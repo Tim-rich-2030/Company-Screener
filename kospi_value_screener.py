@@ -64,6 +64,13 @@ UNAVAILABLE_STRIKES = 12            # 특정 보고서가 N회 연속 실패(성
 OUTPUT_CSV = "kospi_value_screener_stage1.csv"
 EXCLUDED_CSV = "kospi_value_screener_stage1_excluded.csv"   # 제외 사유 상세 (빈 문자열이면 저장 안 함)
 
+# --- 디버깅 / 시험 실행 옵션 (CLI 인자로도 지정 가능) -------------------------
+#   --selftest          : pykrx / DART 연결과 파싱을 3단계로 점검하고 종료
+#   --limit 20          : 시총 상위 20종목만 처리 (전체 실행 전 빠른 확인)
+#   --ticker 005930 ... : 특정 종목만 추적 (시총·우선주 필터 건너뜀, 상세 로그)
+LIMIT_CANDIDATES = 0            # 0이면 전체 처리
+DEBUG_TICKERS: list[str] = []   # 예: ["005930", "000660"]
+
 EOK = 100_000_000                   # 1억 (원 -> 억 변환용)
 
 DART_BASE = "https://opendart.fss.or.kr/api"
@@ -128,8 +135,28 @@ except ImportError:             # tqdm이 끝내 없으면 진행률 없이 진�
 # 유틸
 # =============================================================================
 
+_SECRETS: list[str] = []
+
+
+def remember_secret(value: str) -> None:
+    """로그·예외 메시지에서 가려야 할 값(API 키)을 등록한다."""
+    if value and value not in _SECRETS:
+        _SECRETS.append(value)
+
+
+def redact(text) -> str:
+    """
+    requests 예외 메시지에는 요청 URL이 통째로 들어있어 crtfc_key가 그대로 노출된다.
+    로그를 그대로 복사해 공유해도 키가 새지 않도록 가린다.
+    """
+    out = str(text)
+    for secret in _SECRETS:
+        out = out.replace(secret, "***REDACTED***")
+    return re.sub(r"(crtfc_key=)[^&\s'\"]+", r"\1***REDACTED***", out)
+
+
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    print(redact(msg), flush=True)
 
 
 def to_num(raw) -> float | None:
@@ -162,6 +189,7 @@ def get_api_key() -> str:
     key = os.environ.get("DART_API_KEY", "").strip()
     if key:
         log("[setup] DART_API_KEY 환경변수 사용")
+        remember_secret(key)
         return key
 
     # 코랩 시크릿(userdata) 지원
@@ -170,6 +198,7 @@ def get_api_key() -> str:
         key = (userdata.get("DART_API_KEY") or "").strip()
         if key:
             log("[setup] 코랩 시크릿(DART_API_KEY) 사용")
+            remember_secret(key)
             return key
     except Exception:
         pass
@@ -178,6 +207,7 @@ def get_api_key() -> str:
     key = getpass("OpenDART API key를 입력하세요 (화면에 표시되지 않음): ").strip()
     if not key:
         raise SystemExit("DART API 키가 없어 종료합니다.")
+    remember_secret(key)
     return key
 
 
@@ -280,11 +310,15 @@ def build_preferred_map(all_codes: list[str], name_by_code: dict[str, str]) -> d
 def fetch_corp_code_map(api_key: str) -> dict[str, str]:
     """상장 종목코드(6자리) -> DART corp_code(8자리) 매핑."""
     log("[2/5] DART 기업 고유번호(corpCode) 내려받는 중")
-    resp = requests.get(f"{DART_BASE}/corpCode.xml",
-                        params={"crtfc_key": api_key}, timeout=60)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(f"{DART_BASE}/corpCode.xml",
+                            params={"crtfc_key": api_key}, timeout=60)
+        resp.raise_for_status()
+    except Exception as exc:
+        # 예외 메시지에 요청 URL(=키 포함)이 들어있어 그대로 흘리지 않는다.
+        raise SystemExit(redact(f"corpCode 호출 실패 — {type(exc).__name__}: {exc}")) from None
     if not resp.content.startswith(b"PK"):
-        head = resp.content[:400].decode("utf-8", "replace")
+        head = redact(resp.content[:400].decode("utf-8", "replace"))
         raise SystemExit(f"corpCode 응답이 ZIP이 아닙니다. API 키를 확인하세요.\n{head}")
 
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -362,6 +396,7 @@ class DartClient:
         self.api_key = api_key
         self.session = requests.Session()
         self.calls = 0
+        self.last_error = ""      # 마지막 실패 원인 (디버깅용 — 삼키지 않는다)
 
     def get_json(self, endpoint: str, params: dict) -> dict | None:
         params = {"crtfc_key": self.api_key, **params}
@@ -373,7 +408,8 @@ class DartClient:
                 time.sleep(DART_SLEEP_SEC)          # 호출 제한 회피
                 r.raise_for_status()
                 return r.json()
-            except Exception:
+            except Exception as exc:
+                self.last_error = redact(f"{type(exc).__name__}: {exc}")
                 if attempt == DART_MAX_RETRY - 1:
                     return None
                 time.sleep(1.5 * (attempt + 1))     # 백오프
@@ -440,8 +476,9 @@ def fetch_equity(client: DartClient, corp_code: str,
     연결(CFS) 우선, 없으면 별도(OFS).
     반환: (결과, 사용한 보고서, 실패 사유)
     """
+    tried = resolver.order()
     last_reason = "조회 가능한 보고서 없음"
-    for period in resolver.order():
+    for period in tried:
         got_period = False
         for fs_div in ("CFS", "OFS"):
             payload = client.get_json("fnlttSinglAcntAll.json", {
@@ -451,7 +488,7 @@ def fetch_equity(client: DartClient, corp_code: str,
                 "fs_div": fs_div,
             })
             if payload is None:
-                last_reason = "DART 호출 실패(네트워크/타임아웃)"
+                last_reason = f"DART 호출 실패 [{period.label}/{fs_div}] {client.last_error}"
                 continue
             status = payload.get("status")
             if status in DART_FATAL_STATUS:
@@ -467,7 +504,8 @@ def fetch_equity(client: DartClient, corp_code: str,
             if payload.get("status") == "000":
                 got_period = True   # 보고서는 있는데 계정 파싱 실패
         resolver.mark(period, got_period)
-    return None, None, last_reason
+    scope = ", ".join(p.label for p in tried) or "없음"
+    return None, None, f"{last_reason} (시도한 보고서: {scope})"
 
 
 # =============================================================================
@@ -479,6 +517,7 @@ class Excluded:
     rows: list[dict] = field(default_factory=list)
 
     def add(self, code: str, name: str, stage: str, reason: str, verbose: bool = True) -> None:
+        reason = redact(reason)   # 사유에 DART 요청 URL이 섞일 수 있어 CSV에도 키를 남기지 않는다
         self.rows.append({"종목코드": code, "종목명": name, "단계": stage, "사유": reason})
         if verbose:
             log(f"      [skip] {code} {name}: {reason}")
@@ -487,7 +526,9 @@ class Excluded:
         return pd.DataFrame(self.rows, columns=["종목코드", "종목명", "단계", "사유"])
 
 
-def run() -> pd.DataFrame:
+def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.DataFrame:
+    only = [str(t).zfill(6) for t in (DEBUG_TICKERS if tickers is None else tickers)]
+    debug = bool(only)
     api_key = get_api_key()
     base_date = resolve_base_date(BASE_DATE)
     excluded = Excluded()
@@ -499,20 +540,32 @@ def run() -> pd.DataFrame:
 
     # --- 2) 시가총액 필터 -------------------------------------------------
     total_listed = len(market)
-    cand = market[market["시가총액"] >= MIN_MARKET_CAP_KRW].copy()
-    dropped_cap = total_listed - len(cand)
-    log(f"[3/5] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
-        f"{total_listed} -> {len(cand)}종목 (제외 {dropped_cap})")
-    for _, row in market[market["시가총액"] < MIN_MARKET_CAP_KRW].iterrows():
-        excluded.add(row["종목코드"], row["종목명"], "시총필터",
-                     f"시가총액 {row['시가총액'] / EOK:,.0f}억 < 기준", verbose=False)
+    if debug:
+        # 특정 종목만 추적: 시총/우선주 필터를 건너뛰고 그대로 통과시킨다.
+        cand = market[market["종목코드"].isin(only)].copy()
+        missing = [t for t in only if t not in set(market["종목코드"])]
+        log(f"[3/5] 디버그 모드: {len(cand)}종목만 조회 (시총·우선주 필터 건너뜀)")
+        if missing:
+            log(f"      [warn] {MARKET}에서 찾지 못한 종목코드: {', '.join(missing)}")
+    else:
+        cand = market[market["시가총액"] >= MIN_MARKET_CAP_KRW].copy()
+        dropped_cap = total_listed - len(cand)
+        log(f"[3/5] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
+            f"{total_listed} -> {len(cand)}종목 (제외 {dropped_cap})")
+        for _, row in market[market["시가총액"] < MIN_MARKET_CAP_KRW].iterrows():
+            excluded.add(row["종목코드"], row["종목명"], "시총필터",
+                         f"시가총액 {row['시가총액'] / EOK:,.0f}억 < 기준", verbose=False)
 
-    # 우선주 종목 자체는 분석 대상이 아니다 (보통주만 남긴다)
-    is_pref = cand["종목명"].map(is_preferred_name)
-    for _, row in cand[is_pref].iterrows():
-        excluded.add(row["종목코드"], row["종목명"], "우선주제외",
-                     "우선주 종목(보통주만 분석)", verbose=False)
-    cand = cand[~is_pref].copy()
+        # 우선주 종목 자체는 분석 대상이 아니다 (보통주만 남긴다)
+        is_pref = cand["종목명"].map(is_preferred_name)
+        for _, row in cand[is_pref].iterrows():
+            excluded.add(row["종목코드"], row["종목명"], "우선주제외",
+                         "우선주 종목(보통주만 분석)", verbose=False)
+        cand = cand[~is_pref].copy()
+
+        if limit and limit > 0 and len(cand) > limit:
+            log(f"      [시험 실행] 시총 상위 {limit}종목만 처리합니다.")
+            cand = cand.nlargest(limit, "시가총액").copy()
 
     # --- 3) DART ----------------------------------------------------------
     corp_map = fetch_corp_code_map(api_key)
@@ -537,6 +590,10 @@ def run() -> pd.DataFrame:
         if res is None or period is None:
             excluded.add(code, name, "DART조회", reason)
             continue
+        if debug:
+            log(f"      [debug] {code} {name} corp_code={corp_code} "
+                f"보고서={period.label} {'연결' if res.fs_div == 'CFS' else '별도'} | "
+                f"자본총계={res.equity_total} 지배주주지분={res.parent_equity}")
 
         # 4) 자기자본 = 지배주주지분 우선, 없으면 자본총계
         equity = res.parent_equity if res.parent_equity is not None else res.equity_total
@@ -584,6 +641,9 @@ def run() -> pd.DataFrame:
     df = pd.DataFrame(records)
     log(f"[5/5] 계산 완료 {len(df)}종목 -> PBR 필터 "
         f"({MIN_CALC_PBR} < 계산PBR <= {MAX_CALC_PBR})")
+    if debug and not df.empty:
+        log("      [debug] PBR 필터 적용 전 계산 결과:")
+        print(df.to_string(index=False))
     if not df.empty:
         fail = df[~((df["계산PBR"] > MIN_CALC_PBR) & (df["계산PBR"] <= MAX_CALC_PBR))]
         for _, r in fail.iterrows():
@@ -593,16 +653,24 @@ def run() -> pd.DataFrame:
         df = df.sort_values("계산PBR", ascending=True).reset_index(drop=True)
 
     # --- 저장 & 요약 -------------------------------------------------------
-    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    # 시험/디버그 실행 결과가 전체 실행 결과를 덮어쓰지 않도록 파일명을 분리한다.
+    partial = debug or bool(limit and limit > 0)
+    out_csv = f"debug_{OUTPUT_CSV}" if partial else OUTPUT_CSV
+    exc_csv = (f"debug_{EXCLUDED_CSV}" if partial else EXCLUDED_CSV) if EXCLUDED_CSV else ""
+
+    df.to_csv(out_csv, index=False, encoding="utf-8-sig")
     exc_df = excluded.summary()
-    if EXCLUDED_CSV:
-        exc_df.to_csv(EXCLUDED_CSV, index=False, encoding="utf-8-sig")
+    if exc_csv:
+        exc_df.to_csv(exc_csv, index=False, encoding="utf-8-sig")
 
     log("")
     log("=" * 72)
     log(f"기준일자          : {base_date}")
     log(f"전체 상장종목     : {total_listed}")
-    log(f"시총 필터 통과    : {len(cand)} (하한 {MIN_MARKET_CAP_KRW / EOK:,.0f}억)")
+    if debug:
+        log(f"디버그 대상       : {len(cand)}종목 ({', '.join(only)})")
+    else:
+        log(f"시총 필터 통과    : {len(cand)} (하한 {MIN_MARKET_CAP_KRW / EOK:,.0f}억)")
     log(f"DART 호출 수      : {client.calls}")
     log(f"최종 통과 종목    : {len(df)}")
     log(f"제외 종목 수      : {len(exc_df)}")
@@ -610,9 +678,9 @@ def run() -> pd.DataFrame:
         log("제외 사유별 집계  :")
         for stage, cnt in exc_df["단계"].value_counts().items():
             log(f"  - {stage}: {cnt}")
-    log(f"결과 CSV          : {OUTPUT_CSV}")
-    if EXCLUDED_CSV:
-        log(f"제외 상세 CSV     : {EXCLUDED_CSV}")
+    log(f"결과 CSV          : {out_csv}")
+    if exc_csv:
+        log(f"제외 상세 CSV     : {exc_csv}")
     if not df.empty and (df["우선주존재"] == "Y").any():
         n = int((df["우선주존재"] == "Y").sum())
         log(f"[note] 우선주 상장 종목 {n}개 포함 — 보통주 시총만 반영되어 "
@@ -625,15 +693,124 @@ def run() -> pd.DataFrame:
         with pd.option_context("display.max_rows", 50, "display.width", 200):
             print(df.head(30).to_string(index=False))
 
-    # 코랩이면 결과 파일 자동 다운로드 제안
-    try:
-        from google.colab import files  # type: ignore
-        files.download(OUTPUT_CSV)
-    except Exception:
-        pass
+    # 코랩이면 결과 파일 자동 다운로드 (시험 실행은 제외)
+    if not partial:
+        try:
+            from google.colab import files  # type: ignore
+            files.download(out_csv)
+        except Exception:
+            pass
 
     return df
 
 
+# =============================================================================
+# 진단(self-test): 어디서 깨졌는지 3단계로 좁힌다
+# =============================================================================
+
+SELFTEST_TICKER = "005930"   # 삼성전자 — 연결/지배주주지분이 모두 있는 표준 케이스
+
+
+def selftest() -> bool:
+    """
+    전체 실행 전에 pykrx / DART / 파싱을 순서대로 점검한다.
+    실패한 첫 단계가 원인이므로, 위에서부터 하나씩 고치면 된다.
+    """
+    ok = True
+    log("=" * 72)
+    log("[진단 1/3] pykrx 시장 데이터 (DART 키 불필요)")
+    base_date = None
+    try:
+        base_date = resolve_base_date(BASE_DATE)
+        cap = stock.get_market_cap_by_ticker(base_date, market=MARKET)
+        fund = stock.get_market_fundamental_by_ticker(base_date, market=MARKET)
+        log(f"  [OK] 기준일 {base_date} / 시총 {len(cap)}종목 / 펀더멘털 {len(fund)}종목")
+        if SELFTEST_TICKER in cap.index:
+            r = cap.loc[SELFTEST_TICKER]
+            log(f"       {SELFTEST_TICKER} 종가={int(r['종가']):,} "
+                f"시총={r['시가총액'] / EOK:,.0f}억 주식수={int(r['상장주식수']):,}")
+        if "PBR" not in fund.columns:
+            log("  [warn] 펀더멘털에 PBR 컬럼이 없습니다 -> 시장PBR/괴리율이 전부 결측됩니다.")
+    except Exception as exc:
+        ok = False
+        log(f"  [FAIL] {type(exc).__name__}: {exc}")
+        log("       → KRX 서버 접속 문제입니다. 네트워크/프록시를 확인하고 잠시 후 재시도하세요.")
+        log("         (DART 키와는 무관한 단계입니다.)")
+
+    log("")
+    log("[진단 2/3] DART API 키 & corpCode 조회")
+    api_key = None
+    corp_map = {}
+    try:
+        api_key = get_api_key()
+        corp_map = fetch_corp_code_map(api_key)
+        log(f"  [OK] 상장사 {len(corp_map)}건 / {SELFTEST_TICKER} -> "
+            f"corp_code={corp_map.get(SELFTEST_TICKER)}")
+    except SystemExit as exc:
+        ok = False
+        log(f"  [FAIL] {exc}")
+        log("       → 키 오타이거나, 발급 후 이메일 인증이 안 끝났을 수 있습니다.")
+        log("         https://opendart.fss.or.kr 에서 키 상태를 확인하세요.")
+    except Exception as exc:
+        ok = False
+        log(f"  [FAIL] {type(exc).__name__}: {exc}")
+
+    log("")
+    log("[진단 3/3] DART 재무상태표 조회 & 계정 파싱")
+    if not (api_key and corp_map.get(SELFTEST_TICKER) and base_date):
+        log("  [SKIP] 앞 단계가 실패해 건너뜁니다.")
+        ok = False
+    else:
+        try:
+            periods = build_period_candidates(base_date)
+            log(f"  보고서 후보(최신순): {', '.join(p.label for p in periods[:MAX_PERIOD_TRIES])}")
+            client = DartClient(api_key)
+            res, period, reason = fetch_equity(
+                client, corp_map[SELFTEST_TICKER], PeriodResolver(periods))
+            if res is None or period is None:
+                ok = False
+                log(f"  [FAIL] {reason}")
+                log("       → 후보 보고서가 아직 미공시일 수 있습니다. "
+                    "BASE_DATE를 과거 날짜로 바꿔 다시 시도해 보세요.")
+            else:
+                equity = res.parent_equity if res.parent_equity is not None else res.equity_total
+                fmt = (lambda v: f"{v / EOK:,.0f}억" if v is not None else "없음")
+                log(f"  [OK] {period.label} "
+                    f"{'연결' if res.fs_div == 'CFS' else '별도'} / "
+                    f"자본총계={fmt(res.equity_total)} / "
+                    f"지배주주지분={fmt(res.parent_equity)} "
+                    f"→ 자기자본 {fmt(equity)} (DART 호출 {client.calls}건)")
+        except SystemExit as exc:
+            ok = False
+            log(f"  [FAIL] {exc}")
+        except Exception as exc:
+            ok = False
+            log(f"  [FAIL] {type(exc).__name__}: {exc}")
+
+    log("")
+    log("=" * 72)
+    log("진단 결과: 정상 — 전체 실행 가능합니다." if ok
+        else "진단 결과: 위에서 [FAIL]로 표시된 첫 단계가 원인입니다.")
+    log("=" * 72)
+    return ok
+
+
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="코스피 밸류 스크리너 1단계")
+    p.add_argument("--selftest", action="store_true",
+                   help="pykrx/DART 연결과 파싱을 점검하고 종료")
+    p.add_argument("--limit", type=int, default=LIMIT_CANDIDATES,
+                   help="시총 상위 N종목만 처리 (0=전체). 전체 실행 전 빠른 확인용")
+    p.add_argument("--ticker", nargs="*", default=None,
+                   help="특정 종목코드만 추적 (시총·우선주 필터 건너뜀, 상세 로그)")
+    # 코랩 셀에서 %run 할 때 노트북 인자가 섞여 들어와도 죽지 않도록
+    args, _unknown = p.parse_known_args()
+    return args
+
+
 if __name__ == "__main__":
-    run()
+    _args = _parse_args()
+    if _args.selftest:
+        sys.exit(0 if selftest() else 1)
+    run(limit=_args.limit, tickers=_args.ticker)
