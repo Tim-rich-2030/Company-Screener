@@ -309,7 +309,7 @@ def build_preferred_map(all_codes: list[str], name_by_code: dict[str, str]) -> d
 
 def fetch_corp_code_map(api_key: str) -> dict[str, str]:
     """상장 종목코드(6자리) -> DART corp_code(8자리) 매핑."""
-    log("[2/5] DART 기업 고유번호(corpCode) 내려받는 중")
+    log("[3/5] DART 기업 고유번호(corpCode) 내려받는 중")
     try:
         resp = requests.get(f"{DART_BASE}/corpCode.xml",
                             params={"crtfc_key": api_key}, timeout=60)
@@ -544,13 +544,13 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         # 특정 종목만 추적: 시총/우선주 필터를 건너뛰고 그대로 통과시킨다.
         cand = market[market["종목코드"].isin(only)].copy()
         missing = [t for t in only if t not in set(market["종목코드"])]
-        log(f"[3/5] 디버그 모드: {len(cand)}종목만 조회 (시총·우선주 필터 건너뜀)")
+        log(f"[2/5] 디버그 모드: {len(cand)}종목만 조회 (시총·우선주 필터 건너뜀)")
         if missing:
             log(f"      [warn] {MARKET}에서 찾지 못한 종목코드: {', '.join(missing)}")
     else:
         cand = market[market["시가총액"] >= MIN_MARKET_CAP_KRW].copy()
         dropped_cap = total_listed - len(cand)
-        log(f"[3/5] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
+        log(f"[2/5] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
             f"{total_listed} -> {len(cand)}종목 (제외 {dropped_cap})")
         for _, row in market[market["시가총액"] < MIN_MARKET_CAP_KRW].iterrows():
             excluded.add(row["종목코드"], row["종목명"], "시총필터",

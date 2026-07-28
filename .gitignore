@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+
+# 실행 산출물 (재생성되므로 커밋하지 않음)
+kospi_value_screener_stage1*.csv
+debug_*.csv
+
+# API 키가 들어갈 수 있는 파일
+.env
+*.key
