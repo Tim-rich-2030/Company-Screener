@@ -130,12 +130,15 @@ OP = 1_000_000_000   # 10억
 KIA_OP = {y: 500 * OP for y in range(2021, 2026)}
 # 현대차: 2021년만 적자 -> 5년 N / 3년 Y
 HMC_OP = {**{y: 400 * OP for y in range(2022, 2026)}, 2021: -100 * OP}
-# 별도만공시: 2021 데이터 없음 -> 5년 '-' / 3년 Y
+# 별도만공시: 2022 사업보고서가 없어 2021·2022를 못 구함 -> 5년 '-' / 3년 Y
 SEP_OP = {y: 200 * OP for y in range(2022, 2026)}
 
 ANNUAL_FIXTURES = {}
 for _code, _op in (("000270", KIA_OP), ("005380", HMC_OP), ("333333", SEP_OP)):
     for _y in (2025, 2022):
+        # 333333은 2022 사업보고서 자체가 없다 -> 2021/2022 값을 못 구하는 상황 재현
+        if _code == "333333" and _y == 2022:
+            continue
         _div = "OFS" if _code == "333333" else "CFS"
         ANNUAL_FIXTURES[(CORP_CODE[_code], str(_y), "11011", _div)] = is_payload(_op, _y)
 
@@ -327,7 +330,10 @@ def test_full_run():
         assert by_code["111111"] == "DART조회"
         assert by_code["222222"] == "자본잠식"
         assert by_code["005930"] == "PBR필터"
-        assert len(exc) == 6, exc
+        # 1단계에서 실제로 결과에서 빠진 종목은 6개
+        # (2단계의 '영업이익*' 행은 결과에 남는 종목의 참고 기록이라 제외한다)
+        stage1 = exc[~exc["단계"].str.startswith("영업이익")]
+        assert len(stage1) == 6, stage1
         # 시도한 보고서가 사유에 남는지 (디버깅용)
         assert "2026 1Q" in exc.set_index("종목코드").loc["111111", "사유"]
         # 키가 CSV로 새지 않는지
@@ -477,13 +483,33 @@ def test_stage2_profit_streaks():
     # 추이 문자열: 오래된 연도부터 5개, 억 단위
     assert row.loc["005380", "영업이익추이(억)"] == \
         "2021:-1,000 | 2022:4,000 | 2023:4,000 | 2024:4,000 | 2025:4,000"
-    assert row.loc["333333", "영업이익추이(억)"].startswith("2021:- | 2022:2,000")
+    assert row.loc["333333", "영업이익추이(억)"] == \
+        "2021:- | 2022:- | 2023:2,000 | 2024:2,000 | 2025:2,000"
 
     # 1단계에서 별도를 쓴 종목은 2단계도 별도 기준으로 맞춘다
     assert row.loc["333333", "재무제표구분"] == "별도"
     assert row.loc["333333", "영업이익기준"] == "별도"
     assert row.loc["000270", "영업이익기준"] == "연결"
     print("test_stage2_profit_streaks: OK")
+
+
+def test_stage2_records_partial_gaps():
+    """
+    일부 연도만 비어도 사유를 남겨야 한다.
+    조용히 넘기면 '-'가 왜 생겼는지 추적할 방법이 없다.
+    """
+    install_fakes()
+    _, exc = _run_isolated()
+    gaps = exc[exc["단계"] == "영업이익부분결측"].set_index("종목코드")
+    # 333333은 2021년치(2022 FY 보고서)가 없다
+    assert "333333" in gaps.index, exc[exc["단계"].str.startswith("영업이익")]
+    사유 = gaps.loc["333333", "사유"]
+    assert "2021, 2022년 누락" in 사유, 사유
+    # 어느 보고서가 왜 실패했는지까지 남는지 — 진단의 핵심
+    assert "2022 FY" in 사유 and "보고서없음" in 사유, 사유
+    # 온전한 종목은 기록되지 않는다
+    assert "000270" not in gaps.index
+    print("test_stage2_records_partial_gaps: OK")
 
 
 def test_stage2_as_filter():
@@ -597,6 +623,7 @@ if __name__ == "__main__":
     test_fdr_fallback_when_krx_down()
     test_pykrx_source_forced_raises()
     test_stage2_profit_streaks()
+    test_stage2_records_partial_gaps()
     test_stage2_as_filter()
     test_stage2_disabled()
     test_parallel_matches_sequential()

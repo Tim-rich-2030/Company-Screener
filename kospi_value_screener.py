@@ -748,10 +748,12 @@ def fetch_operating_profits(client: DartClient, corp_code: str, latest_fy: int,
     """
     order = ["CFS", "OFS"] if prefer_cfs else ["OFS", "CFS"]
     profits: dict[int, float] = {}
-    used_div, reason = "", ""
+    used_div = ""
+    reasons: list[str] = []
 
     for year in annual_report_years(latest_fy, n_years):
         got = False
+        detail: list[str] = []
         for fs_div in order:
             payload = client.get_json("fnlttSinglAcntAll.json", {
                 "corp_code": corp_code,
@@ -760,7 +762,7 @@ def fetch_operating_profits(client: DartClient, corp_code: str, latest_fy: int,
                 "fs_div": fs_div,
             })
             if payload is None:
-                reason = reason or f"{year} FY 호출 실패: {client.last_error}"
+                detail.append(f"{fs_div} 호출실패({client.last_error})")
                 continue
             status = payload.get("status")
             if status in DART_FATAL_STATUS:
@@ -774,9 +776,13 @@ def fetch_operating_profits(client: DartClient, corp_code: str, latest_fy: int,
                 used_div = used_div or fs_div
                 got = True
                 break
-        if not got and not reason:
-            reason = f"{year} FY 영업이익을 찾지 못함"
-    return profits, used_div, reason
+            # 보고서 자체가 없는 것과, 보고서는 있는데 영업이익 계정이 없는 것은
+            # 원인이 전혀 다르므로 구분해서 남긴다.
+            detail.append(f"{fs_div} 보고서없음(status={status})" if status != "000"
+                          else f"{fs_div} 영업이익 계정 없음")
+        if not got:
+            reasons.append(f"{year} FY: {' / '.join(detail)}")
+    return profits, used_div, " ; ".join(reasons)
 
 
 def profit_streak(profits: dict[int, float], latest_fy: int, n_years: int) -> str:
@@ -808,7 +814,8 @@ STAGE2_COLUMNS = ["영업이익5년연속흑자", "영업이익3년연속흑자"
 
 
 def attach_profit_streaks(df: pd.DataFrame, client: "DartClient", corp_map: dict,
-                          periods: list[Period], excluded: "Excluded") -> pd.DataFrame:
+                          periods: list[Period], excluded: "Excluded",
+                          debug: bool = False) -> pd.DataFrame:
     """
     2단계: PBR 필터를 통과한 종목만 대상으로 영업이익 연속 흑자 여부를 채운다.
     기본은 표시만 하고 걸러내지 않는다 (STAGE2_REQUIRE 로 필터로 바꿀 수 있다).
@@ -832,20 +839,38 @@ def attach_profit_streaks(df: pd.DataFrame, client: "DartClient", corp_map: dict
         f"{latest_fy - PROFIT_YEARS_LONG + 1}~{latest_fy} / 사업보고서 {len(years)}건: "
         f"{', '.join(f'{y} FY' for y in years)})")
 
+    window = list(range(latest_fy - PROFIT_YEARS_LONG + 1, latest_fy + 1))
+
     def probe(row) -> dict:
-        code = row["종목코드"]
+        code, name = row["종목코드"], row["종목명"]
         blank = {c: "-" for c in STAGE2_COLUMNS}
         corp_code = corp_map.get(code)
         if not corp_code:
+            excluded.add(code, name, "영업이익조회",
+                         "DART corp_code 없음(결과에는 남김)", verbose=False)
             return blank
         # 1단계에서 연결을 썼으면 연결을, 별도를 썼으면 별도를 우선한다 (기준 일관성)
         prefer_cfs = row.get("재무제표구분") != "별도"
         profits, used_div, reason = fetch_operating_profits(
             client, corp_code, latest_fy, PROFIT_YEARS_LONG, prefer_cfs)
+        if debug:
+            log(f"      [debug] {code} {name} 영업이익={profits} "
+                f"기준={used_div or '-'} 사유={reason or '-'}")
         if not profits:
-            excluded.add(code, row["종목명"], "영업이익조회",
+            excluded.add(code, name, "영업이익조회",
                          reason or "영업이익 데이터 없음(결과에는 남김)", verbose=False)
             return blank
+
+        # 일부 연도만 빠진 경우도 사유를 남긴다. 조용히 넘기면 '-'가 왜 생겼는지
+        # 알 수 없어 판정불가 종목을 추적할 방법이 사라진다.
+        missing = [y for y in window if y not in profits]
+        if missing:
+            # 보고서를 못 받은 것과, 보고서는 받았는데 그 해 금액칸이 비어 있는 것은
+            # 원인이 다르다. 후자는 재작성·사업재편 때 흔하다.
+            why = reason or "보고서에 해당 연도 금액이 비어 있음"
+            excluded.add(code, name, "영업이익부분결측",
+                         f"{', '.join(str(y) for y in missing)}년 누락 — {why} (결과에는 남김)",
+                         verbose=False)
         return {
             "영업이익5년연속흑자": profit_streak(profits, latest_fy, PROFIT_YEARS_LONG),
             "영업이익3년연속흑자": profit_streak(profits, latest_fy, PROFIT_YEARS_SHORT),
@@ -885,6 +910,23 @@ def attach_profit_streaks(df: pd.DataFrame, client: "DartClient", corp_map: dict
         counts = df[col].value_counts()
         log(f"      {label} 연속 흑자: Y {counts.get('Y', 0)} / "
             f"N {counts.get('N', 0)} / 판정불가 {counts.get('-', 0)}")
+
+    # 판정불가가 왜 생겼는지 바로 알 수 있게 사유별로 집계해 보여준다.
+    gaps = [r for r in excluded.rows if r["단계"] in ("영업이익조회", "영업이익부분결측")]
+    if gaps:
+        log(f"      [판정불가 원인] {len(gaps)}종목 — 상세는 제외 CSV의 "
+            f"'영업이익조회'/'영업이익부분결측' 행 참고")
+        buckets: dict[str, int] = {}
+        for r in gaps:
+            for token in ("보고서없음", "영업이익 계정 없음", "호출실패", "corp_code 없음"):
+                if token in r["사유"]:
+                    buckets[token] = buckets.get(token, 0) + 1
+                    break
+            else:
+                buckets["기타"] = buckets.get("기타", 0) + 1
+        for token, cnt in sorted(buckets.items(), key=lambda kv: -kv[1]):
+            log(f"        - {token}: {cnt}")
+        log(f"        예시: {gaps[0]['종목코드']} {gaps[0]['종목명']} — {gaps[0]['사유'][:110]}")
 
     if STAGE2_REQUIRE:
         col = {"5년": "영업이익5년연속흑자", "3년": "영업이익3년연속흑자"}.get(STAGE2_REQUIRE)
@@ -1075,7 +1117,7 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         df = df.sort_values("계산PBR", ascending=True).reset_index(drop=True)
 
     # --- 6) 2단계: 영업이익 연속 흑자 -------------------------------------
-    df = attach_profit_streaks(df, client, corp_map, periods, excluded)
+    df = attach_profit_streaks(df, client, corp_map, periods, excluded, debug)
 
     # --- 저장 & 요약 -------------------------------------------------------
     # 시험/디버그 실행 결과가 전체 실행 결과를 덮어쓰지 않도록 파일명을 분리한다.
