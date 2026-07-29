@@ -6,9 +6,13 @@ kospi_value_screener_stage1*.csv
 debug_*.csv
 dashboard*.html
 
-# 수집 원천 데이터. 용량이 크고 날짜별로 쌓인다.
-# 시계열 비교용으로 보관하고 싶으면 이 줄을 지우세요.
+# quarterly_dashboard.py 의 일회성 스냅샷 (screener 패키지의 store/ 와는 다름)
 data/
+docs_preview/
+
+# NOTE: store/ 와 docs/ 는 일부러 커밋합니다.
+#   store/  분기 시계열이 여기 쌓입니다. 무시하면 매 실행이 백지에서 시작합니다.
+#   docs/   GitHub Pages 가 이 폴더를 배포합니다.
 
 # API 키가 들어갈 수 있는 파일
 .env
