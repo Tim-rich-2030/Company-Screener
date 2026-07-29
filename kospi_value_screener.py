@@ -49,8 +49,10 @@ import re
 import sys
 import time
 import zipfile
+import threading
 import datetime as dt
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 # =============================================================================
@@ -63,6 +65,9 @@ MIN_MARKET_CAP_KRW = 500_000_000_000   # 시가총액 하한: 5,000억원
 MAX_CALC_PBR = 1.0                  # 계산PBR 상한 (이하만 통과)
 MIN_CALC_PBR = 0.0                  # 계산PBR 하한 (초과만 통과 = 자본잠식/음수 제외)
 
+DART_WORKERS = 4                    # DART 동시 조회 스레드 수 (1이면 순차).
+                                    # 응답이 종목당 수 초라 순차 조회는 300종목에 30분을 넘긴다.
+                                    # 호출 '총량'은 그대로이고 대기 시간만 겹친다.
 DART_SLEEP_SEC = 0.12               # DART 호출 간 대기 (분당 호출 제한 회피)
 DART_TIMEOUT_SEC = 20               # DART 요청 타임아웃
 DART_MAX_RETRY = 3                  # 네트워크 오류 시 재시도 횟수
@@ -492,33 +497,55 @@ class PeriodResolver:
         self.success: dict[Period, int] = {p: 0 for p in candidates}
         self.fail: dict[Period, int] = {p: 0 for p in candidates}
         self._announced: set[Period] = set()
+        self._lock = threading.Lock()   # 여러 스레드가 같은 카운터를 갱신한다
 
     def _dead(self, p: Period) -> bool:
         return self.success[p] == 0 and self.fail[p] >= UNAVAILABLE_STRIKES
 
     def order(self) -> list[Period]:
-        alive = [p for p in self.candidates if not self._dead(p)]
-        return (alive or self.candidates)[:MAX_PERIOD_TRIES]
+        with self._lock:
+            alive = [p for p in self.candidates if not self._dead(p)]
+            return (alive or self.candidates)[:MAX_PERIOD_TRIES]
 
     def mark(self, p: Period, ok: bool) -> None:
-        (self.success if ok else self.fail)[p] += 1
-        if not ok and self._dead(p) and p not in self._announced:
-            self._announced.add(p)
+        with self._lock:
+            (self.success if ok else self.fail)[p] += 1
+            announce = not ok and self._dead(p) and p not in self._announced
+            if announce:
+                self._announced.add(p)
+        if announce:
             log(f"      [info] {p.label} 보고서는 아직 미공시로 판단, 이후 조회에서 제외")
 
 
 class DartClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.session = requests.Session()
         self.calls = 0
         self.last_error = ""      # 마지막 실패 원인 (디버깅용 — 삼키지 않는다)
+        self._local = threading.local()   # 세션은 스레드마다 따로 쓴다
+        self._session_override = None
+        self._lock = threading.Lock()
+
+    @property
+    def session(self):
+        if self._session_override is not None:
+            return self._session_override
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._local.session = sess
+        return sess
+
+    @session.setter
+    def session(self, value) -> None:
+        self._session_override = value
 
     def get_json(self, endpoint: str, params: dict) -> dict | None:
         params = {"crtfc_key": self.api_key, **params}
         for attempt in range(DART_MAX_RETRY):
             try:
-                self.calls += 1
+                with self._lock:
+                    self.calls += 1
                 r = self.session.get(f"{DART_BASE}/{endpoint}",
                                      params=params, timeout=DART_TIMEOUT_SEC)
                 time.sleep(DART_SLEEP_SEC)          # 호출 제한 회피
@@ -631,10 +658,12 @@ def fetch_equity(client: DartClient, corp_code: str,
 @dataclass
 class Excluded:
     rows: list[dict] = field(default_factory=list)
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
     def add(self, code: str, name: str, stage: str, reason: str, verbose: bool = True) -> None:
         reason = redact(reason)   # 사유에 DART 요청 URL이 섞일 수 있어 CSV에도 키를 남기지 않는다
-        self.rows.append({"종목코드": code, "종목명": name, "단계": stage, "사유": reason})
+        with self.lock:
+            self.rows.append({"종목코드": code, "종목명": name, "단계": stage, "사유": reason})
         if verbose:
             log(f"      [skip] {code} {name}: {reason}")
 
@@ -695,18 +724,18 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
     resolver = PeriodResolver(periods)
     records: list[dict] = []
 
-    log(f"[4/5] DART 재무상태표 조회 ({len(cand)}종목)")
-    for _, row in tqdm(list(cand.iterrows()), total=len(cand), desc="DART", unit="종목"):
+    def process(row) -> dict | None:
+        """한 종목 처리. 제외되면 None을 반환하고 사유를 기록한다."""
         code, name = row["종목코드"], row["종목명"]
         corp_code = corp_map.get(code)
         if not corp_code:
             excluded.add(code, name, "DART매핑", "DART corp_code를 찾지 못함")
-            continue
+            return None
 
         res, period, reason = fetch_equity(client, corp_code, resolver)
         if res is None or period is None:
             excluded.add(code, name, "DART조회", reason)
-            continue
+            return None
         if debug:
             log(f"      [debug] {code} {name} corp_code={corp_code} "
                 f"보고서={period.label} {'연결' if res.fs_div == 'CFS' else '별도'} | "
@@ -717,19 +746,19 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         equity_basis = "지배주주지분" if res.parent_equity is not None else "자본총계"
         if equity is None:
             excluded.add(code, name, "재무결측", "자기자본 값 없음")
-            continue
+            return None
         if equity <= 0:
             excluded.add(code, name, "자본잠식", f"자기자본 {equity / EOK:,.0f}억 <= 0")
-            continue
+            return None
 
         shares = row["상장주식수"]
         mcap = row["시가총액"]
         if not shares or shares <= 0:
             excluded.add(code, name, "결측", "상장주식수 없음")
-            continue
+            return None
         if not mcap or mcap <= 0:
             excluded.add(code, name, "결측", "시가총액 없음")
-            continue
+            return None
 
         bps = equity / shares
         calc_pbr = mcap / equity
@@ -739,7 +768,7 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         if pd.isna(gap) and has_market_pbr:
             log(f"      [warn] {code} {name}: 시장PBR 결측 -> 괴리율 계산 불가(결과에는 포함)")
 
-        records.append({
+        return {
             "종목코드": code,
             "종목명": name,
             "종가": int(row["종가"]),
@@ -753,7 +782,37 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
             "우선주존재": "Y" if pref_map.get(code) else "N",
             "자기자본기준": equity_basis,
             "재무제표구분": "연결" if res.fs_div == "CFS" else "별도",
-        })
+        }
+
+    rows = [row for _, row in cand.iterrows()]
+    workers = max(1, int(DART_WORKERS))
+    log(f"[4/5] DART 재무상태표 조회 ({len(rows)}종목, 동시 {workers})")
+    bar = tqdm(total=len(rows), desc="DART", unit="종목")
+    if workers == 1:
+        for row in rows:
+            rec = process(row)
+            if rec:
+                records.append(rec)
+            bar.update(1)
+    else:
+        # DART 응답이 종목당 수 초 걸려 순차 조회는 수백 종목에서 30분을 넘긴다.
+        # 스레드는 응답 대기 시간만 겹치므로 호출 총량은 그대로다.
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(process, row) for row in rows]
+            try:
+                for fut in as_completed(futures):
+                    rec = fut.result()
+                    if rec:
+                        records.append(rec)
+                    bar.update(1)
+            except (SystemExit, KeyboardInterrupt):
+                # 키 오류·한도 초과 등은 남은 조회를 계속할 이유가 없다.
+                for f in futures:
+                    f.cancel()
+                pool.shutdown(wait=False, cancel_futures=True)
+                bar.close()
+                raise
+    bar.close()
 
     # --- 5) PBR 필터 & 정렬 ----------------------------------------------
     df = pd.DataFrame(records)

@@ -405,6 +405,74 @@ def test_pykrx_source_forced_raises():
         k.MARKET_SOURCE = "auto"
 
 
+def _run_isolated(**kw):
+    """임시 디렉터리에서 run()을 돌리고 결과 DataFrame과 제외 목록을 돌려준다."""
+    workdir = tempfile.mkdtemp(prefix="screener_par_")
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(workdir)
+        df = k.run(**kw)
+        exc = pd.read_csv(k.EXCLUDED_CSV, dtype={"종목코드": str})
+        return df.reset_index(drop=True), exc
+    finally:
+        os.chdir(prev_cwd)
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_parallel_matches_sequential():
+    """동시 조회를 켜도 결과와 제외 사유가 순차 실행과 완전히 같아야 한다."""
+    install_fakes()
+    k.DART_WORKERS = 1
+    seq_df, seq_exc = _run_isolated()
+    k.DART_WORKERS = 4
+    par_df, par_exc = _run_isolated()
+    k.DART_WORKERS = 4
+
+    pd.testing.assert_frame_equal(seq_df, par_df)
+    # 제외 사유는 완료 순서에 따라 행 순서가 달라질 수 있으므로 정렬해 비교
+    key = ["종목코드", "단계"]
+    pd.testing.assert_frame_equal(
+        seq_exc.sort_values(key).reset_index(drop=True),
+        par_exc.sort_values(key).reset_index(drop=True),
+    )
+    print("test_parallel_matches_sequential: OK")
+
+
+def test_parallel_overlaps_latency():
+    """
+    병렬화의 목적은 응답 대기 시간을 겹치는 것.
+    호출당 지연을 넣고 순차 대비 실제로 빨라지는지, 호출 총량은 그대로인지 확인한다.
+    """
+    import time as _time
+    install_fakes()
+    delay = 0.05
+
+    class SlowSession(FakeSession):
+        def get(self, url, params=None, timeout=None):
+            _time.sleep(delay)
+            return super().get(url, params=params, timeout=timeout)
+
+    k.requests.Session = SlowSession
+    calls = {}
+
+    def timed(workers):
+        k.DART_WORKERS = workers
+        started = _time.perf_counter()
+        df, _ = _run_isolated()
+        return _time.perf_counter() - started, len(df)
+
+    seq_secs, seq_rows = timed(1)
+    par_secs, par_rows = timed(4)
+    k.DART_WORKERS = 4
+    k.requests.Session = FakeSession
+
+    assert seq_rows == par_rows, "병렬 실행에서 결과 종목 수가 달라졌습니다"
+    assert par_secs < seq_secs * 0.75, (
+        f"병렬 실행이 빨라지지 않았습니다: 순차 {seq_secs:.2f}s vs 동시4 {par_secs:.2f}s")
+    print(f"test_parallel_overlaps_latency: OK "
+          f"(순차 {seq_secs:.2f}s -> 동시4 {par_secs:.2f}s)")
+
+
 def test_fatal_status_aborts():
     """호출 한도 초과(020)는 남은 종목을 헛돌지 않고 즉시 중단해야 한다."""
     install_fakes()
@@ -432,5 +500,7 @@ if __name__ == "__main__":
     test_fdr_source_schema()
     test_fdr_fallback_when_krx_down()
     test_pykrx_source_forced_raises()
+    test_parallel_matches_sequential()
+    test_parallel_overlaps_latency()
     test_fatal_status_aborts()
     print("\nALL PIPELINE TESTS PASSED")
