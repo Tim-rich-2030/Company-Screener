@@ -118,3 +118,71 @@ def ingest_one(client, hit: dict, record: dict) -> dict:
 
     note = "" if touched else "새로 채운 값 없음"
     return {"changed": bool(touched), "quarters": sorted(touched, reverse=True), "note": note}
+
+
+def backfill_one(client, corp_code: str, name: str, periods: list, record: dict) -> dict:
+    """
+    과거 여러 분기를 한꺼번에 채운다.
+
+    ingest_one 을 기간마다 부르면 차분용 직전 분기를 매번 다시 받게 되어 호출이
+    두 배가 된다. 여기서는 각 보고서를 **한 번씩만** 받아 누계를 모두 모은 뒤
+    마지막에 한 번에 차분한다.
+
+    재무상태표와 주식수는 보고서마다 그 시점 값이므로 각자의 분기에 붙인다.
+    (최신 것 하나로 과거 PBR을 계산하면 시계열이 아니라 착시가 된다.)
+    """
+    from .store import merge_quarter
+
+    cums: dict = {}
+    balances: dict = {}
+    shares: dict = {}
+    meta: dict = {}
+    fs_pref = "CFS"
+    fetched = 0
+
+    for period in periods:
+        quarter = qd.QUARTER_OF_REPRT.get(period.reprt_code)
+        if quarter is None:
+            continue
+        payload, fs_div = _fetch_report(client, corp_code, period.year,
+                                        period.reprt_code, fs_pref)
+        if payload is None:
+            continue
+        fetched += 1
+        fs_pref = fs_div or fs_pref
+
+        for key, vals in qd.parse_cumulative_is(payload, period.year, quarter).items():
+            cums.setdefault(key, {}).update(
+                {k: v for k, v in vals.items() if k not in cums.get(key, {})})
+
+        bs = qd.parse_balance_accounts(payload)
+        if bs:
+            balances[(period.year, quarter)] = bs
+        got_shares = fetch_shares(client, corp_code, period.year, period.reprt_code)
+        if got_shares:
+            shares[(period.year, quarter)] = got_shares
+        meta[(period.year, quarter)] = {"fs_div": fs_div, "report_nm": period.label}
+
+    if name:
+        record["name"] = name
+
+    touched = []
+    for (yy, qq), vals in qd.cumulative_to_quarterly(cums).items():
+        values = dict(vals)
+        values.update(balances.get((yy, qq), {}))
+        if (yy, qq) in shares:
+            values["상장주식수"] = shares[(yy, qq)]
+        if merge_quarter(record, quarter_key(yy, qq), values, meta.get((yy, qq))):
+            touched.append(quarter_key(yy, qq))
+
+    # 재무상태표만 있고 손익 차분이 안 된 분기(가장 오래된 쪽)도 살려둔다.
+    # PBR 은 자기자본만 있으면 계산되므로 버릴 이유가 없다.
+    for (yy, qq), bs in balances.items():
+        qkey = quarter_key(yy, qq)
+        values = dict(bs)
+        if (yy, qq) in shares:
+            values["상장주식수"] = shares[(yy, qq)]
+        if merge_quarter(record, qkey, values, meta.get((yy, qq))) and qkey not in touched:
+            touched.append(qkey)
+
+    return {"fetched": fetched, "quarters": sorted(set(touched), reverse=True)}
