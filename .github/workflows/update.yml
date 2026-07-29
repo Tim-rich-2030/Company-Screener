@@ -15,7 +15,7 @@ on:
         default: '3'
 
 concurrency:
-  group: screener-update      # 스케줄이 겹쳐도 동시에 커밋하지 않게 한다
+  group: screener-store      # 두 워크플로가 store/ 를 동시에 밀지 않게 직렬화한다
   cancel-in-progress: false
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
           cache: pip
 
       - name: 의존성 설치
-        run: pip install -q pandas requests tqdm pykrx
+        run: pip install -q -r requirements.txt
 
       - name: 공시 감지 및 수집
         env:
@@ -52,7 +52,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add store docs
+          git add store docs 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 건너뜀"
           else
@@ -62,7 +62,10 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
+      # Pages 를 아직 켜지 않았어도 여기서 자동으로 활성화한다
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs

@@ -1,0 +1,6 @@
+# GitHub Actions 와 로컬 실행이 같은 것을 쓰도록 고정한다.
+# setup-python 의 pip 캐시도 이 파일을 기준으로 동작한다.
+pandas>=2.0
+requests>=2.31
+tqdm>=4.66
+pykrx>=1.2.8
