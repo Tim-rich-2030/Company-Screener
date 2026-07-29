@@ -117,4 +117,30 @@ e.add("005930", "삼성전자", "DART조회", "실패 crtfc_key=abc123SECRET", v
 assert "abc123SECRET" not in e.summary().iloc[0]["사유"]
 print("redact ok")
 
+# --- API 키 입력 방어 ---
+# 코랩의 getpass는 통신 실패 시 문자열이 아닌 dict를 돌려준다.
+os.environ.pop("DART_API_KEY", None)
+for bad, label in [({"error": "x"}, "dict"), (None, "None"), (123, "int")]:
+    try:
+        k._accept_key(bad, "입력창")
+    except SystemExit as exc:
+        assert "DART_API_KEY" in str(exc), exc          # 조치 방법을 알려주는지
+        assert type(bad).__name__ in str(exc), exc      # 받은 타입을 알려주는지
+    else:
+        raise AssertionError(f"{label} 입력을 걸러내지 못했습니다")
+# 빈 문자열도 거부
+try:
+    k._accept_key("   ", "입력창")
+except SystemExit as exc:
+    assert "비어 있습니다" in str(exc), exc
+else:
+    raise AssertionError("빈 키를 걸러내지 못했습니다")
+# 정상 키는 통과하고, 재실행 시 입력창을 다시 띄우지 않도록 환경변수에 저장된다
+assert k._accept_key("  realkey123  ", "입력창") == "realkey123"
+assert os.environ["DART_API_KEY"] == "realkey123"
+assert k.get_api_key() == "realkey123"       # 두 번째 호출은 입력창 없이 환경변수에서
+assert "realkey123" not in k.redact("crtfc_key=realkey123")
+os.environ.pop("DART_API_KEY", None)
+print("api key handling ok")
+
 print("\nALL TESTS PASSED")

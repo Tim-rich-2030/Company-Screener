@@ -192,31 +192,60 @@ def norm_name(s: str) -> str:
     return re.sub(r"[\s ().,·\-]", "", str(s or ""))
 
 
+ENV_KEY_HINT = (
+    "환경변수로 지정한 뒤 다시 실행하세요:\n"
+    "    import os\n"
+    "    os.environ['DART_API_KEY'] = '발급받은_키'\n"
+    "  (또는 코랩 왼쪽 🔑 시크릿에 DART_API_KEY 등록 후 '노트북 액세스' 허용)"
+)
+
+
+def _accept_key(raw, source: str) -> str:
+    """
+    입력받은 값을 키로 채택한다.
+
+    코랩은 표준 getpass를 자체 구현으로 바꿔치기해 두는데, 브라우저와의 통신이
+    실패하면 문자열 대신 dict를 돌려준다. 그대로 .strip()을 부르면
+    "AttributeError: 'dict' object has no attribute 'strip'" 로 죽으므로
+    타입을 먼저 확인하고, 실패 시 조치 방법을 알려준다.
+    """
+    if not isinstance(raw, str):
+        raise SystemExit(
+            f"{source}에서 키를 문자열로 받지 못했습니다 (받은 타입: {type(raw).__name__}).\n"
+            f"  코랩 입력창이 제대로 동작하지 않는 상태입니다. {ENV_KEY_HINT}")
+    key = raw.strip()
+    if not key:
+        raise SystemExit(f"DART API 키가 비어 있습니다.\n  {ENV_KEY_HINT}")
+    remember_secret(key)
+    # 같은 세션에서 다시 실행할 때 입력창을 또 띄우지 않도록 저장해 둔다.
+    os.environ["DART_API_KEY"] = key
+    return key
+
+
 def get_api_key() -> str:
     """DART API 키를 환경변수 또는 입력창에서 받는다. 하드코딩 금지."""
-    key = os.environ.get("DART_API_KEY", "").strip()
-    if key:
+    env_key = os.environ.get("DART_API_KEY", "")
+    if isinstance(env_key, str) and env_key.strip():
         log("[setup] DART_API_KEY 환경변수 사용")
-        remember_secret(key)
-        return key
+        return _accept_key(env_key, "환경변수")
 
     # 코랩 시크릿(userdata) 지원
     try:
         from google.colab import userdata  # type: ignore
-        key = (userdata.get("DART_API_KEY") or "").strip()
-        if key:
+        secret = userdata.get("DART_API_KEY")
+        if secret:
             log("[setup] 코랩 시크릿(DART_API_KEY) 사용")
-            remember_secret(key)
-            return key
+            return _accept_key(secret, "코랩 시크릿")
     except Exception:
         pass
 
     from getpass import getpass
-    key = getpass("OpenDART API key를 입력하세요 (화면에 표시되지 않음): ").strip()
-    if not key:
-        raise SystemExit("DART API 키가 없어 종료합니다.")
-    remember_secret(key)
-    return key
+    try:
+        raw = getpass("OpenDART API key를 입력하세요 (화면에 표시되지 않음): ")
+    except Exception as exc:
+        raise SystemExit(
+            f"키 입력창을 띄우지 못했습니다 ({type(exc).__name__}). {ENV_KEY_HINT}") from None
+    return _accept_key(raw, "입력창")
 
 
 def resolve_base_date(raw: str) -> str:
