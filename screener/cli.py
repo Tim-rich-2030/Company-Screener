@@ -135,6 +135,7 @@ def cmd_backfill(args) -> int:
     todo = codes[:args.limit] if args.limit else codes
     if not todo:
         log("[소급] 처리할 종목이 없습니다. 이미 전부 채워졌습니다.")
+        store.save_state(state)     # store/ 가 없으면 뒤따르는 커밋 단계가 실패한다
         site.build()
         return 0
 
