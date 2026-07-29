@@ -150,4 +150,79 @@ assert "realkey123" not in k.redact("crtfc_key=realkey123")
 os.environ.pop("DART_API_KEY", None)
 print("api key handling ok")
 
+# --- 2단계: 사업보고서 연도 선택 ---
+# 사업보고서 1건이 3개년을 담으므로 5년치는 2건이면 충분해야 한다
+assert k.annual_report_years(2025, 5) == [2025, 2022]
+assert k.annual_report_years(2025, 3) == [2025]
+assert k.annual_report_years(2025, 1) == [2025]
+assert k.annual_report_years(2025, 6) == [2025, 2022]
+assert k.annual_report_years(2025, 7) == [2025, 2022, 2019]
+# 선택된 보고서들이 실제로 필요한 연도를 전부 덮는지
+for n in range(1, 9):
+    covered = set()
+    for y in k.annual_report_years(2025, n):
+        covered |= {y, y - 1, y - 2}
+    assert set(range(2025 - n + 1, 2026)) <= covered, n
+print("annual_report_years ok")
+
+# --- 2단계: 영업이익 파싱 ---
+def is_item(sj, aid, nm, th, fr, bf):
+    return {"sj_div": sj, "account_id": aid, "account_nm": nm,
+            "thstrm_amount": th, "frmtrm_amount": fr, "bfefrmtrm_amount": bf,
+            "thstrm_nm": "제 58 기", "ord": "1", "currency": "KRW"}
+
+payload = {"status": "000", "list": [
+    is_item("IS", "ifrs-full_Revenue", "매출액", "9,000", "8,000", "7,000"),
+    is_item("IS", "dart_OperatingIncomeLoss", "영업이익", "1,000", "-500", "300"),
+    is_item("IS", "ifrs-full_ProfitLoss", "당기순이익", "800", "-400", "200"),
+    # 함정: 이름에 '영업이익'이 들어가지만 다른 계정
+    is_item("IS", "x_custom", "충당금적립전영업이익", "9,999", "9,999", "9,999"),
+    is_item("BS", "ifrs-full_Equity", "자본총계", "50,000", "49,000", "48,000"),
+]}
+got = k.parse_operating_profit(payload, 2025)
+assert got == {2025: 1000, 2024: -500, 2023: 300}, got
+print("parse_operating_profit ok")
+
+# CIS만 있는 경우 (포괄손익계산서 단일 표시)
+cis_only = {"status": "000", "list": [
+    is_item("CIS", "dart_OperatingIncomeLoss", "영업이익(손실)", "700", "600", "500")]}
+assert k.parse_operating_profit(cis_only, 2024) == {2024: 700, 2023: 600, 2022: 500}
+# IS와 CIS에 모두 있으면 IS를 쓴다
+both = {"status": "000", "list": [
+    is_item("CIS", "dart_OperatingIncomeLoss", "영업이익", "111", "111", "111"),
+    is_item("IS", "dart_OperatingIncomeLoss", "영업이익", "222", "222", "222")]}
+assert k.parse_operating_profit(both, 2025)[2025] == 222
+# 전전기가 비어 있는 경우 (신규 상장 등)
+partial = {"status": "000", "list": [
+    is_item("IS", "dart_OperatingIncomeLoss", "영업이익", "100", "90", "")]}
+assert k.parse_operating_profit(partial, 2025) == {2025: 100, 2024: 90}
+# 미제출 보고서
+assert k.parse_operating_profit({"status": "013", "message": "없음"}, 2025) == {}
+print("parse_operating_profit edge cases ok")
+
+# --- 2단계: 연속 흑자 판정 ---
+allpos = {y: 100.0 for y in range(2021, 2026)}
+assert k.profit_streak(allpos, 2025, 5) == "Y"
+assert k.profit_streak(allpos, 2025, 3) == "Y"
+# 5년 중 가장 오래된 해만 적자 -> 5년 N, 3년 Y
+mixed = dict(allpos); mixed[2021] = -50.0
+assert k.profit_streak(mixed, 2025, 5) == "N"
+assert k.profit_streak(mixed, 2025, 3) == "Y"
+# 최근 해가 적자면 둘 다 N
+recent_loss = dict(allpos); recent_loss[2025] = -1.0
+assert k.profit_streak(recent_loss, 2025, 5) == "N"
+assert k.profit_streak(recent_loss, 2025, 3) == "N"
+# 데이터가 빠진 해가 있으면 판정 불가
+holey = dict(allpos); del holey[2022]
+assert k.profit_streak(holey, 2025, 5) == "-"
+assert k.profit_streak(holey, 2025, 3) == "Y"    # 3년(2023~2025)은 온전하므로 판정 가능
+# 영업이익 0은 흑자가 아니다
+zero = dict(allpos); zero[2024] = 0.0
+assert k.profit_streak(zero, 2025, 3) == "N"
+print("profit_streak ok")
+
+trend = k.format_profit_trend({2025: 1e12, 2024: -2e11, 2022: 3e11}, 2025, 5)
+assert trend == "2021:- | 2022:3,000 | 2023:- | 2024:-2,000 | 2025:10,000", trend
+print("format_profit_trend ok")
+
 print("\nALL TESTS PASSED")

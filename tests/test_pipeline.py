@@ -105,6 +105,40 @@ def bs_payload(equity_total=None, parent_equity=None, noncontrolling=None):
 
 NO_DATA = {"status": "013", "message": "조회된 데이타가 없습니다."}
 
+
+# --- 2단계: 사업보고서 손익계산서 픽스처 ----------------------------------
+# 사업보고서 1건이 당기·전기·전전기 3개년을 담는다.
+# 최신 사업보고서는 2025 FY(2025/2024/2023), 그 앞은 2022 FY(2022/2021/2020).
+
+def is_payload(op_by_year, year):
+    """영업이익 3개년을 담은 손익계산서 응답."""
+    def amt(y):
+        v = op_by_year.get(y)
+        return "" if v is None else f"{int(v):,}"
+    return {"status": "000", "message": "정상", "list": [
+        {"sj_div": "IS", "sj_nm": "손익계산서", "account_id": "ifrs-full_Revenue",
+         "account_nm": "매출액", "thstrm_amount": "9,000",
+         "frmtrm_amount": "8,000", "bfefrmtrm_amount": "7,000", "ord": "1"},
+        {"sj_div": "IS", "sj_nm": "손익계산서", "account_id": "dart_OperatingIncomeLoss",
+         "account_nm": "영업이익", "thstrm_amount": amt(year),
+         "frmtrm_amount": amt(year - 1), "bfefrmtrm_amount": amt(year - 2), "ord": "2"},
+    ]}
+
+
+OP = 1_000_000_000   # 10억
+# 기아: 5년 내내 흑자 -> 5년 Y / 3년 Y
+KIA_OP = {y: 500 * OP for y in range(2021, 2026)}
+# 현대차: 2021년만 적자 -> 5년 N / 3년 Y
+HMC_OP = {**{y: 400 * OP for y in range(2022, 2026)}, 2021: -100 * OP}
+# 별도만공시: 2021 데이터 없음 -> 5년 '-' / 3년 Y
+SEP_OP = {y: 200 * OP for y in range(2022, 2026)}
+
+ANNUAL_FIXTURES = {}
+for _code, _op in (("000270", KIA_OP), ("005380", HMC_OP), ("333333", SEP_OP)):
+    for _y in (2025, 2022):
+        _div = "OFS" if _code == "333333" else "CFS"
+        ANNUAL_FIXTURES[(CORP_CODE[_code], str(_y), "11011", _div)] = is_payload(_op, _y)
+
 # (corp_code, bsns_year, reprt_code, fs_div) -> payload
 DART_FIXTURES = {
     (CORP_CODE["005930"], "2026", "11013", "CFS"):
@@ -122,6 +156,7 @@ DART_FIXTURES = {
         bs_payload(equity_total=-1 * JO, parent_equity=-1 * JO),
     # 111111 은 어떤 조합에도 없음 -> 전부 013
 }
+DART_FIXTURES.update(ANNUAL_FIXTURES)   # 2단계 사업보고서 응답
 
 
 class FakeResponse:
@@ -244,6 +279,7 @@ def test_full_run():
             "종목코드", "종목명", "종가", "시가총액(억)", "자기자본(억)", "BPS",
             "계산PBR", "시장PBR", "괴리율(%)", "기준보고서",
             "우선주존재", "자기자본기준", "재무제표구분",
+            "영업이익5년연속흑자", "영업이익3년연속흑자", "영업이익추이(억)", "영업이익기준",
         ], list(df.columns)
 
         # --- 계산PBR 오름차순, 0 < PBR <= 1.0 만 통과 ---
@@ -419,6 +455,66 @@ def _run_isolated(**kw):
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def test_stage2_profit_streaks():
+    """2단계: 영업이익 5년/3년 연속 흑자를 Y/N/- 로 표시하되 걸러내지는 않는다."""
+    install_fakes()
+    df, _ = _run_isolated()
+    row = df.set_index("종목코드")
+
+    # 기본값은 '표시만' — 2단계 때문에 종목이 사라지면 안 된다
+    assert len(df) == 3, df
+
+    # 5년 내내 흑자
+    assert row.loc["000270", "영업이익5년연속흑자"] == "Y"
+    assert row.loc["000270", "영업이익3년연속흑자"] == "Y"
+    # 2021년만 적자 -> 5년 N, 3년 Y (2단계의 핵심 구분)
+    assert row.loc["005380", "영업이익5년연속흑자"] == "N"
+    assert row.loc["005380", "영업이익3년연속흑자"] == "Y"
+    # 2021년 데이터 없음 -> 5년은 판정 불가, 3년은 판정 가능
+    assert row.loc["333333", "영업이익5년연속흑자"] == "-"
+    assert row.loc["333333", "영업이익3년연속흑자"] == "Y"
+
+    # 추이 문자열: 오래된 연도부터 5개, 억 단위
+    assert row.loc["005380", "영업이익추이(억)"] == \
+        "2021:-1,000 | 2022:4,000 | 2023:4,000 | 2024:4,000 | 2025:4,000"
+    assert row.loc["333333", "영업이익추이(억)"].startswith("2021:- | 2022:2,000")
+
+    # 1단계에서 별도를 쓴 종목은 2단계도 별도 기준으로 맞춘다
+    assert row.loc["333333", "재무제표구분"] == "별도"
+    assert row.loc["333333", "영업이익기준"] == "별도"
+    assert row.loc["000270", "영업이익기준"] == "연결"
+    print("test_stage2_profit_streaks: OK")
+
+
+def test_stage2_as_filter():
+    """STAGE2_REQUIRE 를 켜면 통과 조건으로 동작하고 제외 사유가 남는다."""
+    install_fakes()
+    k.STAGE2_REQUIRE = "5년"
+    try:
+        df, exc = _run_isolated()
+        assert list(df["종목코드"]) == ["000270"], list(df["종목코드"])
+        dropped = exc[exc["단계"] == "영업이익필터"].set_index("종목코드")
+        assert set(dropped.index) == {"005380", "333333"}
+        assert "N" in dropped.loc["005380", "사유"]
+        assert "-" in dropped.loc["333333", "사유"]
+    finally:
+        k.STAGE2_REQUIRE = ""
+    print("test_stage2_as_filter: OK")
+
+
+def test_stage2_disabled():
+    """STAGE2_ENABLED=False 면 컬럼도 호출도 없어야 한다 (1단계만 쓰는 경우)."""
+    install_fakes()
+    k.STAGE2_ENABLED = False
+    try:
+        df, _ = _run_isolated()
+        assert not any(c in df.columns for c in k.STAGE2_COLUMNS), list(df.columns)
+        assert len(df) == 3
+    finally:
+        k.STAGE2_ENABLED = True
+    print("test_stage2_disabled: OK")
+
+
 def test_parallel_matches_sequential():
     """동시 조회를 켜도 결과와 제외 사유가 순차 실행과 완전히 같아야 한다."""
     install_fakes()
@@ -500,6 +596,9 @@ if __name__ == "__main__":
     test_fdr_source_schema()
     test_fdr_fallback_when_krx_down()
     test_pykrx_source_forced_raises()
+    test_stage2_profit_streaks()
+    test_stage2_as_filter()
+    test_stage2_disabled()
     test_parallel_matches_sequential()
     test_parallel_overlaps_latency()
     test_fatal_status_aborts()

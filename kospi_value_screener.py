@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-코스피 밸류 스크리너 - 1단계 (자체 계산 PBR)
-============================================
+코스피 밸류 스크리너 - 1단계(자체 계산 PBR) + 2단계(영업이익 연속 흑자)
+=====================================================================
 
 시장에서 제공하는 PBR을 그대로 믿지 않고, DART 재무상태표의 자기자본과
 현재 시가총액을 직접 비교해 PBR을 다시 계산한다.
@@ -17,6 +17,10 @@
        계산PBR  = 시가총액 / 자기자본
        괴리율   = (계산PBR - 시장PBR) / 시장PBR * 100
     5) 0 < 계산PBR <= 1.0 인 종목만 최종 남기고 계산PBR 오름차순 정렬
+    6) [2단계] 남은 종목의 영업이익 5년/3년 연속 흑자 여부를 Y/N 컬럼으로 표시.
+       사업보고서 손익계산서가 한 응답에 당기·전기·전전기 3개년을 담으므로
+       5년치를 모으는 데 종목당 사업보고서 2건이면 된다.
+       기본은 '표시만' 하고 걸러내지 않는다 (STAGE2_REQUIRE 로 필터 전환 가능).
 
 주의 (해석상의 한계)
     * 금융지주 / 은행 / 보험 / 증권은 자본 구조와 규제자본(BIS비율, RBC/K-ICS 등)의
@@ -26,7 +30,10 @@
       본 스크리너의 결과에서 금융업종은 별도의 잣대로 다시 검토해야 한다.
     * 우선주가 상장된 종목은 pykrx 시가총액/상장주식수가 보통주 기준이라
       계산PBR이 실제보다 과소 계산된다. 해당 종목은 '우선주존재' 플래그로 표시한다.
-    * 2단계(영업이익 5년/3년 연속 흑자 필터)는 이 파일에 포함하지 않는다.
+    * 영업이익 연속 흑자는 '지속적으로 돈을 버는가'를 볼 뿐, 이익의 질(일회성 손익,
+      매출 추세, 부채)까지 보지는 않는다. Y가 곧 좋은 기업이라는 뜻은 아니다.
+    * 회계기준 변경이나 사업 재편으로 과거치가 재작성되면 연도별 값이 달라질 수 있다.
+      본 스크리너는 더 최신 보고서에 실린 값을 우선한다.
 
 시장 데이터 소스
     2026년부터 data.krx.co.kr이 로그인 세션을 요구해, KRX_ID/KRX_PW 없이 pykrx를 쓰면
@@ -74,6 +81,14 @@ DART_MAX_RETRY = 3                  # 네트워크 오류 시 재시도 횟수
 MAX_PERIOD_TRIES = 4                # 한 종목당 시도할 보고서 후보 개수 상한
 UNAVAILABLE_STRIKES = 12            # 특정 보고서가 N회 연속 실패(성공 0회)하면 미공시로 보고 건너뜀
 
+# --- 2단계: 영업이익 연속 흑자 ------------------------------------------------
+# 필터로 걸러내지 않고 Y/N 컬럼으로 표시만 한다 (몇 개가 살아남는지 먼저 보기 위함).
+# 걸러내려면 STAGE2_REQUIRE 를 "5년" 또는 "3년" 으로 바꾼다.
+STAGE2_ENABLED = True
+PROFIT_YEARS_LONG = 5               # 장기 연속 흑자 판정 연수
+PROFIT_YEARS_SHORT = 3              # 단기 연속 흑자 판정 연수
+STAGE2_REQUIRE = ""                 # "" | "5년" | "3년"  — 통과 조건으로 쓸지 여부
+
 OUTPUT_CSV = "kospi_value_screener_stage1.csv"
 EXCLUDED_CSV = "kospi_value_screener_stage1_excluded.csv"   # 제외 사유 상세 (빈 문자열이면 저장 안 함)
 
@@ -103,6 +118,18 @@ PARENT_EQUITY_NAMES = (
     "지배주주지분",
     "지배기업지분",
 )
+
+# 손익계산서 영업이익 계정 매칭용 (2단계)
+IS_SJ_DIVS = ("IS", "CIS")          # 손익계산서 / 포괄손익계산서. IS를 우선한다
+OPERATING_PROFIT_IDS = {
+    "dart_OperatingIncomeLoss",
+    "ifrs-full_ProfitLossFromOperatingActivities",
+    "ifrs_ProfitLossFromOperatingActivities",
+}
+# norm_name()으로 괄호·공백을 지운 뒤 '정확히' 일치하는 것만 쓴다.
+# 부분 일치를 허용하면 '영업이익률', '충당금적립전영업이익' 같은 계정이 섞인다.
+OPERATING_PROFIT_NAMES = ("영업이익", "영업이익손실", "영업손익", "영업손실")
+ANNUAL_REPRT_CODE = "11011"
 
 # 보고서 코드 -> (라벨 접미사, 분기 끝 월/일, 공시 여유를 둔 조회 가능 시점 월/일, 연도 오프셋)
 REPRT_CODES = {
@@ -368,7 +395,7 @@ def fetch_market_snapshot(base_date: str) -> tuple[pd.DataFrame, str, str]:
     코스피 전 종목의 종가/시가총액/상장주식수/시장PBR/종목명.
     반환: (데이터프레임, 실제 사용한 기준일, 사용한 소스명)
     """
-    log(f"[1/5] {MARKET} 시장 데이터 수집 (기준일 {base_date}, source={MARKET_SOURCE})")
+    log(f"[1/6] {MARKET} 시장 데이터 수집 (기준일 {base_date}, source={MARKET_SOURCE})")
     df, used_date, source = None, base_date, ""
 
     if MARKET_SOURCE in ("auto", "pykrx"):
@@ -432,7 +459,7 @@ def build_preferred_map(all_codes: list[str], name_by_code: dict[str, str]) -> d
 
 def fetch_corp_code_map(api_key: str) -> dict[str, str]:
     """상장 종목코드(6자리) -> DART corp_code(8자리) 매핑."""
-    log("[3/5] DART 기업 고유번호(corpCode) 내려받는 중")
+    log("[3/6] DART 기업 고유번호(corpCode) 내려받는 중")
     try:
         resp = requests.get(f"{DART_BASE}/corpCode.xml",
                             params={"crtfc_key": api_key}, timeout=60)
@@ -654,8 +681,224 @@ def fetch_equity(client: DartClient, corp_code: str,
 
 
 # =============================================================================
+# 2단계) 영업이익 연속 흑자
+# =============================================================================
+#
+# 사업보고서 손익계산서는 한 응답에 당기·전기·전전기 3개년을 함께 담고 있다.
+# 따라서 5년치를 모으는 데 종목당 사업보고서 2건(예: 2025 FY + 2022 FY)이면 충분하다.
+
+
+def annual_report_years(latest_fy: int, n_years: int) -> list[int]:
+    """n_years치를 덮는 데 필요한 최소한의 사업보고서 연도 목록(최신순)."""
+    needed = set(range(latest_fy - n_years + 1, latest_fy + 1))
+    years, y = [], latest_fy
+    while needed and y > latest_fy - n_years - 3:
+        years.append(y)
+        needed -= {y, y - 1, y - 2}
+        y -= 3
+    return years
+
+
+def latest_annual_year(periods: list[Period]) -> int | None:
+    """조회 가능한 보고서 후보 중 가장 최근 사업보고서의 사업연도."""
+    for p in periods:                      # periods는 최신순으로 정렬돼 있다
+        if p.reprt_code == ANNUAL_REPRT_CODE:
+            return p.year
+    return None
+
+
+def parse_operating_profit(payload: dict, year: int) -> dict[int, float]:
+    """
+    사업보고서 응답에서 영업이익 3개년을 뽑는다.
+    반환: {연도: 영업이익(원)}  — 값이 없는 연도는 키 자체가 없다.
+    """
+    if payload.get("status") != "000":
+        return {}
+
+    chosen = None
+    for item in payload.get("list", []):
+        sj = item.get("sj_div")
+        if sj not in IS_SJ_DIVS:
+            continue
+        acc_id = (item.get("account_id") or "").strip()
+        nm = norm_name(item.get("account_nm"))
+        if acc_id not in OPERATING_PROFIT_IDS and nm not in OPERATING_PROFIT_NAMES:
+            continue
+        # 손익계산서(IS)를 포괄손익계산서(CIS)보다 우선한다
+        if chosen is None or (chosen[0] != "IS" and sj == "IS"):
+            chosen = (sj, item)
+
+    if chosen is None:
+        return {}
+
+    item = chosen[1]
+    out = {}
+    for offset, key in ((0, "thstrm_amount"), (1, "frmtrm_amount"), (2, "bfefrmtrm_amount")):
+        val = to_num(item.get(key))
+        if val is not None:
+            out[year - offset] = val
+    return out
+
+
+def fetch_operating_profits(client: DartClient, corp_code: str, latest_fy: int,
+                            n_years: int, prefer_cfs: bool) -> tuple[dict[int, float], str, str]:
+    """
+    최근 n_years치 영업이익을 모은다.
+    반환: ({연도: 영업이익}, 사용한 재무제표구분, 실패 사유)
+    """
+    order = ["CFS", "OFS"] if prefer_cfs else ["OFS", "CFS"]
+    profits: dict[int, float] = {}
+    used_div, reason = "", ""
+
+    for year in annual_report_years(latest_fy, n_years):
+        got = False
+        for fs_div in order:
+            payload = client.get_json("fnlttSinglAcntAll.json", {
+                "corp_code": corp_code,
+                "bsns_year": str(year),
+                "reprt_code": ANNUAL_REPRT_CODE,
+                "fs_div": fs_div,
+            })
+            if payload is None:
+                reason = reason or f"{year} FY 호출 실패: {client.last_error}"
+                continue
+            status = payload.get("status")
+            if status in DART_FATAL_STATUS:
+                raise SystemExit(
+                    f"DART 오류 {status}: {DART_FATAL_STATUS[status]} — 실행을 중단합니다.")
+            found = parse_operating_profit(payload, year)
+            if found:
+                # 최신 보고서 값을 우선한다 (재작성된 과거치는 최신 보고서 기준이 정확)
+                for y, v in found.items():
+                    profits.setdefault(y, v)
+                used_div = used_div or fs_div
+                got = True
+                break
+        if not got and not reason:
+            reason = f"{year} FY 영업이익을 찾지 못함"
+    return profits, used_div, reason
+
+
+def profit_streak(profits: dict[int, float], latest_fy: int, n_years: int) -> str:
+    """
+    최근 n_years 연속 흑자 여부.
+    Y = 전부 흑자, N = 한 해라도 적자, '-' = 해당 연도 데이터가 없어 판정 불가.
+    """
+    years = [latest_fy - i for i in range(n_years)]
+    if any(y not in profits for y in years):
+        return "-"
+    return "Y" if all(profits[y] > 0 for y in years) else "N"
+
+
+def format_profit_trend(profits: dict[int, float], latest_fy: int, n_years: int) -> str:
+    """'2021:1,234 | 2022:-567 | ...' 형태의 억 단위 추이 문자열 (오래된 연도부터)."""
+    parts = []
+    for y in range(latest_fy - n_years + 1, latest_fy + 1):
+        val = profits.get(y)
+        parts.append(f"{y}:{val / EOK:,.0f}" if val is not None else f"{y}:-")
+    return " | ".join(parts)
+
+
+# =============================================================================
 # 4~5) 계산 / 필터 / 출력
 # =============================================================================
+
+STAGE2_COLUMNS = ["영업이익5년연속흑자", "영업이익3년연속흑자",
+                  "영업이익추이(억)", "영업이익기준"]
+
+
+def attach_profit_streaks(df: pd.DataFrame, client: "DartClient", corp_map: dict,
+                          periods: list[Period], excluded: "Excluded") -> pd.DataFrame:
+    """
+    2단계: PBR 필터를 통과한 종목만 대상으로 영업이익 연속 흑자 여부를 채운다.
+    기본은 표시만 하고 걸러내지 않는다 (STAGE2_REQUIRE 로 필터로 바꿀 수 있다).
+    """
+    if not STAGE2_ENABLED:
+        log("[6/6] 2단계 비활성화(STAGE2_ENABLED=False) — 건너뜁니다.")
+        return df
+    if df.empty:
+        log("[6/6] 1단계 통과 종목이 없어 2단계를 건너뜁니다.")
+        return df
+
+    latest_fy = latest_annual_year(periods)
+    if latest_fy is None:
+        log("[6/6] [warn] 조회 가능한 사업보고서가 없어 2단계를 건너뜁니다.")
+        for col in STAGE2_COLUMNS:
+            df[col] = "-"
+        return df
+
+    years = annual_report_years(latest_fy, PROFIT_YEARS_LONG)
+    log(f"[6/6] 영업이익 연속 흑자 조회 ({len(df)}종목, "
+        f"{latest_fy - PROFIT_YEARS_LONG + 1}~{latest_fy} / 사업보고서 {len(years)}건: "
+        f"{', '.join(f'{y} FY' for y in years)})")
+
+    def probe(row) -> dict:
+        code = row["종목코드"]
+        blank = {c: "-" for c in STAGE2_COLUMNS}
+        corp_code = corp_map.get(code)
+        if not corp_code:
+            return blank
+        # 1단계에서 연결을 썼으면 연결을, 별도를 썼으면 별도를 우선한다 (기준 일관성)
+        prefer_cfs = row.get("재무제표구분") != "별도"
+        profits, used_div, reason = fetch_operating_profits(
+            client, corp_code, latest_fy, PROFIT_YEARS_LONG, prefer_cfs)
+        if not profits:
+            excluded.add(code, row["종목명"], "영업이익조회",
+                         reason or "영업이익 데이터 없음(결과에는 남김)", verbose=False)
+            return blank
+        return {
+            "영업이익5년연속흑자": profit_streak(profits, latest_fy, PROFIT_YEARS_LONG),
+            "영업이익3년연속흑자": profit_streak(profits, latest_fy, PROFIT_YEARS_SHORT),
+            "영업이익추이(억)": format_profit_trend(profits, latest_fy, PROFIT_YEARS_LONG),
+            "영업이익기준": "연결" if used_div == "CFS" else "별도",
+        }
+
+    rows = [row for _, row in df.iterrows()]
+    workers = max(1, int(DART_WORKERS))
+    bar = tqdm(total=len(rows), desc="영업이익", unit="종목")
+    results: dict[int, dict] = {}
+    try:
+        if workers == 1:
+            for i, row in enumerate(rows):
+                results[i] = probe(row)
+                bar.update(1)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(probe, row): i for i, row in enumerate(rows)}
+                try:
+                    for fut in as_completed(futures):
+                        results[futures[fut]] = fut.result()
+                        bar.update(1)
+                except (SystemExit, KeyboardInterrupt):
+                    for f in futures:
+                        f.cancel()
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise
+    finally:
+        bar.close()
+
+    for col in STAGE2_COLUMNS:
+        df[col] = [results.get(i, {}).get(col, "-") for i in range(len(rows))]
+
+    for label, col in ((f"{PROFIT_YEARS_LONG}년", "영업이익5년연속흑자"),
+                       (f"{PROFIT_YEARS_SHORT}년", "영업이익3년연속흑자")):
+        counts = df[col].value_counts()
+        log(f"      {label} 연속 흑자: Y {counts.get('Y', 0)} / "
+            f"N {counts.get('N', 0)} / 판정불가 {counts.get('-', 0)}")
+
+    if STAGE2_REQUIRE:
+        col = {"5년": "영업이익5년연속흑자", "3년": "영업이익3년연속흑자"}.get(STAGE2_REQUIRE)
+        if col is None:
+            log(f"      [warn] STAGE2_REQUIRE 값이 잘못됐습니다: {STAGE2_REQUIRE!r} — 필터 미적용")
+        else:
+            drop = df[df[col] != "Y"]
+            for _, r in drop.iterrows():
+                excluded.add(r["종목코드"], r["종목명"], "영업이익필터",
+                             f"{STAGE2_REQUIRE} 연속 흑자 {r[col]}", verbose=False)
+            df = df[df[col] == "Y"].reset_index(drop=True)
+            log(f"      [filter] {STAGE2_REQUIRE} 연속 흑자 조건 적용 -> {len(df)}종목")
+    return df
+
 
 @dataclass
 class Excluded:
@@ -692,13 +935,13 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         # 특정 종목만 추적: 시총/우선주 필터를 건너뛰고 그대로 통과시킨다.
         cand = market[market["종목코드"].isin(only)].copy()
         missing = [t for t in only if t not in set(market["종목코드"])]
-        log(f"[2/5] 디버그 모드: {len(cand)}종목만 조회 (시총·우선주 필터 건너뜀)")
+        log(f"[2/6] 디버그 모드: {len(cand)}종목만 조회 (시총·우선주 필터 건너뜀)")
         if missing:
             log(f"      [warn] {MARKET}에서 찾지 못한 종목코드: {', '.join(missing)}")
     else:
         cand = market[market["시가총액"] >= MIN_MARKET_CAP_KRW].copy()
         dropped_cap = total_listed - len(cand)
-        log(f"[2/5] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
+        log(f"[2/6] 시가총액 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 필터: "
             f"{total_listed} -> {len(cand)}종목 (제외 {dropped_cap})")
         for _, row in market[market["시가총액"] < MIN_MARKET_CAP_KRW].iterrows():
             excluded.add(row["종목코드"], row["종목명"], "시총필터",
@@ -788,7 +1031,7 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
 
     rows = [row for _, row in cand.iterrows()]
     workers = max(1, int(DART_WORKERS))
-    log(f"[4/5] DART 재무상태표 조회 ({len(rows)}종목, 동시 {workers})")
+    log(f"[4/6] DART 재무상태표 조회 ({len(rows)}종목, 동시 {workers})")
     bar = tqdm(total=len(rows), desc="DART", unit="종목")
     if workers == 1:
         for row in rows:
@@ -818,7 +1061,7 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
 
     # --- 5) PBR 필터 & 정렬 ----------------------------------------------
     df = pd.DataFrame(records)
-    log(f"[5/5] 계산 완료 {len(df)}종목 -> PBR 필터 "
+    log(f"[5/6] 계산 완료 {len(df)}종목 -> PBR 필터 "
         f"({MIN_CALC_PBR} < 계산PBR <= {MAX_CALC_PBR})")
     if debug and not df.empty:
         log("      [debug] PBR 필터 적용 전 계산 결과:")
@@ -830,6 +1073,9 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
                          f"계산PBR {r['계산PBR']}", verbose=False)
         df = df[(df["계산PBR"] > MIN_CALC_PBR) & (df["계산PBR"] <= MAX_CALC_PBR)]
         df = df.sort_values("계산PBR", ascending=True).reset_index(drop=True)
+
+    # --- 6) 2단계: 영업이익 연속 흑자 -------------------------------------
+    df = attach_profit_streaks(df, client, corp_map, periods, excluded)
 
     # --- 저장 & 요약 -------------------------------------------------------
     # 시험/디버그 실행 결과가 전체 실행 결과를 덮어쓰지 않도록 파일명을 분리한다.
