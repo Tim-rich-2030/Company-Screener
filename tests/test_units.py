@@ -24,8 +24,15 @@ print("norm_name ok")
 assert k.is_preferred_name("삼성전자우")
 assert k.is_preferred_name("현대차2우B")
 assert k.is_preferred_name("대신증권우")
+# 전환우선주는 뒤에 괄호가 붙는다 (실제 코스피 상장 종목)
+assert k.is_preferred_name("CJ4우(전환)")
+assert k.is_preferred_name("DL이앤씨2우(전환)")
 assert not k.is_preferred_name("삼성전자")
 assert not k.is_preferred_name("한국앤컴퍼니")   # '우'로 끝나지 않음
+# '우'가 들어가지만 보통주인 실제 종목들 — 오탐이 나면 분석 대상에서 통째로 빠진다
+for common in ["대우건설", "우리금융지주", "한국항공우주", "다우기술",
+               "LX하우시스", "우진플라임", "우성머티리얼스"]:
+    assert not k.is_preferred_name(common), common
 codes = ["005930", "005935", "000660", "005380", "005387"]
 names = {"005930": "삼성전자", "005935": "삼성전자우", "000660": "SK하이닉스",
          "005380": "현대차", "005387": "현대차2우B"}

@@ -400,8 +400,10 @@ def fetch_market_snapshot(base_date: str) -> tuple[pd.DataFrame, str, str]:
     return df.reset_index(drop=True), used_date, source
 
 
-# 우선주 종목명은 '...우', '...우B', '...2우B', '...3우C' 형태로 끝난다.
-PREF_NAME_RE = re.compile(r"\d?우[A-Za-z]?$")
+# 우선주 종목명은 '...우', '...우B', '...2우B', '...3우C' 로 끝나고,
+# 전환우선주는 뒤에 괄호가 더 붙는다: 'CJ4우(전환)', 'DL이앤씨2우(전환)'.
+# '대우건설', '우리금융지주', '한국항공우주'처럼 '우'가 들어가도 끝이 아니면 보통주다.
+PREF_NAME_RE = re.compile(r"\d?우[A-Za-z]?(\([^)]*\))?$")
 
 
 def is_preferred_name(name: str) -> bool:
