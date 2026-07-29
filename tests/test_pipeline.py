@@ -168,24 +168,61 @@ def fake_corpcode_zip():
     return buf.getvalue()
 
 
+# --- 대체 소스(FDR 캐시 CSV) 픽스처 --------------------------------------
+# 실제 파일과 동일한 컬럼 구성. KOSPI(STK)만 걸러져야 한다.
+FDR_HEADER = (",Code,ISU_CD,Name,Market,Dept,Close,ChangeCode,Changes,ChagesRatio,"
+              "Open,High,Low,Volume,Amount,Marcap,Stocks,MarketId")
+
+
+def fdr_csv_body():
+    lines = [FDR_HEADER]
+    for i, (code, name, price, cap, shares, _pbr) in enumerate(MARKET_ROWS):
+        lines.append(f"{i},{code},KR7{code}00{i},{name},KOSPI,,{price},2,0,0.0,"
+                     f"{price},{price},{price},1,1,{cap},{shares},STK")
+    # 코스닥 종목 — 걸러져야 한다
+    lines.append(f"{len(MARKET_ROWS)},999999,KR7999999009,코스닥종목,KOSDAQ,,1000,2,0,0.0,"
+                 f"1000,1000,1000,1,1,{9 * JO},1000000,KSQ")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+# 기준일에는 파일이 없고(휴장일) 하루 전에 있는 상황을 재현한다
+FDR_AVAILABLE_DATE = "2026-07-27"
+
+
 def fake_requests_get(url, params=None, timeout=None):
-    assert "corpCode.xml" in url, url
-    assert params["crtfc_key"] == FAKE_KEY
-    return FakeResponse(content=fake_corpcode_zip())
+    if "corpCode.xml" in url:
+        assert params["crtfc_key"] == FAKE_KEY
+        return FakeResponse(content=fake_corpcode_zip())
+    if "fdr_krx_data_cache" in url:
+        if FDR_AVAILABLE_DATE in url:
+            return FakeResponse(content=fdr_csv_body())
+        return FakeResponse(content=b"404: Not Found", status_code=404)
+    raise AssertionError(f"예상하지 못한 URL: {url}")
 
 
 # =============================================================================
 # 테스트 본체
 # =============================================================================
 
-def install_fakes():
-    k.stock.get_market_cap_by_ticker = fake_market_cap
-    k.stock.get_market_fundamental_by_ticker = fake_fundamental
-    k.stock.get_market_ticker_name = fake_ticker_name
-    k.stock.get_nearest_business_day_in_a_week = lambda date=None, prev=True: BASE_DATE
+def install_fakes(krx_down=False):
+    """krx_down=True 이면 pykrx가 KRX 로그인 미설정 상태처럼 실패한다."""
+    if krx_down:
+        def dead(*a, **kw):
+            # KRX가 빈 응답을 줄 때 pykrx가 내는 실제 예외
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+        k.stock.get_market_cap_by_ticker = dead
+        k.stock.get_market_fundamental_by_ticker = dead
+        k.stock.get_market_ticker_name = dead
+        k.stock.get_nearest_business_day_in_a_week = dead
+    else:
+        k.stock.get_market_cap_by_ticker = fake_market_cap
+        k.stock.get_market_fundamental_by_ticker = fake_fundamental
+        k.stock.get_market_ticker_name = fake_ticker_name
+        k.stock.get_nearest_business_day_in_a_week = lambda date=None, prev=True: BASE_DATE
     k.requests.get = fake_requests_get
     k.requests.Session = FakeSession
     k.BASE_DATE = BASE_DATE
+    k.MARKET_SOURCE = "auto"
     k.DART_SLEEP_SEC = 0
     os.environ["DART_API_KEY"] = FAKE_KEY
 
@@ -312,6 +349,62 @@ def test_limit_mode():
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def test_fdr_fallback_when_krx_down():
+    """
+    KRX가 로그인 세션을 요구해 pykrx가 빈 응답을 받는 상황.
+    대체 소스로 자동 전환되고, 시장PBR만 공란인 채 나머지는 정상 산출되어야 한다.
+    """
+    install_fakes(krx_down=True)
+    workdir = tempfile.mkdtemp(prefix="screener_fdr_")
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(workdir)
+        df = k.run()
+
+        # 휴장일 되감기: 기준일(0728)에 파일이 없어 0727을 썼는지
+        assert not df.empty, "대체 소스로 전환되지 않았습니다"
+        # 스크리닝 결과 자체는 pykrx 경로와 동일해야 한다
+        assert list(df["종목코드"]) == ["333333", "005380", "000270"], list(df["종목코드"])
+        assert approx(df.set_index("종목코드").loc["000270", "계산PBR"], 0.7)
+        # 시장PBR·괴리율만 공란
+        assert df["시장PBR"].isna().all(), "PBR 없는 소스인데 값이 채워졌습니다"
+        assert df["괴리율(%)"].isna().all()
+        # 우선주 플래그는 대체 소스에서도 동작해야 한다 (종목명 기반)
+        assert df.set_index("종목코드").loc["005380", "우선주존재"] == "Y"
+        print("test_fdr_fallback_when_krx_down: OK")
+    finally:
+        os.chdir(prev_cwd)
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_fdr_source_schema():
+    """대체 소스 파서: 시장 필터, 컬럼 매핑, 휴장일 되감기."""
+    install_fakes(krx_down=True)
+    df, used = k._fetch_market_fdr(BASE_DATE)
+    assert used == FDR_AVAILABLE_DATE.replace("-", ""), used     # 0728 -> 0727 되감기
+    assert list(df.columns) == ["종목코드", "종목명", "종가", "시가총액", "상장주식수", "시장PBR"]
+    assert "999999" not in set(df["종목코드"]), "코스닥 종목이 섞였습니다"
+    assert len(df) == len(MARKET_ROWS)
+    assert df["시장PBR"].isna().all()
+    assert df.loc[df["종목코드"] == "005930", "시가총액"].iloc[0] == 600 * JO
+    print("test_fdr_source_schema: OK")
+
+
+def test_pykrx_source_forced_raises():
+    """MARKET_SOURCE='pykrx' 로 고정하면 조용히 대체하지 않고 조치 방법을 알려야 한다."""
+    install_fakes(krx_down=True)
+    k.MARKET_SOURCE = "pykrx"
+    try:
+        k.fetch_market_snapshot(BASE_DATE)
+    except SystemExit as exc:
+        assert "KRX_ID" in str(exc) and "MARKET_SOURCE" in str(exc), exc
+        print("test_pykrx_source_forced_raises: OK")
+    else:
+        raise AssertionError("pykrx 고정인데 실패를 알리지 않았습니다")
+    finally:
+        k.MARKET_SOURCE = "auto"
+
+
 def test_fatal_status_aborts():
     """호출 한도 초과(020)는 남은 종목을 헛돌지 않고 즉시 중단해야 한다."""
     install_fakes()
@@ -336,5 +429,8 @@ if __name__ == "__main__":
     test_full_run()
     test_debug_ticker_mode()
     test_limit_mode()
+    test_fdr_source_schema()
+    test_fdr_fallback_when_krx_down()
+    test_pykrx_source_forced_raises()
     test_fatal_status_aborts()
     print("\nALL PIPELINE TESTS PASSED")

@@ -28,9 +28,17 @@
       계산PBR이 실제보다 과소 계산된다. 해당 종목은 '우선주존재' 플래그로 표시한다.
     * 2단계(영업이익 5년/3년 연속 흑자 필터)는 이 파일에 포함하지 않는다.
 
+시장 데이터 소스
+    2026년부터 data.krx.co.kr이 로그인 세션을 요구해, KRX_ID/KRX_PW 없이 pykrx를 쓰면
+    빈 응답("Expecting value: line 1 column 1")이 돌아온다. 그래서 KRX 로그인이 필요 없는
+    대체 소스(FinanceDataReader의 일자별 상장종목 캐시)를 두고 자동 전환한다.
+    대체 소스에는 시장PBR이 없어 괴리율만 공란이 되고, 계산PBR 스크리닝은 그대로 동작한다.
+    자세한 내용은 MARKET_SOURCE 상수 주석 참고.
+
 실행
     코랩:  이 파일 전체를 셀에 붙여넣고 실행하거나 `%run kospi_value_screener.py`
     로컬:  export DART_API_KEY=... && python kospi_value_screener.py
+    진단:  python kospi_value_screener.py --selftest
 """
 
 from __future__ import annotations
@@ -224,35 +232,47 @@ def resolve_base_date(raw: str) -> str:
             pass
     except Exception:
         pass
-    # 최후 수단: 데이터가 나올 때까지 하루씩 되감기
-    cur = dt.datetime.strptime(date, "%Y%m%d").date()
-    for _ in range(10):
-        ymd = cur.strftime("%Y%m%d")
-        try:
-            if not stock.get_market_cap_by_ticker(ymd, market=MARKET).empty:
-                return ymd
-        except Exception:
-            pass
-        cur -= dt.timedelta(days=1)
+    # KRX가 응답하지 않으면 여기서 더 두드려봐야 같은 오류만 반복된다.
+    # 입력 날짜를 그대로 돌려주고, 대체 소스가 직전 영업일을 스스로 찾게 한다.
+    log("      [warn] KRX 영업일 조회 실패 — 입력 날짜를 그대로 사용합니다.")
     return date
 
 
 # =============================================================================
-# 1) pykrx 시장 데이터
+# 1) 시장 데이터 — pykrx(주) / FDR 캐시(대체)
 # =============================================================================
+#
+# 2026년부터 data.krx.co.kr의 JSON 엔드포인트가 로그인 세션을 요구하면서,
+# KRX_ID/KRX_PW 없이 pykrx를 쓰면 빈 응답이 돌아온다
+# ("Expecting value: line 1 column 1 (char 0)" = JSON 파싱 실패).
+# 그래서 KRX 로그인이 필요 없는 대체 소스를 둔다.
+#
+#   MARKET_SOURCE = "auto"   pykrx 먼저, 실패하면 FDR 캐시 (기본)
+#                 = "pykrx"  pykrx만 (KRX_ID/KRX_PW 설정 시)
+#                 = "fdr"    FDR 캐시만 (KRX 계정 없이 쓰는 경우)
 
-def fetch_market_snapshot(base_date: str) -> pd.DataFrame:
-    """코스피 전 종목의 종가/시가총액/상장주식수/시장PBR/종목명."""
-    log(f"[1/5] pykrx {MARKET} 시장 데이터 수집 (기준일 {base_date})")
+MARKET_SOURCE = "auto"
 
+# FinanceDataReader가 관리하는 일자별 KRX 상장 종목 스냅샷 (GitHub 정적 파일).
+# KRX 로그인이 필요 없고 종가/시가총액/상장주식수를 모두 담고 있다. 단, PBR은 없다.
+FDR_CACHE_URL = ("https://raw.githubusercontent.com/FinanceData/fdr_krx_data_cache/"
+                 "refs/heads/master/data/listing/krx/{date}.csv")
+FDR_MARKET_ID = {"KOSPI": "STK", "KOSDAQ": "KSQ", "KONEX": "KNX"}
+FDR_LOOKBACK_DAYS = 10          # 휴장일이면 하루씩 되감으며 찾는다
+
+
+def _fetch_market_pykrx(base_date: str) -> pd.DataFrame:
+    """pykrx 경로. 시장PBR까지 한 번에 얻을 수 있는 정식 경로."""
     cap = stock.get_market_cap_by_ticker(base_date, market=MARKET)
     if cap is None or cap.empty:
-        raise SystemExit(f"{base_date} 기준 {MARKET} 시가총액 데이터를 받지 못했습니다.")
-    cap = cap.rename(columns={"종가": "종가", "시가총액": "시가총액", "상장주식수": "상장주식수"})
+        raise RuntimeError(f"{base_date} 기준 {MARKET} 시가총액 데이터가 비어 있습니다.")
 
-    fund = stock.get_market_fundamental_by_ticker(base_date, market=MARKET)
+    try:
+        fund = stock.get_market_fundamental_by_ticker(base_date, market=MARKET)
+    except Exception as exc:
+        log(f"      [warn] 시장PBR 조회 실패({type(exc).__name__}) — 괴리율은 공란이 됩니다.")
+        fund = None
     if fund is None or fund.empty:
-        log("  [warn] 시장 PBR(fundamental) 데이터를 받지 못해 시장PBR을 결측 처리합니다.")
         fund = pd.DataFrame(index=cap.index)
     if "PBR" not in fund.columns:
         fund["PBR"] = float("nan")
@@ -270,13 +290,80 @@ def fetch_market_snapshot(base_date: str) -> pd.DataFrame:
         except Exception:
             names[code] = ""
     df["종목명"] = df["종목코드"].map(names)
+    return df
 
+
+def _fetch_market_fdr(base_date: str) -> tuple[pd.DataFrame, str]:
+    """
+    FDR 캐시 경로. KRX 로그인 없이 동작하지만 시장PBR이 없다.
+    요청일에 파일이 없으면(휴장일) 하루씩 되감으며 찾는다.
+    반환: (데이터프레임, 실제로 사용한 날짜)
+    """
+    if MARKET not in FDR_MARKET_ID:
+        raise RuntimeError(f"대체 소스가 지원하지 않는 시장입니다: {MARKET}")
+
+    cur = dt.datetime.strptime(base_date, "%Y%m%d").date()
+    raw = None
+    used = ""
+    for _ in range(FDR_LOOKBACK_DAYS):
+        url = FDR_CACHE_URL.format(date=cur.isoformat())
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 200 and resp.content:
+                raw, used = resp.content, cur.strftime("%Y%m%d")
+                break
+        except Exception as exc:
+            log(f"      [warn] 대체 소스 조회 실패 {cur}: {type(exc).__name__}")
+        cur -= dt.timedelta(days=1)
+
+    if raw is None:
+        raise RuntimeError(
+            f"대체 소스에서 {base_date} 이전 {FDR_LOOKBACK_DAYS}일치 데이터를 찾지 못했습니다.")
+
+    df = pd.read_csv(io.BytesIO(raw), dtype={"Code": str, "MarketId": str})
+    df = df[df["MarketId"] == FDR_MARKET_ID[MARKET]].copy()
+    df = df.rename(columns={"Code": "종목코드", "Name": "종목명", "Close": "종가",
+                            "Marcap": "시가총액", "Stocks": "상장주식수"})
+    df["종목코드"] = df["종목코드"].astype(str).str.zfill(6)
+    df["시장PBR"] = float("nan")        # 이 소스에는 PBR이 없다
+    return df[["종목코드", "종목명", "종가", "시가총액", "상장주식수", "시장PBR"]], used
+
+
+def fetch_market_snapshot(base_date: str) -> tuple[pd.DataFrame, str, str]:
+    """
+    코스피 전 종목의 종가/시가총액/상장주식수/시장PBR/종목명.
+    반환: (데이터프레임, 실제 사용한 기준일, 사용한 소스명)
+    """
+    log(f"[1/5] {MARKET} 시장 데이터 수집 (기준일 {base_date}, source={MARKET_SOURCE})")
+    df, used_date, source = None, base_date, ""
+
+    if MARKET_SOURCE in ("auto", "pykrx"):
+        try:
+            df, source = _fetch_market_pykrx(base_date), "pykrx"
+        except Exception as exc:
+            msg = f"      [warn] pykrx 실패: {type(exc).__name__}: {exc}"
+            log(msg[:300])
+            if MARKET_SOURCE == "pykrx":
+                raise SystemExit(
+                    "pykrx 경로가 실패했습니다. KRX가 로그인 세션을 요구하는 경우이므로\n"
+                    "  (1) KRX_ID / KRX_PW 환경변수를 설정하거나\n"
+                    "  (2) MARKET_SOURCE = \"fdr\" 로 바꿔 대체 소스를 쓰세요.") from None
+            log("      → KRX 로그인이 필요한 상태로 보입니다. 대체 소스로 전환합니다.")
+
+    if df is None:
+        df, used_date = _fetch_market_fdr(base_date)
+        source = "fdr-cache"
+        log(f"      [info] 대체 소스 사용(기준일 {used_date}). "
+            f"이 소스에는 시장PBR이 없어 '시장PBR'·'괴리율(%)'은 공란이 됩니다.")
+        log("             계산PBR 스크리닝 자체에는 영향이 없습니다.")
+
+    for col in ("종가", "시가총액", "상장주식수", "시장PBR"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     # pykrx는 결측 PBR을 0으로 채워 내려주므로 결측으로 되돌린다.
-    df["시장PBR"] = pd.to_numeric(df["시장PBR"], errors="coerce")
     df.loc[df["시장PBR"] <= 0, "시장PBR"] = float("nan")
 
-    log(f"      전 종목 {len(df)}개 수집")
-    return df
+    log(f"      전 종목 {len(df)}개 수집 (source={source})")
+    return df.reset_index(drop=True), used_date, source
 
 
 # 우선주 종목명은 '...우', '...우B', '...2우B', '...3우C' 형태로 끝난다.
@@ -534,7 +621,8 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
     excluded = Excluded()
 
     # --- 1) 시장 데이터 ---------------------------------------------------
-    market = fetch_market_snapshot(base_date)
+    market, base_date, market_source = fetch_market_snapshot(base_date)
+    has_market_pbr = bool(market["시장PBR"].notna().any())
     name_by_code = dict(zip(market["종목코드"], market["종목명"]))
     pref_map = build_preferred_map(list(market["종목코드"]), name_by_code)
 
@@ -618,7 +706,8 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         calc_pbr = mcap / equity
         mkt_pbr = row["시장PBR"]
         gap = ((calc_pbr - mkt_pbr) / mkt_pbr * 100) if pd.notna(mkt_pbr) and mkt_pbr > 0 else float("nan")
-        if pd.isna(gap):
+        # 소스 전체에 PBR이 없는 경우(FDR 캐시)는 이미 한 번 안내했으므로 종목별로 반복하지 않는다.
+        if pd.isna(gap) and has_market_pbr:
             log(f"      [warn] {code} {name}: 시장PBR 결측 -> 괴리율 계산 불가(결과에는 포함)")
 
         records.append({
@@ -665,7 +754,7 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
 
     log("")
     log("=" * 72)
-    log(f"기준일자          : {base_date}")
+    log(f"기준일자          : {base_date} (시장데이터 source={market_source})")
     log(f"전체 상장종목     : {total_listed}")
     if debug:
         log(f"디버그 대상       : {len(cand)}종목 ({', '.join(only)})")
@@ -685,6 +774,9 @@ def run(limit: int = LIMIT_CANDIDATES, tickers: list[str] | None = None) -> pd.D
         n = int((df["우선주존재"] == "Y").sum())
         log(f"[note] 우선주 상장 종목 {n}개 포함 — 보통주 시총만 반영되어 "
             f"계산PBR이 과소 계산됨 (우선주존재=Y)")
+    if not has_market_pbr:
+        log("[note] 시장PBR을 제공하지 않는 소스라 '시장PBR'·'괴리율(%)'은 공란입니다 "
+            "(계산PBR 스크리닝은 정상)")
     log("[note] 금융지주/은행/보험/증권은 자본 구조가 달라 PBR 1배 미만을 "
         "그대로 저평가로 해석하면 안 됨")
     log("=" * 72)
@@ -718,23 +810,30 @@ def selftest() -> bool:
     """
     ok = True
     log("=" * 72)
-    log("[진단 1/3] pykrx 시장 데이터 (DART 키 불필요)")
+    log("[진단 1/3] 시장 데이터 (DART 키 불필요)")
     base_date = None
     try:
         base_date = resolve_base_date(BASE_DATE)
-        cap = stock.get_market_cap_by_ticker(base_date, market=MARKET)
-        fund = stock.get_market_fundamental_by_ticker(base_date, market=MARKET)
-        log(f"  [OK] 기준일 {base_date} / 시총 {len(cap)}종목 / 펀더멘털 {len(fund)}종목")
-        if SELFTEST_TICKER in cap.index:
-            r = cap.loc[SELFTEST_TICKER]
-            log(f"       {SELFTEST_TICKER} 종가={int(r['종가']):,} "
+        market, base_date, source = fetch_market_snapshot(base_date)
+        row = market[market["종목코드"] == SELFTEST_TICKER]
+        log(f"  [OK] source={source} / 기준일 {base_date} / {len(market)}종목")
+        if not row.empty:
+            r = row.iloc[0]
+            log(f"       {SELFTEST_TICKER} {r['종목명']} 종가={int(r['종가']):,} "
                 f"시총={r['시가총액'] / EOK:,.0f}억 주식수={int(r['상장주식수']):,}")
-        if "PBR" not in fund.columns:
-            log("  [warn] 펀더멘털에 PBR 컬럼이 없습니다 -> 시장PBR/괴리율이 전부 결측됩니다.")
+        big = int((market["시가총액"] >= MIN_MARKET_CAP_KRW).sum())
+        log(f"       시총 {MIN_MARKET_CAP_KRW / EOK:,.0f}억 이상 {big}종목 (DART 조회 대상 규모)")
+        if not market["시장PBR"].notna().any():
+            log("  [warn] 이 소스에는 시장PBR이 없어 '시장PBR'·'괴리율(%)'이 공란이 됩니다.")
+            log("         계산PBR 스크리닝에는 영향이 없습니다. 괴리율까지 원하면")
+            log("         KRX_ID/KRX_PW 환경변수를 설정해 pykrx 경로를 쓰세요.")
     except Exception as exc:
         ok = False
         log(f"  [FAIL] {type(exc).__name__}: {exc}")
-        log("       → KRX 서버 접속 문제입니다. 네트워크/프록시를 확인하고 잠시 후 재시도하세요.")
+        log("       → 주 소스(pykrx)와 대체 소스가 모두 실패했습니다.")
+        log("         'Expecting value: line 1 column 1' 은 KRX가 빈 응답을 준 것으로,")
+        log("         2026년부터 data.krx.co.kr이 로그인 세션을 요구하기 때문입니다.")
+        log("         KRX_ID/KRX_PW 를 설정하거나 네트워크를 확인하세요.")
         log("         (DART 키와는 무관한 단계입니다.)")
 
     log("")
