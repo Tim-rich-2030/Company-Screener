@@ -107,39 +107,91 @@ def cmd_site(args) -> int:
 
 
 def cmd_backfill(args) -> int:
-    """특정 종목의 과거 분기를 소급 수집한다 (최초 1회용)."""
+    """
+    과거 분기를 소급 수집한다.
+
+    한 번에 전 종목을 돌리면 몇 시간이 걸려 Actions 시간 제한에 걸린다. 그래서
+    --limit 만큼만 처리하고 어디까지 했는지 state 에 남긴다. 같은 명령을 반복
+    실행하면 남은 종목이 이어서 채워진다.
+    """
     client = _client()
-    codes = [c.strip().zfill(6) for c in (args.codes or "").split(",") if c.strip()]
-    if not codes:
-        raise SystemExit("--codes 005930,000660 형식으로 종목을 지정하세요.")
+    state = store.load_state()
+    done = set(state.setdefault("backfilled", []))
+
+    if args.codes:
+        codes = [c.strip().zfill(6) for c in args.codes.split(",") if c.strip()]
+        names = {}
+    elif args.all:
+        market, _, source = base.fetch_market_snapshot(base.resolve_base_date(""))
+        market = market[market["시가총액"] >= args.min_cap]
+        market = market[~market["종목명"].map(base.is_preferred_name)]
+        names = dict(zip(market["종목코드"], market["종목명"]))
+        codes = [c for c in market["종목코드"] if c not in done]
+        log(f"[소급] 대상 {len(market)}종목 중 미처리 {len(codes)}종목 "
+            f"(완료 {len(done)}) · source={source}")
+    else:
+        raise SystemExit("--codes 005930,000660 또는 --all 중 하나를 지정하세요.")
+
+    todo = codes[:args.limit] if args.limit else codes
+    if not todo:
+        log("[소급] 처리할 종목이 없습니다. 이미 전부 채워졌습니다.")
+        site.build()
+        return 0
 
     corp_map = base.fetch_corp_code_map(client.api_key)
     periods = base.build_period_candidates(
         base.resolve_base_date(""), lookback_years=args.years)
+    log(f"[소급] {len(todo)}종목 × 보고서 {len(periods)}건 "
+        f"({periods[-1].label} ~ {periods[0].label})")
 
-    for code in codes:
+    def work(code):
         corp_code = corp_map.get(code)
-        if not corp_code:
-            log(f"[소급] {code}: DART corp_code 없음 — 건너뜁니다")
-            continue
         record = store.load(code)
-        touched = []
-        for period in periods:
-            quarter = ingest.QUARTER_TO_REPRT
-            qnum = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}.get(period.reprt_code)
-            if qnum is None:
-                continue
-            hit = {"corp_code": corp_code, "code": code,
-                   "name": record.get("name", ""), "year": period.year,
-                   "reprt_code": period.reprt_code, "quarter": qnum,
-                   "rcept_no": "", "report_nm": period.label}
-            result = ingest.ingest_one(client, hit, record)
-            touched += result["quarters"]
+        if not corp_code:
+            return code, None, "DART corp_code 없음"
+        result = ingest.backfill_one(
+            client, corp_code, names.get(code, record.get("name", "")), periods, record)
         filled = prices.fill_quarter_prices(record)
-        store.save(record)
-        log(f"[소급] {code} {record.get('name','')}: 분기 {len(set(touched))}개, "
-            f"주가 {filled}개 채움 (누적 {len(record['quarters'])}분기)")
+        if record.get("quarters"):
+            store.save(record)
+        return code, {**result, "prices": filled,
+                      "total": len(record.get("quarters", {}))}, ""
 
+    ok, fail = 0, []
+    bar = tqdm(total=len(todo), desc="소급", unit="종목")
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, config.DART_WORKERS)) as pool:
+            futures = [pool.submit(work, c) for c in todo]
+            try:
+                for fut in as_completed(futures):
+                    code, result, err = fut.result()
+                    if result is None:
+                        fail.append(f"{code} ({err})")
+                    else:
+                        done.add(code)
+                        ok += 1
+                        if args.codes:      # 종목을 직접 지정했을 때만 상세 출력
+                            log(f"  {code}: 분기 {len(result['quarters'])}개 채움, "
+                                f"주가 {result['prices']}개 (누적 {result['total']}분기)")
+                    bar.update(1)
+            except (SystemExit, KeyboardInterrupt):
+                for f in futures:
+                    f.cancel()
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
+    finally:
+        bar.close()
+        state["backfilled"] = sorted(done)
+        store.save_state(state)
+
+    remaining = max(0, len(codes) - len(todo))
+    log("")
+    log(f"[소급] 완료 {ok}종목 / 실패 {len(fail)} / 남은 종목 {remaining}")
+    for line in fail[:10]:
+        log(f"  - {line}")
+    if remaining:
+        log(f"       같은 명령을 다시 실행하면 남은 {remaining}종목이 이어서 채워집니다.")
+    log(f"       DART 호출 {client.calls}건")
     site.build()
     return 0
 
@@ -156,9 +208,14 @@ def main(argv=None) -> int:
     st = sub.add_parser("site", help="사이트만 다시 생성")
     st.set_defaults(func=cmd_site)
 
-    bf = sub.add_parser("backfill", help="특정 종목 과거 소급 수집")
-    bf.add_argument("--codes", required=True, help="쉼표로 구분한 종목코드")
-    bf.add_argument("--years", type=int, default=3, help="몇 년치를 훑을지")
+    bf = sub.add_parser("backfill", help="과거 분기 소급 수집 (반복 실행하면 이어서 진행)")
+    bf.add_argument("--codes", help="쉼표로 구분한 종목코드. 없으면 --all 필요")
+    bf.add_argument("--all", action="store_true", help="시총 하한 이상 전 종목")
+    bf.add_argument("--years", type=int, default=3, help="몇 년치를 훑을지 (기본 3년)")
+    bf.add_argument("--limit", type=int, default=0,
+                    help="이번 실행에서 처리할 종목 수 (0=제한 없음). 나머지는 다음 실행으로")
+    bf.add_argument("--min-cap", type=int, default=config.MIN_MARKET_CAP_KRW,
+                    dest="min_cap", help="--all 일 때 시가총액 하한(원)")
     bf.set_defaults(func=cmd_backfill)
 
     args = p.parse_args(argv)

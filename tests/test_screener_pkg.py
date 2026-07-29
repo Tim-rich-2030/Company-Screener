@@ -288,6 +288,43 @@ def test_ingest_one():
     print("test_ingest_one: OK")
 
 
+def test_backfill_one_fetches_each_report_once():
+    """
+    소급 수집은 보고서를 기간마다 한 번씩만 받아야 한다.
+    ingest_one 을 반복 호출하면 차분용 직전 분기를 매번 다시 받아 호출이 두 배가 된다.
+    """
+    import kospi_value_screener as ksv
+
+    seen = []
+
+    class CountingDart(FakeDart):
+        def get_json(self, endpoint, params):
+            if endpoint == "fnlttSinglAcntAll.json":
+                seen.append((params["bsns_year"], params["reprt_code"], params["fs_div"]))
+            return FakeDart.get_json(self, endpoint, params)
+
+    periods = ksv.build_period_candidates("20260729", lookback_years=3)
+    rec = store.load("222222")
+    result = ingest.backfill_one(CountingDart(), "00000001", "소급테스트", periods, rec)
+
+    # CFS 가 바로 성공하므로 보고서 하나당 정확히 한 번
+    cfs = [s for s in seen if s[2] == "CFS"]
+    assert len(cfs) == len(set(cfs)) == result["fetched"], (len(cfs), len(set(cfs)))
+    assert result["fetched"] == len(periods), (result["fetched"], len(periods))
+
+    # 3년치면 분기가 10개는 넘어야 한다
+    assert len(rec["quarters"]) >= 10, sorted(rec["quarters"])
+    # 누계가 아니라 분기 단독으로 들어갔는지 (3Q누계 420 - 반기누계 250 = 170)
+    q3 = [k for k in rec["quarters"] if k.endswith("Q3")][0]
+    assert approx(rec["quarters"][q3]["매출액"], 170 * EOK), rec["quarters"][q3]
+    # 재무상태표와 주식수가 각 분기에 붙었는지 (한 시점 값을 전 분기에 복사하면 안 된다)
+    withbs = [k for k, v in rec["quarters"].items() if v.get("지배주주지분")]
+    assert len(withbs) >= 10, len(withbs)
+    assert all(rec["quarters"][k].get("상장주식수") == 10_000_000 for k in withbs)
+    print(f"test_backfill_one_fetches_each_report_once: OK "
+          f"({result['fetched']}건 조회 -> {len(rec['quarters'])}분기)")
+
+
 def test_fetch_shares_prefers_common():
     got = ingest.fetch_shares(FakeDart(), "00000001", 2025, "11014")
     assert got == 10_000_000, got   # 우선주 100만주를 더하면 안 된다
@@ -316,6 +353,7 @@ if __name__ == "__main__":
         test_timeseries_shape_and_yoy()
         test_site_build()
         test_ingest_one()
+        test_backfill_one_fetches_each_report_once()
         test_fetch_shares_prefers_common()
         test_price_backtracks_to_business_day()
         print("\nALL SCREENER PACKAGE TESTS PASSED")

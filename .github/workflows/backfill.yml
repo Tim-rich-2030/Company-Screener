@@ -1,0 +1,75 @@
+name: 과거 실적 소급 수집
+
+# 전 종목을 한 번에 돌리면 몇 시간이 걸려 작업 시간 제한에 걸린다.
+# 그래서 한 번에 정해진 수만 처리하고, 어디까지 했는지 store/state.json 에 남긴다.
+# 이 워크플로가 반복 실행되면서 남은 종목을 이어서 채운다.
+# 전부 채워지면 아무 일도 하지 않으므로, 그때 이 워크플로를 꺼도 된다.
+on:
+  schedule:
+    - cron: '0 */2 * * *'    # 2시간마다 — 코스피 시총 상위 285종목이면 하루 안에 끝난다
+  workflow_dispatch:
+    inputs:
+      years:
+        description: '몇 년치를 소급할지'
+        required: false
+        default: '3'
+      limit:
+        description: '이번 실행에서 처리할 종목 수'
+        required: false
+        default: '40'
+      codes:
+        description: '특정 종목만 (쉼표 구분). 비우면 전 종목 이어서'
+        required: false
+        default: ''
+
+concurrency:
+  group: screener-store      # update 워크플로와 store/ 를 동시에 건드리지 않게 한다
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -q pandas requests tqdm pykrx
+
+      - name: 소급 수집
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          YEARS: ${{ github.event.inputs.years || '3' }}
+          LIMIT: ${{ github.event.inputs.limit || '40' }}
+          CODES: ${{ github.event.inputs.codes }}
+        run: |
+          if [ -z "$DART_API_KEY" ]; then
+            echo "::error::DART_API_KEY 시크릿이 없습니다."
+            exit 1
+          fi
+          if [ -n "$CODES" ]; then
+            python -m screener backfill --codes "$CODES" --years "$YEARS"
+          else
+            python -m screener backfill --all --years "$YEARS" --limit "$LIMIT"
+          fi
+
+      - name: 변경분 커밋
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add store docs
+          if git diff --staged --quiet; then
+            echo "변경 없음 — 소급이 이미 끝났을 수 있습니다"
+          else
+            git commit -m "과거 실적 소급 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
