@@ -1,0 +1,70 @@
+name: 실적 수집 및 사이트 갱신
+
+# 자동 실행. DART 정기보고서는 장 마감 후 저녁에 몰리므로 그 뒤로 잡는다.
+# cron은 UTC 기준 — 한국시간(KST) = UTC + 9시간.
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'   # KST 평일 19:00 — 당일 제출분 1차 수집
+    - cron: '0 14 * * 1-5'   # KST 평일 23:00 — 마감 직전 제출분까지
+    - cron: '0 1 * * 6'      # KST 토요일 10:00 — 주간 누락분 보정
+  workflow_dispatch:          # 수동 실행 버튼
+    inputs:
+      days:
+        description: '며칠치 공시를 훑을지'
+        required: false
+        default: '3'
+
+concurrency:
+  group: screener-update      # 스케줄이 겹쳐도 동시에 커밋하지 않게 한다
+  cancel-in-progress: false
+
+permissions:
+  contents: write             # 수집 결과를 저장소에 커밋
+  pages: write
+  id-token: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -q pandas requests tqdm pykrx
+
+      - name: 공시 감지 및 수집
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          if [ -z "$DART_API_KEY" ]; then
+            echo "::error::DART_API_KEY 시크릿이 없습니다. Settings > Secrets and variables > Actions 에 추가하세요."
+            exit 1
+          fi
+          python -m screener update --days "${{ github.event.inputs.days || 3 }}"
+
+      - name: 변경분 커밋
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add store docs
+          if git diff --staged --quiet; then
+            echo "변경 없음 — 커밋 건너뜀"
+          else
+            git commit -m "실적 갱신 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            # 스케줄이 겹쳐 밀렸을 수 있으니 리베이스 후 푸시
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
