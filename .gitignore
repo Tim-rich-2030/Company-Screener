@@ -4,6 +4,11 @@ __pycache__/
 # 실행 산출물 (재생성되므로 커밋하지 않음)
 kospi_value_screener_stage1*.csv
 debug_*.csv
+dashboard*.html
+
+# 수집 원천 데이터. 용량이 크고 날짜별로 쌓인다.
+# 시계열 비교용으로 보관하고 싶으면 이 줄을 지우세요.
+data/
 
 # API 키가 들어갈 수 있는 파일
 .env
