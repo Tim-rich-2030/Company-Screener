@@ -63,6 +63,9 @@ tbody th{text-align:left;background:var(--bg);position:sticky;left:0;font-weight
 border-right:1px solid var(--line)}
 .pos{color:var(--pos)}.neg{color:var(--neg)}.na{color:var(--muted)}
 .chart{margin:6px 0 18px}
+.cscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.bval{font-size:9.5px;fill:var(--fg);font-variant-numeric:tabular-nums}
+.bqlab{font-size:9px;fill:var(--muted)}
 .chart h3{font-size:13px;margin:0 0 6px;color:var(--muted);font-weight:600}
 .legend{font-size:11px;color:var(--muted);margin-bottom:4px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
@@ -97,49 +100,78 @@ function renderList(){
     el.addEventListener('click', function(){ select(el.dataset.code); });
   });
 }
+function compact(v){
+  // 막대 위에 얹는 짧은 숫자. 억 단위가 커지면 '조'로 접는다.
+  var a = Math.abs(v);
+  if (a >= 10000) return (v / 10000).toFixed(a >= 100000 ? 0 : 1) + '조';
+  if (a >= 1000) return Math.round(v).toLocaleString('ko-KR');
+  return (Math.round(v * 10) / 10).toLocaleString('ko-KR');
+}
 function bars(labels, vals, title){
   // 분기 막대. 음수는 0선 아래로 내려 적자 분기가 한눈에 보이게 한다.
-  var W = Math.max(340, labels.length * 46), H = 92, pad = 18;
+  // 값은 막대 위(음수는 아래)에 직접 찍는다 — 눈금축을 읽는 것보다 빠르다.
+  var W = Math.max(340, labels.length * 52), H = 132, padT = 20, padB = 26;
   var ok = vals.filter(function(v){return v !== null;});
   if (!ok.length) return '';
   var hi = Math.max.apply(null, ok), lo = Math.min.apply(null, ok);
   if (hi < 0) hi = 0; if (lo > 0) lo = 0;
-  var span = (hi - lo) || 1, zero = pad + (hi / span) * (H - pad * 2);
-  var bw = (W - pad) / labels.length * 0.62, step = (W - pad) / labels.length;
-  var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
+  var span = (hi - lo) || 1, plot = H - padT - padB;
+  var zero = padT + (hi / span) * plot;
+  var step = (W - 8) / labels.length, bw = step * 0.6;
+  var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H +
+            '" role="img">';
   svg += '<line x1="0" y1="' + zero.toFixed(1) + '" x2="' + W + '" y2="' + zero.toFixed(1) +
          '" stroke="var(--line)"/>';
   for (var i = 0; i < labels.length; i++){
     var v = vals[i]; if (v === null) continue;
-    var x = pad / 2 + i * step + (step - bw) / 2;
-    var h = Math.abs(v) / span * (H - pad * 2);
+    var x = 4 + i * step + (step - bw) / 2;
+    var h = Math.abs(v) / span * plot;
     var y = v >= 0 ? zero - h : zero;
+    var cx = x + bw / 2;
     svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
       '" height="' + Math.max(1, h).toFixed(1) + '" rx="1.5" fill="' +
       (v >= 0 ? 'var(--pos)' : 'var(--neg)') + '"><title>' + labels[i] + ': ' +
       v.toLocaleString('ko-KR') + '</title></rect>';
+    // 값 라벨: 양수는 막대 위, 음수는 막대 아래
+    svg += '<text class="bval" x="' + cx.toFixed(1) + '" y="' +
+      (v >= 0 ? (y - 4).toFixed(1) : (y + h + 11).toFixed(1)) +
+      '" text-anchor="middle">' + esc(compact(v)) + '</text>';
+    // 분기 라벨은 2줄로 (2025Q3 -> 25 / Q3) 가로 공간을 아낀다
+    svg += '<text class="bqlab" x="' + cx.toFixed(1) + '" y="' + (H - 4).toFixed(1) +
+      '" text-anchor="middle">' + labels[i].slice(2) + '</text>';
   }
   svg += '</svg>';
-  return '<div class="chart"><h3>' + title + '</h3>' + svg + '</div>';
+  return '<div class="chart"><h3>' + title + '</h3><div class="cscroll">' + svg + '</div></div>';
 }
-function line(labels, vals, title){
-  var W = Math.max(340, labels.length * 46), H = 92, pad = 14;
+function line(labels, vals, title, digits){
+  var W = Math.max(340, labels.length * 52), H = 124, padT = 20, padB = 26, padX = 16;
   var ok = vals.filter(function(v){return v !== null;});
   if (ok.length < 2) return '';
   var hi = Math.max.apply(null, ok), lo = Math.min.apply(null, ok), span = (hi - lo) || 1;
-  var step = (W - pad * 2) / Math.max(1, labels.length - 1), d = '', started = false, dots = '';
+  var plot = H - padT - padB;
+  var step = (W - padX * 2) / Math.max(1, labels.length - 1);
+  var d = '', started = false, marks = '';
   for (var i = 0; i < labels.length; i++){
-    var v = vals[i]; if (v === null){ started = false; continue; }
-    var x = pad + i * step, y = pad + (hi - v) / span * (H - pad * 2);
-    d += (started ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-    dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
-      '" r="2.4" fill="var(--accent)"><title>' + labels[i] + ': ' +
-      v.toLocaleString('ko-KR') + '</title></circle>';
-    started = true;
+    var v = vals[i];
+    var x = padX + i * step;
+    if (v === null){ started = false; }
+    else {
+      var y = padT + (hi - v) / span * plot;
+      d += (started ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+      marks += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
+        '" r="2.6" fill="var(--accent)"><title>' + labels[i] + ': ' +
+        v.toLocaleString('ko-KR') + '</title></circle>';
+      marks += '<text class="bval" x="' + x.toFixed(1) + '" y="' + (y - 6).toFixed(1) +
+        '" text-anchor="middle">' + v.toFixed(digits == null ? 2 : digits) + '</text>';
+      started = true;
+    }
+    marks += '<text class="bqlab" x="' + x.toFixed(1) + '" y="' + (H - 4).toFixed(1) +
+      '" text-anchor="middle">' + labels[i].slice(2) + '</text>';
   }
-  return '<div class="chart"><h3>' + title + '</h3><svg width="' + W + '" height="' + H +
-    '" viewBox="0 0 ' + W + ' ' + H + '"><path d="' + d +
-    '" fill="none" stroke="var(--accent)" stroke-width="1.8"/>' + dots + '</svg></div>';
+  return '<div class="chart"><h3>' + title + '</h3><div class="cscroll"><svg width="' + W +
+    '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><path d="' + d +
+    '" fill="none" stroke="var(--accent)" stroke-width="1.8"/>' + marks +
+    '</svg></div></div>';
 }
 function select(code){
   current = code;
@@ -179,8 +211,8 @@ function select(code){
   }
   var charts = bars(oldFirst, seriesOld('매출액(억)'), '분기 매출액 (억원)') +
                bars(oldFirst, seriesOld('영업이익(억)'), '분기 영업이익 (억원)') +
-               line(oldFirst, seriesOld('PBR'), 'PBR 추이 (각 분기말 주가 기준)') +
-               line(oldFirst, seriesOld('PER'), 'PER 추이 (각 분기말 주가 기준)');
+               line(oldFirst, seriesOld('PBR'), 'PBR 추이 (각 분기말 주가 기준)', 2) +
+               line(oldFirst, seriesOld('PER'), 'PER 추이 (각 분기말 주가 기준)', 1);
 
   pane.innerHTML =
     '<div class="title"><h2>' + esc(c.name) + '</h2><span class="code">' + code + '</span>' +

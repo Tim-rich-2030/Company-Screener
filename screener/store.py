@@ -146,6 +146,62 @@ def set_price(record: dict, qkey: str, close: float, shares: float,
     return True
 
 
+def set_shares(record: dict, qkey: str, shares: float) -> bool:
+    """
+    주식수를 덮어쓰고 시가총액을 다시 계산한다.
+
+    merge_quarter 는 기존 값을 지키지만, 잘못 채워진 값을 바로잡을 때는 덮어써야 한다.
+    (수권주식수를 발행주식수로 잘못 읽어 시총이 부풀려진 경우)
+    """
+    slot = record.setdefault("quarters", {}).get(qkey)
+    if slot is None or not shares or shares <= 0:
+        return False
+    if slot.get("상장주식수") == shares and slot.get("시가총액"):
+        return False
+    slot["상장주식수"] = shares
+    close = slot.get("종가")
+    slot["시가총액"] = close * shares if close else None
+    return True
+
+
+def fill_missing_shares(record: dict) -> int:
+    """
+    주식수가 빈 분기를 가장 가까운 분기 값으로 메우고 시가총액을 다시 계산한다.
+
+    DART 주식총수현황이 분기보고서에는 없는 경우가 있어, 그대로 두면 그 분기의
+    PBR·PER 이 통째로 비어버린다. 주식수는 증자·감자가 없는 한 잘 바뀌지 않으므로
+    **직전 분기 값을 이어받는 것**이 오늘 주식수를 쓰는 것보다 훨씬 정확하다.
+    직전 값이 없는 가장 오래된 구간만 이후 값을 거꾸로 가져온다.
+    """
+    quarters = sort_quarters(record.get("quarters", {}), newest_first=False)
+    filled, last = 0, None
+    for qkey in quarters:                       # 과거 -> 현재: 직전 값을 이어받는다
+        slot = record["quarters"][qkey]
+        known = slot.get("상장주식수")
+        if known:
+            last = known
+        elif last:
+            slot["상장주식수"] = last
+            slot["shares_src"] = "carried"
+            filled += 1
+    nxt = None
+    for qkey in reversed(quarters):             # 가장 오래된 구간만 거꾸로 메운다
+        slot = record["quarters"][qkey]
+        known = slot.get("상장주식수")
+        if known:
+            nxt = known
+        elif nxt:
+            slot["상장주식수"] = nxt
+            slot["shares_src"] = "carried-back"
+            filled += 1
+    for qkey in quarters:                       # 시가총액 재계산
+        slot = record["quarters"][qkey]
+        close, shares = slot.get("종가"), slot.get("상장주식수")
+        if close and shares:
+            slot["시가총액"] = close * shares
+    return filled
+
+
 def missing_price_quarters(record: dict) -> list:
     """주가 스냅샷이 아직 없는 분기 목록 (최신순)."""
     return [k for k in sort_quarters(record.get("quarters", {}))

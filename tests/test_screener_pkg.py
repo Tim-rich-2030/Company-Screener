@@ -249,9 +249,13 @@ class FakeDart:
 
     def get_json(self, endpoint, params):
         if endpoint == "stockTotqySttus.json":
+            # 실제 응답 구조. isu_stock_totqy 는 정관상 '발행할' 주식의 총수(수권주식수)라
+            # 실제 발행주식수보다 훨씬 크다. 이걸 쓰면 시가총액이 통째로 부풀려진다.
             return {"status": "000", "list": [
-                {"se": "보통주", "isu_stock_totqy": "10,000,000"},
-                {"se": "우선주", "isu_stock_totqy": "1,000,000"}]}
+                {"se": "보통주", "isu_stock_totqy": "500,000,000",
+                 "istc_totqy": "10,000,000", "distb_stock_co": "9,500,000"},
+                {"se": "우선주", "isu_stock_totqy": "50,000,000",
+                 "istc_totqy": "1,000,000", "distb_stock_co": "1,000,000"}]}
         if params.get("fs_div") != "CFS":
             return {"status": "013"}
         q = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}[params["reprt_code"]]
@@ -325,10 +329,67 @@ def test_backfill_one_fetches_each_report_once():
           f"({result['fetched']}건 조회 -> {len(rec['quarters'])}분기)")
 
 
-def test_fetch_shares_prefers_common():
+def test_fetch_shares_uses_issued_not_authorized():
+    """
+    주식총수현황의 필드 이름이 헷갈린다.
+      isu_stock_totqy  발행'할' 주식의 총수 = 정관상 수권주식수 (실제보다 훨씬 큼)
+      istc_totqy       발행주식의 총수     = 실제 발행 수  <- 이걸 써야 한다
+    수권주식수를 쓰면 시가총액이 부풀려져 PBR·PER 이 통째로 틀린다.
+    """
     got = ingest.fetch_shares(FakeDart(), "00000001", 2025, "11014")
-    assert got == 10_000_000, got   # 우선주 100만주를 더하면 안 된다
-    print("test_fetch_shares_prefers_common: OK")
+    assert got == 10_000_000, got          # istc_totqy
+    assert got != 500_000_000, "수권주식수(발행할 주식의 총수)를 쓰고 있습니다"
+    assert got != 11_000_000, "우선주를 더하면 안 됩니다"
+
+    # istc_totqy 가 없으면 유통주식수로 대체
+    class NoIssued(FakeDart):
+        def get_json(self, endpoint, params):
+            if endpoint == "stockTotqySttus.json":
+                return {"status": "000", "list": [
+                    {"se": "보통주", "isu_stock_totqy": "500,000,000",
+                     "distb_stock_co": "9,500,000"}]}
+            return FakeDart.get_json(self, endpoint, params)
+    assert ingest.fetch_shares(NoIssued(), "00000001", 2025, "11014") == 9_500_000
+    print("test_fetch_shares_uses_issued_not_authorized: OK")
+
+
+def test_missing_shares_carried_from_neighbour():
+    """
+    분기보고서에 주식총수현황이 없는 경우가 있다. 그대로 두면 그 분기 PBR·PER 이
+    통째로 비므로 인접 분기 값을 이어받는다. 오늘 주식수를 쓰는 것보다 정확하다.
+    """
+    rec = {"code": "777777", "name": "주식수테스트", "quarters": {}}
+    for q in ("2025Q1", "2025Q2", "2025Q3", "2025Q4"):
+        store.merge_quarter(rec, q, {"매출액": 100.0})
+        store.set_price(rec, q, 1000.0, 0, "20250101", "test")
+    rec["quarters"]["2025Q2"]["상장주식수"] = 5_000_000
+
+    filled = store.fill_missing_shares(rec)
+    assert filled == 3, filled
+    assert rec["quarters"]["2025Q3"]["상장주식수"] == 5_000_000   # 직전에서 이어받음
+    assert rec["quarters"]["2025Q1"]["상장주식수"] == 5_000_000   # 가장 오래된 구간은 거꾸로
+    assert rec["quarters"]["2025Q1"]["shares_src"] == "carried-back"
+    assert rec["quarters"]["2025Q3"]["shares_src"] == "carried"
+    # 시가총액이 다시 계산되어야 한다
+    assert rec["quarters"]["2025Q3"]["시가총액"] == 1000.0 * 5_000_000
+    print("test_missing_shares_carried_from_neighbour: OK")
+
+
+def test_missing_mcap_yields_blank_not_zero():
+    """
+    시가총액이 없을 때 PBR 이 0.00 으로 찍히면 '계산된 값'처럼 보인다.
+    비어 있어야 정렬에서도 뒤로 가고 오해가 없다.
+    """
+    rec = sample_record()
+    for slot in rec["quarters"].values():
+        slot["시가총액"] = None
+    _, _, rows = None, None, None
+    ts = compute_timeseries(rec, qd.METRICS)
+    assert all(v is None for v in ts["metrics"]["PBR"]), ts["metrics"]["PBR"][:3]
+    assert all(v is None for v in ts["metrics"]["PER"]), ts["metrics"]["PER"][:3]
+    # 주가와 무관한 지표는 계속 나와야 한다
+    assert ts["metrics"]["ROE(%)"][0] is not None
+    print("test_missing_mcap_yields_blank_not_zero: OK")
 
 
 def test_price_backtracks_to_business_day():
@@ -354,7 +415,9 @@ if __name__ == "__main__":
         test_site_build()
         test_ingest_one()
         test_backfill_one_fetches_each_report_once()
-        test_fetch_shares_prefers_common()
+        test_fetch_shares_uses_issued_not_authorized()
+        test_missing_shares_carried_from_neighbour()
+        test_missing_mcap_yields_blank_not_zero()
         test_price_backtracks_to_business_day()
         print("\nALL SCREENER PACKAGE TESTS PASSED")
     finally:

@@ -36,6 +36,23 @@ def _fetch_report(client, corp_code: str, year: int, reprt_code: str,
     return None, ""
 
 
+# 주식총수현황 응답의 필드는 이름이 헷갈린다.
+#   isu_stock_totqy      발행'할' 주식의 총수  = 정관상 수권주식수. 시총 계산에 쓰면 안 된다
+#                        (삼성전자 200억주 — 실제 발행 59.7억주의 3.3배)
+#   istc_totqy           발행주식의 총수      = 실제로 발행된 주식 수. 이게 맞다
+#   distb_stock_co       유통주식수           = 발행주식 - 자기주식
+# 시가총액은 상장주식수(=발행주식총수) 기준이므로 istc_totqy 를 쓴다.
+SHARE_FIELDS = ("istc_totqy", "distb_stock_co")
+
+
+def _shares_from_item(item: dict) -> float | None:
+    for field in SHARE_FIELDS:
+        val = base.to_num(item.get(field))
+        if val and val > 0:
+            return val
+    return None
+
+
 def fetch_shares(client, corp_code: str, year: int, reprt_code: str) -> float | None:
     """
     그 보고서 시점의 보통주 발행주식총수.
@@ -48,17 +65,16 @@ def fetch_shares(client, corp_code: str, year: int, reprt_code: str) -> float | 
     })
     if payload is None or payload.get("status") != "000":
         return None
-    for item in payload.get("list", []):
-        se = base.norm_name(item.get("se"))
-        if se.startswith("보통주"):
-            val = base.to_num(item.get("isu_stock_totqy"))
-            if val and val > 0:
+    items = payload.get("list", [])
+    for item in items:                      # 보통주 우선
+        if base.norm_name(item.get("se")).startswith("보통주"):
+            val = _shares_from_item(item)
+            if val:
                 return val
-    # 종류별 구분이 없으면 합계라도 쓴다
-    for item in payload.get("list", []):
+    for item in items:                      # 종류 구분이 없으면 합계
         if base.norm_name(item.get("se")).startswith("합계"):
-            val = base.to_num(item.get("isu_stock_totqy"))
-            if val and val > 0:
+            val = _shares_from_item(item)
+            if val:
                 return val
     return None
 
