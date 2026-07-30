@@ -16,7 +16,7 @@ import quarterly_dashboard as qd
 
 from . import config
 from .metrics import compute_timeseries
-from .store import load_all, sort_quarters
+from .store import load_all, load_state, sort_quarters
 
 CSS = """
 :root{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;--head:#f7f8fa;
@@ -71,6 +71,9 @@ border-right:1px solid var(--line)}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
 .foot{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.7;max-width:70ch}
 .empty{color:var(--muted);padding:40px 0}
+.prog{display:inline-block;margin-top:4px;background:var(--chip);border-radius:999px;
+padding:2px 10px;font-size:12px}
+.prog.done{color:var(--pos)}
 """
 
 JS = r"""
@@ -269,10 +272,24 @@ def build(out_dir: str = None) -> str:
 
     all_q = sort_quarters({q for c in data.values() for q in c["quarters"]})
     span = f"{all_q[-1]} ~ {all_q[0]}" if all_q else "데이터 없음"
+
+    # 과거 소급이 어디까지 왔는지 — 여기 안 띄우면 저장소 파일을 세어 보는 수밖에 없다
+    state = load_state()
+    target = state.get("backfill_total")
+    if target and len(companies) < target:
+        pct = round(len(companies) / target * 100)
+        progress = (f'<span class="prog">과거 수집 {len(companies)} / {target}종목 '
+                    f'({pct}%) — 매시간 이어서 채우는 중</span>')
+    elif target:
+        progress = '<span class="prog done">과거 수집 완료</span>'
+    else:
+        progress = ""
+
     body = f"""<header>
 <h1>코스피 분기 실적 시계열</h1>
 <div class="meta">{len(companies)}종목 · {html.escape(span)} ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
+<div class="meta">{progress}</div>
 </header>
 <div class="layout">
   <aside class="side">

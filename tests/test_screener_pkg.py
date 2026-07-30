@@ -239,6 +239,35 @@ def test_site_build():
     print("test_site_build: OK")
 
 
+def test_site_shows_backfill_progress():
+    """
+    소급이 어디까지 왔는지 화면에 띄운다. 안 띄우면 저장소 파일을 세어 보는
+    수밖에 없어서, 다 모였는지 알 방법이 없다.
+    """
+    store.save(sample_record())
+    saved = len([r for r in store.load_all() if r.get("quarters")])
+
+    st = store.load_state()
+    st["backfill_total"] = saved + 200        # 아직 한참 남은 상태
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert f"{saved} / {saved + 200}종목" in doc, "진행률이 안 보입니다"
+    assert "%)" in doc
+
+    st = store.load_state()
+    st["backfill_total"] = saved              # 목표에 도달
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "과거 수집 완료" in doc, "완료 표시가 안 보입니다"
+
+    st = store.load_state()
+    st.pop("backfill_total", None)    # 소급을 한 번도 안 돌린 경우
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "과거 수집" not in doc
+    print("test_site_shows_backfill_progress: OK")
+
+
 # =============================================================================
 # 5) 수집 (DART 응답 흉내)
 # =============================================================================
@@ -413,6 +442,7 @@ if __name__ == "__main__":
         test_quarter_context_uses_that_quarters_price()
         test_timeseries_shape_and_yoy()
         test_site_build()
+        test_site_shows_backfill_progress()
         test_ingest_one()
         test_backfill_one_fetches_each_report_once()
         test_fetch_shares_uses_issued_not_authorized()

@@ -128,6 +128,8 @@ def cmd_backfill(args) -> int:
         market = market[~market["종목명"].map(base.is_preferred_name)]
         names = dict(zip(market["종목코드"], market["종목명"]))
         codes = [c for c in market["종목코드"] if c not in done]
+        # 사이트에 "80 / 285" 처럼 진행률을 띄우려면 목표 수를 알아야 한다
+        state["backfill_total"] = int(len(market))
         log(f"[소급] 대상 {len(market)}종목 중 미처리 {len(codes)}종목 "
             f"(완료 {len(done)}) · source={source}")
     else:
@@ -135,7 +137,10 @@ def cmd_backfill(args) -> int:
 
     todo = codes[:args.limit] if args.limit else codes
     if not todo:
-        log("[소급] 처리할 종목이 없습니다. 이미 전부 채워졌습니다.")
+        log(f"[소급] 처리할 종목이 없습니다. "
+            f"{len(done)}종목 전부 채워졌습니다.")
+        state.setdefault("backfill_done_at",
+                         dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
         store.save_state(state)     # store/ 가 없으면 뒤따르는 커밋 단계가 실패한다
         site.build()
         return 0
@@ -188,6 +193,10 @@ def cmd_backfill(args) -> int:
         store.save_state(state)
 
     remaining = max(0, len(codes) - len(todo))
+    if args.all and remaining == 0:
+        state["backfill_done_at"] = dt.datetime.now(dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        store.save_state(state)
     log("")
     log(f"[소급] 완료 {ok}종목 / 실패 {len(fail)} / 남은 종목 {remaining}")
     for line in fail[:10]:
