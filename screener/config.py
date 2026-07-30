@@ -16,7 +16,7 @@ SITE_DIR = os.environ.get("SCREENER_SITE", "docs")  # GitHub Pages 루트
 
 # --- 수집 --------------------------------------------------------------
 DART_WORKERS = 4
-MAX_TICKERS_PER_RUN = 200      # 한 번 실행에서 처리할 종목 수 상한 (Actions 시간 제한 대비)
+MAX_TICKERS_PER_RUN = 200      # update 한 번에 처리할 공시 수 상한 (Actions 시간 제한 대비)
 KEEP_QUARTERS = 24             # 종목당 보관할 분기 수 (6년)
 
 # --- 지표 --------------------------------------------------------------
