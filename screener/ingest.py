@@ -17,6 +17,20 @@ from .watch import alt_reprt_code
 QUARTER_TO_REPRT = {1: "11013", 2: "11012", 3: "11014", 4: "11011"}
 
 
+def detect_currency(payload: dict) -> str:
+    """
+    재무제표의 표시 통화. 두산밥캣처럼 USD로 공시하는 회사가 있다.
+
+    통화를 무시하면 달러 자기자본을 원화 시가총액으로 나누게 되어 PBR이 1,000배로
+    나온다. 실제로 그렇게 나왔다.
+    """
+    for item in payload.get("list", []):
+        cur = (item.get("currency") or "").strip().upper()
+        if cur:
+            return cur
+    return ""
+
+
 def _fetch_report(client, corp_code: str, year: int, reprt_code: str,
                   prefer: str = "CFS") -> tuple[dict | None, str]:
     """정상 응답과 사용한 재무제표 구분을 돌려준다."""
@@ -119,7 +133,8 @@ def ingest_one(client, hit: dict, record: dict) -> dict:
 
     record["name"] = hit.get("name") or record.get("name", "")
     meta = {"rcept_no": hit.get("rcept_no", ""), "fs_div": fs_div,
-            "report_nm": hit.get("report_nm", "")}
+            "report_nm": hit.get("report_nm", ""),
+            "currency": detect_currency(payload)}
 
     touched = []
     for (yy, qq), vals in quarterly.items():
@@ -177,7 +192,8 @@ def backfill_one(client, corp_code: str, name: str, periods: list, record: dict)
         got_shares = fetch_shares(client, corp_code, period.year, period.reprt_code)
         if got_shares:
             shares[(period.year, quarter)] = got_shares
-        meta[(period.year, quarter)] = {"fs_div": fs_div, "report_nm": period.label}
+        meta[(period.year, quarter)] = {"fs_div": fs_div, "report_nm": period.label,
+                                        "currency": detect_currency(payload)}
 
     if name:
         record["name"] = name

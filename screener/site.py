@@ -52,6 +52,7 @@ main{padding:16px 18px 50px;overflow-x:auto}
 .title .code{color:var(--muted);font-size:13px}
 .tag{background:var(--chip);color:var(--muted);border-radius:999px;
 padding:2px 9px;font-size:11px}
+.tag.warn{color:var(--neg)}
 .cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
 .card .k{color:var(--muted);font-size:11px}
@@ -221,7 +222,10 @@ function select(code){
     '<div class="title"><h2>' + esc(c.name) + '</h2><span class="code">' + code + '</span>' +
     (c.fs_div ? '<span class="tag">' + esc(c.fs_div) + '</span>' : '') +
     '<span class="tag">' + qs.length + '개 분기</span>' +
-    (c.report ? '<span class="tag">최근 ' + esc(c.report) + '</span>' : '') + '</div>' +
+    (c.report ? '<span class="tag">최근 ' + esc(c.report) + '</span>' : '') +
+    (c.currency && c.currency !== 'KRW'
+      ? '<span class="tag warn">' + esc(c.currency) + ' 공시 — PBR·PER 계산 안 함</span>' : '') +
+    '</div>' +
     '<div class="cards">' + cards + '</div>' + charts +
     '<div style="overflow-x:auto"><table><thead>' + head + '</thead><tbody>' + body +
     '</tbody></table></div>' +
@@ -268,6 +272,7 @@ def build(out_dir: str = None) -> str:
             "metrics": ts["metrics"],
             "fs_div": {"CFS": "연결", "OFS": "별도"}.get(latest_slot.get("fs_div"), ""),
             "report": latest_slot.get("report_nm", ""),
+            "currency": (latest_slot.get("currency") or "KRW").upper(),
         }
         companies.append({"code": rec["code"],
                           "name": rec.get("name") or rec["code"],

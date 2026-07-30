@@ -231,6 +231,17 @@ def cmd_fix_shares(args) -> int:
         if not corp_code:
             return record, 0, 0
         fixed = 0
+        # 통화도 함께 확인한다. USD 로 공시하는 회사(두산밥캣 등)를 원화로 취급하면
+        # 달러 자기자본을 원화 시총으로 나눠 PBR 이 1,000배로 나온다.
+        quarters = store.sort_quarters(record.get("quarters", {}))
+        if quarters:
+            newest = store.parse_quarter(quarters[0])
+            payload, _ = ingest._fetch_report(
+                client, corp_code, newest[0], ingest.QUARTER_TO_REPRT[newest[1]])
+            currency = ingest.detect_currency(payload) if payload else ""
+            if currency:
+                for qkey in quarters:
+                    record["quarters"][qkey]["currency"] = currency
         for qkey in store.sort_quarters(record.get("quarters", {})):
             parsed = store.parse_quarter(qkey)
             if not parsed:
@@ -284,7 +295,7 @@ def main(argv=None) -> int:
                     dest="min_cap", help="--all 일 때 시가총액 하한(원)")
     bf.set_defaults(func=cmd_backfill)
 
-    fx = sub.add_parser("fix-shares", help="저장된 종목의 주식수·시가총액 재계산")
+    fx = sub.add_parser("fix-shares", help="저장된 종목의 주식수·통화·시가총액 재확인")
     fx.add_argument("--codes", help="특정 종목만 (쉼표 구분). 비우면 전체")
     fx.set_defaults(func=cmd_fix_shares)
 
