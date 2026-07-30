@@ -274,6 +274,7 @@ def build(out_dir: str = None) -> str:
                           "latest": ts["quarters"][0]})
     companies.sort(key=lambda c: c["name"])
 
+    state = load_state()
     payload = {
         "built_at": state.get("backfill_last_run") or state.get("last_run") or "",
         "companies": companies,
@@ -287,7 +288,6 @@ def build(out_dir: str = None) -> str:
 
     # 상태를 한 화면에서 다 보이게 한다. 안 그러면 실행 기록·state.json·사이트
     # 세 군데를 돌아다녀야 "돌고 있나, 어디까지 됐나"를 알 수 있다.
-    state = load_state()
     target = state.get("backfill_total")
     chips = []
     if target and len(companies) < target:
