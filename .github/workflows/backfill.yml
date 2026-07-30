@@ -36,6 +36,8 @@ concurrency:
 
 permissions:
   contents: write
+  pages: write        # 이 워크플로도 docs/ 를 바꾸므로 직접 배포해야 한다
+  id-token: write
 
 jobs:
   backfill:
@@ -91,3 +93,15 @@ jobs:
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
+
+      # docs/ 를 커밋만 하고 끝내면 저장소만 최신이고 실제 사이트는 옛 화면이 남는다.
+      # GITHUB_TOKEN 으로 만든 푸시는 다른 워크플로의 on:push 를 깨우지 않으므로,
+      # 여기서 직접 배포해야 한다.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
