@@ -35,8 +35,13 @@ class QuarterContext:
         # 없으면 0 이 아니라 None. 0 으로 두면 PBR·PER 이 "0.00" 으로 찍혀
         # 마치 계산된 값처럼 보인다. None 이면 지표가 비고 정렬에서 뒤로 간다.
         self.price = self._slot.get("종가")
-        self.mcap = self._slot.get("시가총액")
         self.shares = self._slot.get("상장주식수")
+        # 재무제표를 USD로 내는 회사(예: 두산밥캣)가 있다. 달러 자기자본을 원화
+        # 시가총액으로 나누면 PBR이 1,000배로 나온다. 통화가 원화가 아니면
+        # 시가총액 기반 지표(PBR·PER·PSR)를 계산하지 않는다.
+        # ROE·영업이익률처럼 같은 통화끼리의 비율은 통화와 무관하므로 그대로 둔다.
+        self.currency = (self._slot.get("currency") or "KRW").upper()
+        self.mcap = self._slot.get("시가총액") if self.currency == "KRW" else None
 
     # --- 재무상태표 (이 분기 시점의 잔액) ---
     @property

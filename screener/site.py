@@ -16,7 +16,7 @@ import quarterly_dashboard as qd
 
 from . import config
 from .metrics import compute_timeseries
-from .store import load_all, sort_quarters
+from .store import load_all, load_state, sort_quarters
 
 CSS = """
 :root{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;--head:#f7f8fa;
@@ -52,6 +52,7 @@ main{padding:16px 18px 50px;overflow-x:auto}
 .title .code{color:var(--muted);font-size:13px}
 .tag{background:var(--chip);color:var(--muted);border-radius:999px;
 padding:2px 9px;font-size:11px}
+.tag.warn{color:var(--neg)}
 .cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
 .card .k{color:var(--muted);font-size:11px}
@@ -71,6 +72,9 @@ border-right:1px solid var(--line)}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
 .foot{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.7;max-width:70ch}
 .empty{color:var(--muted);padding:40px 0}
+.prog{display:inline-block;margin-top:4px;background:var(--chip);border-radius:999px;
+padding:2px 10px;font-size:12px}
+.prog.done{color:var(--pos)}
 """
 
 JS = r"""
@@ -218,7 +222,10 @@ function select(code){
     '<div class="title"><h2>' + esc(c.name) + '</h2><span class="code">' + code + '</span>' +
     (c.fs_div ? '<span class="tag">' + esc(c.fs_div) + '</span>' : '') +
     '<span class="tag">' + qs.length + '개 분기</span>' +
-    (c.report ? '<span class="tag">최근 ' + esc(c.report) + '</span>' : '') + '</div>' +
+    (c.report ? '<span class="tag">최근 ' + esc(c.report) + '</span>' : '') +
+    (c.currency && c.currency !== 'KRW'
+      ? '<span class="tag warn">' + esc(c.currency) + ' 공시 — PBR·PER 계산 안 함</span>' : '') +
+    '</div>' +
     '<div class="cards">' + cards + '</div>' + charts +
     '<div style="overflow-x:auto"><table><thead>' + head + '</thead><tbody>' + body +
     '</tbody></table></div>' +
@@ -229,6 +236,17 @@ function select(code){
     'PER은 최근 4분기 순이익이 적자면 계산하지 않습니다(–). ' +
     '금융지주·은행·보험은 자본 구조가 달라 제조업과 같은 기준으로 비교하면 안 됩니다.</div>';
 }
+// 마지막 실행 시각을 보는 사람의 시간대로, '몇 시간 전'까지 함께 보여준다
+document.querySelectorAll('time[datetime]').forEach(function(el){
+  var t = new Date(el.getAttribute('datetime'));
+  if (isNaN(t)) return;
+  var mins = Math.round((Date.now() - t.getTime()) / 60000);
+  var ago = mins < 60 ? mins + '분 전'
+          : mins < 1440 ? Math.round(mins / 60) + '시간 전'
+          : Math.round(mins / 1440) + '일 전';
+  el.textContent = t.toLocaleString('ko-KR', {month:'numeric', day:'numeric',
+    hour:'2-digit', minute:'2-digit'}) + ' (' + ago + ')';
+});
 search.addEventListener('input', renderList);
 renderList();
 if (DB.companies.length) select(DB.companies[0].code);
@@ -254,13 +272,16 @@ def build(out_dir: str = None) -> str:
             "metrics": ts["metrics"],
             "fs_div": {"CFS": "연결", "OFS": "별도"}.get(latest_slot.get("fs_div"), ""),
             "report": latest_slot.get("report_nm", ""),
+            "currency": (latest_slot.get("currency") or "KRW").upper(),
         }
         companies.append({"code": rec["code"],
                           "name": rec.get("name") or rec["code"],
                           "latest": ts["quarters"][0]})
     companies.sort(key=lambda c: c["name"])
 
+    state = load_state()
     payload = {
+        "built_at": state.get("backfill_last_run") or state.get("last_run") or "",
         "companies": companies,
         "data": data,
         "metrics": [{"key": m.key, "fmt": m.fmt, "better": m.better, "desc": m.desc}
@@ -269,10 +290,31 @@ def build(out_dir: str = None) -> str:
 
     all_q = sort_quarters({q for c in data.values() for q in c["quarters"]})
     span = f"{all_q[-1]} ~ {all_q[0]}" if all_q else "데이터 없음"
+
+    # 상태를 한 화면에서 다 보이게 한다. 안 그러면 실행 기록·state.json·사이트
+    # 세 군데를 돌아다녀야 "돌고 있나, 어디까지 됐나"를 알 수 있다.
+    target = state.get("backfill_total")
+    chips = []
+    if target and len(companies) < target:
+        pct = round(len(companies) / target * 100)
+        chips.append(f'<span class="prog">과거 수집 {len(companies)} / {target}종목 '
+                     f'({pct}%)</span>')
+    elif target:
+        chips.append('<span class="prog done">과거 수집 완료</span>')
+    for label, key in (("소급", "backfill_last_run"), ("공시 감지", "last_run")):
+        when = state.get(key)
+        if when:
+            chips.append(f'<span class="prog">{label} 마지막 실행 '
+                         f'<time datetime="{html.escape(when)}">{html.escape(when)}</time>'
+                         f'</span>')
+    progress = " ".join(chips)
+
     body = f"""<header>
 <h1>코스피 분기 실적 시계열</h1>
 <div class="meta">{len(companies)}종목 · {html.escape(span)} ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
+<div class="meta">{progress}</div>
+<div class="meta" id="built"></div>
 </header>
 <div class="layout">
   <aside class="side">

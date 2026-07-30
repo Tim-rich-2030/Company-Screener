@@ -239,6 +239,45 @@ def test_site_build():
     print("test_site_build: OK")
 
 
+def test_site_shows_backfill_progress():
+    """
+    소급이 어디까지 왔는지 화면에 띄운다. 안 띄우면 저장소 파일을 세어 보는
+    수밖에 없어서, 다 모였는지 알 방법이 없다.
+    """
+    store.save(sample_record())
+    saved = len([r for r in store.load_all() if r.get("quarters")])
+
+    st = store.load_state()
+    st["backfill_total"] = saved + 200        # 아직 한참 남은 상태
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert f"{saved} / {saved + 200}종목" in doc, "진행률이 안 보입니다"
+    assert "%)" in doc
+
+    st = store.load_state()
+    st["backfill_total"] = saved              # 목표에 도달
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "과거 수집 완료" in doc, "완료 표시가 안 보입니다"
+
+    # 마지막 실행 시각도 함께 보여야 "돌고 있나"를 사이트만 보고 알 수 있다
+    st = store.load_state()
+    st["backfill_last_run"] = "2026-07-30T03:55:00Z"
+    st["last_run"] = "2026-07-30T01:03:06Z"
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "소급 마지막 실행" in doc and "2026-07-30T03:55:00Z" in doc, "실행 시각이 없습니다"
+    assert "공시 감지 마지막 실행" in doc
+    assert "time[datetime]" in doc, "보는 사람 시간대로 바꾸는 스크립트가 없습니다"
+
+    st = store.load_state()
+    st.pop("backfill_total", None)    # 소급을 한 번도 안 돌린 경우
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "과거 수집" not in doc
+    print("test_site_shows_backfill_progress: OK")
+
+
 # =============================================================================
 # 5) 수집 (DART 응답 흉내)
 # =============================================================================
@@ -392,6 +431,41 @@ def test_missing_mcap_yields_blank_not_zero():
     print("test_missing_mcap_yields_blank_not_zero: OK")
 
 
+def test_foreign_currency_blanks_price_ratios():
+    """
+    두산밥캣처럼 재무제표를 USD 로 내는 회사가 있다. 달러 자기자본을 원화
+    시가총액으로 나누면 PBR 이 1,000배로 나온다 (실제로 그렇게 나왔다).
+    통화가 원화가 아니면 시총 기반 지표는 계산하지 않고, 통화와 무관한
+    비율(ROE·영업이익률)은 그대로 살린다.
+    """
+    rec = sample_record()
+    for slot in rec["quarters"].values():
+        slot["currency"] = "USD"
+    ts = compute_timeseries(rec, qd.METRICS)
+    assert all(v is None for v in ts["metrics"]["PBR"]), ts["metrics"]["PBR"][:3]
+    assert all(v is None for v in ts["metrics"]["PER"])
+    assert ts["metrics"]["ROE(%)"][0] is not None, "통화와 무관한 비율까지 지우면 안 됩니다"
+    assert ts["metrics"]["분기 영업이익률(%)"][0] is not None
+
+    # 원화면 그대로 계산된다
+    for slot in rec["quarters"].values():
+        slot["currency"] = "KRW"
+    assert compute_timeseries(rec, qd.METRICS)["metrics"]["PBR"][0] is not None
+    # currency 가 아예 없으면 원화로 본다 (예전에 수집한 데이터)
+    for slot in rec["quarters"].values():
+        slot.pop("currency", None)
+    assert compute_timeseries(rec, qd.METRICS)["metrics"]["PBR"][0] is not None
+    print("test_foreign_currency_blanks_price_ratios: OK")
+
+
+def test_detect_currency():
+    assert ingest.detect_currency({"list": [{"currency": "USD"}]}) == "USD"
+    assert ingest.detect_currency({"list": [{"currency": " krw "}]}) == "KRW"
+    assert ingest.detect_currency({"list": [{}]}) == ""
+    assert ingest.detect_currency({}) == ""
+    print("test_detect_currency: OK")
+
+
 def test_price_backtracks_to_business_day():
     closes = {"20251230": 70000.0, "20251229": 69000.0}
     # 12/31 이 휴장이면 직전 영업일로 되감는다
@@ -413,11 +487,14 @@ if __name__ == "__main__":
         test_quarter_context_uses_that_quarters_price()
         test_timeseries_shape_and_yoy()
         test_site_build()
+        test_site_shows_backfill_progress()
         test_ingest_one()
         test_backfill_one_fetches_each_report_once()
         test_fetch_shares_uses_issued_not_authorized()
         test_missing_shares_carried_from_neighbour()
         test_missing_mcap_yields_blank_not_zero()
+        test_foreign_currency_blanks_price_ratios()
+        test_detect_currency()
         test_price_backtracks_to_business_day()
         print("\nALL SCREENER PACKAGE TESTS PASSED")
     finally:

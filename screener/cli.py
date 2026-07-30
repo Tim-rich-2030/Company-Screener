@@ -128,6 +128,8 @@ def cmd_backfill(args) -> int:
         market = market[~market["종목명"].map(base.is_preferred_name)]
         names = dict(zip(market["종목코드"], market["종목명"]))
         codes = [c for c in market["종목코드"] if c not in done]
+        # 사이트에 "80 / 285" 처럼 진행률을 띄우려면 목표 수를 알아야 한다
+        state["backfill_total"] = int(len(market))
         log(f"[소급] 대상 {len(market)}종목 중 미처리 {len(codes)}종목 "
             f"(완료 {len(done)}) · source={source}")
     else:
@@ -135,7 +137,10 @@ def cmd_backfill(args) -> int:
 
     todo = codes[:args.limit] if args.limit else codes
     if not todo:
-        log("[소급] 처리할 종목이 없습니다. 이미 전부 채워졌습니다.")
+        log(f"[소급] 처리할 종목이 없습니다. "
+            f"{len(done)}종목 전부 채워졌습니다.")
+        state.setdefault("backfill_done_at",
+                         dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
         store.save_state(state)     # store/ 가 없으면 뒤따르는 커밋 단계가 실패한다
         site.build()
         return 0
@@ -185,9 +190,15 @@ def cmd_backfill(args) -> int:
     finally:
         bar.close()
         state["backfilled"] = sorted(done)
+        state["backfill_last_run"] = dt.datetime.now(dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
         store.save_state(state)
 
     remaining = max(0, len(codes) - len(todo))
+    if args.all and remaining == 0:
+        state["backfill_done_at"] = dt.datetime.now(dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        store.save_state(state)
     log("")
     log(f"[소급] 완료 {ok}종목 / 실패 {len(fail)} / 남은 종목 {remaining}")
     for line in fail[:10]:
@@ -220,6 +231,17 @@ def cmd_fix_shares(args) -> int:
         if not corp_code:
             return record, 0, 0
         fixed = 0
+        # 통화도 함께 확인한다. USD 로 공시하는 회사(두산밥캣 등)를 원화로 취급하면
+        # 달러 자기자본을 원화 시총으로 나눠 PBR 이 1,000배로 나온다.
+        quarters = store.sort_quarters(record.get("quarters", {}))
+        if quarters:
+            newest = store.parse_quarter(quarters[0])
+            payload, _ = ingest._fetch_report(
+                client, corp_code, newest[0], ingest.QUARTER_TO_REPRT[newest[1]])
+            currency = ingest.detect_currency(payload) if payload else ""
+            if currency:
+                for qkey in quarters:
+                    record["quarters"][qkey]["currency"] = currency
         for qkey in store.sort_quarters(record.get("quarters", {})):
             parsed = store.parse_quarter(qkey)
             if not parsed:
@@ -273,7 +295,7 @@ def main(argv=None) -> int:
                     dest="min_cap", help="--all 일 때 시가총액 하한(원)")
     bf.set_defaults(func=cmd_backfill)
 
-    fx = sub.add_parser("fix-shares", help="저장된 종목의 주식수·시가총액 재계산")
+    fx = sub.add_parser("fix-shares", help="저장된 종목의 주식수·통화·시가총액 재확인")
     fx.add_argument("--codes", help="특정 종목만 (쉼표 구분). 비우면 전체")
     fx.set_defaults(func=cmd_fix_shares)
 
