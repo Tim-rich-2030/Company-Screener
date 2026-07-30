@@ -260,6 +260,16 @@ def test_site_shows_backfill_progress():
     doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
     assert "과거 수집 완료" in doc, "완료 표시가 안 보입니다"
 
+    # 마지막 실행 시각도 함께 보여야 "돌고 있나"를 사이트만 보고 알 수 있다
+    st = store.load_state()
+    st["backfill_last_run"] = "2026-07-30T03:55:00Z"
+    st["last_run"] = "2026-07-30T01:03:06Z"
+    store.save_state(st)
+    doc = open(site.build(cfg.SITE_DIR), encoding="utf-8").read()
+    assert "소급 마지막 실행" in doc and "2026-07-30T03:55:00Z" in doc, "실행 시각이 없습니다"
+    assert "공시 감지 마지막 실행" in doc
+    assert "time[datetime]" in doc, "보는 사람 시간대로 바꾸는 스크립트가 없습니다"
+
     st = store.load_state()
     st.pop("backfill_total", None)    # 소급을 한 번도 안 돌린 경우
     store.save_state(st)

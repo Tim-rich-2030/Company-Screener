@@ -232,6 +232,17 @@ function select(code){
     'PER은 최근 4분기 순이익이 적자면 계산하지 않습니다(–). ' +
     '금융지주·은행·보험은 자본 구조가 달라 제조업과 같은 기준으로 비교하면 안 됩니다.</div>';
 }
+// 마지막 실행 시각을 보는 사람의 시간대로, '몇 시간 전'까지 함께 보여준다
+document.querySelectorAll('time[datetime]').forEach(function(el){
+  var t = new Date(el.getAttribute('datetime'));
+  if (isNaN(t)) return;
+  var mins = Math.round((Date.now() - t.getTime()) / 60000);
+  var ago = mins < 60 ? mins + '분 전'
+          : mins < 1440 ? Math.round(mins / 60) + '시간 전'
+          : Math.round(mins / 1440) + '일 전';
+  el.textContent = t.toLocaleString('ko-KR', {month:'numeric', day:'numeric',
+    hour:'2-digit', minute:'2-digit'}) + ' (' + ago + ')';
+});
 search.addEventListener('input', renderList);
 renderList();
 if (DB.companies.length) select(DB.companies[0].code);
@@ -264,6 +275,7 @@ def build(out_dir: str = None) -> str:
     companies.sort(key=lambda c: c["name"])
 
     payload = {
+        "built_at": state.get("backfill_last_run") or state.get("last_run") or "",
         "companies": companies,
         "data": data,
         "metrics": [{"key": m.key, "fmt": m.fmt, "better": m.better, "desc": m.desc}
@@ -273,23 +285,31 @@ def build(out_dir: str = None) -> str:
     all_q = sort_quarters({q for c in data.values() for q in c["quarters"]})
     span = f"{all_q[-1]} ~ {all_q[0]}" if all_q else "데이터 없음"
 
-    # 과거 소급이 어디까지 왔는지 — 여기 안 띄우면 저장소 파일을 세어 보는 수밖에 없다
+    # 상태를 한 화면에서 다 보이게 한다. 안 그러면 실행 기록·state.json·사이트
+    # 세 군데를 돌아다녀야 "돌고 있나, 어디까지 됐나"를 알 수 있다.
     state = load_state()
     target = state.get("backfill_total")
+    chips = []
     if target and len(companies) < target:
         pct = round(len(companies) / target * 100)
-        progress = (f'<span class="prog">과거 수집 {len(companies)} / {target}종목 '
-                    f'({pct}%) — 매시간 이어서 채우는 중</span>')
+        chips.append(f'<span class="prog">과거 수집 {len(companies)} / {target}종목 '
+                     f'({pct}%)</span>')
     elif target:
-        progress = '<span class="prog done">과거 수집 완료</span>'
-    else:
-        progress = ""
+        chips.append('<span class="prog done">과거 수집 완료</span>')
+    for label, key in (("소급", "backfill_last_run"), ("공시 감지", "last_run")):
+        when = state.get(key)
+        if when:
+            chips.append(f'<span class="prog">{label} 마지막 실행 '
+                         f'<time datetime="{html.escape(when)}">{html.escape(when)}</time>'
+                         f'</span>')
+    progress = " ".join(chips)
 
     body = f"""<header>
 <h1>코스피 분기 실적 시계열</h1>
 <div class="meta">{len(companies)}종목 · {html.escape(span)} ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
 <div class="meta">{progress}</div>
+<div class="meta" id="built"></div>
 </header>
 <div class="layout">
   <aside class="side">

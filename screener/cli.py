@@ -190,6 +190,8 @@ def cmd_backfill(args) -> int:
     finally:
         bar.close()
         state["backfilled"] = sorted(done)
+        state["backfill_last_run"] = dt.datetime.now(dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
         store.save_state(state)
 
     remaining = max(0, len(codes) - len(todo))
