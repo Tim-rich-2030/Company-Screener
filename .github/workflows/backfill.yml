@@ -6,7 +6,10 @@ name: 과거 실적 소급 수집
 # 전부 채워지면 아무 일도 하지 않으므로, 그때 이 워크플로를 꺼도 된다.
 on:
   schedule:
-    - cron: '0 */2 * * *'    # 2시간마다 — 코스피 시총 상위 285종목이면 하루 안에 끝난다
+    # GitHub 스케줄러는 지연·누락이 잦다(특히 저장소 생성 직후). 그래서 2시간이 아니라
+    # 매시간으로 두고 몇 번 걸러져도 진도가 나가게 한다. 채울 종목이 없으면 조회 없이
+    # 몇 초 만에 끝나므로 자주 돌아도 부담이 없다.
+    - cron: '7 * * * *'      # 매시 7분 — 정각은 전 세계 작업이 몰려 더 잘 밀린다
   workflow_dispatch:
     inputs:
       years:
@@ -16,7 +19,7 @@ on:
       limit:
         description: '이번 실행에서 처리할 종목 수'
         required: false
-        default: '40'
+        default: '120'
       codes:
         description: '특정 종목만 (쉼표 구분). 비우면 전 종목 이어서'
         required: false
@@ -42,7 +45,7 @@ permissions:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +61,7 @@ jobs:
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           YEARS: ${{ github.event.inputs.years || '3' }}
-          LIMIT: ${{ github.event.inputs.limit || '40' }}
+          LIMIT: ${{ github.event.inputs.limit || '120' }}
           CODES: ${{ github.event.inputs.codes }}
           MODE: ${{ github.event.inputs.mode || 'backfill' }}
         run: |
