@@ -203,14 +203,18 @@ class MetricContext:
         fmt="{:.2f}", better="low")
 def m_pbr(c):
     eq = c.equity
-    return c.mcap / eq if eq and eq > 0 else None
+    if not c.mcap or not eq or eq <= 0:
+        return None
+    return c.mcap / eq
 
 
 @metric("PER", desc="시가총액 / 최근 4분기 지배주주순이익 (TTM). 적자면 공란",
         fmt="{:.1f}", better="low")
 def m_per(c):
     ni = c.ttm("지배주주순이익") or c.ttm("순이익")
-    return c.mcap / ni if ni and ni > 0 else None
+    if not c.mcap or not ni or ni <= 0:
+        return None
+    return c.mcap / ni
 
 
 @metric("ROE(%)", desc="최근 4분기 지배주주순이익 / 자기자본 × 100",

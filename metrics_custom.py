@@ -50,7 +50,9 @@ from quarterly_dashboard import metric
 @metric("PSR", desc="시가총액 / 최근 4분기 매출액", fmt="{:.2f}", better="low")
 def psr(c):
     rev = c.ttm("매출액")
-    return c.mcap / rev if rev and rev > 0 else None
+    if not c.mcap or not rev or rev <= 0:
+        return None
+    return c.mcap / rev
 
 
 # --- 예시 2. 여러 지표를 조합 --------------------------------------------------
@@ -61,7 +63,7 @@ def psr(c):
 def pbr_over_roe(c):
     eq = c.equity
     ni = c.ttm("지배주주순이익") or c.ttm("순이익")
-    if not eq or eq <= 0 or ni is None or ni <= 0:
+    if not c.mcap or not eq or eq <= 0 or ni is None or ni <= 0:
         return None
     pbr = c.mcap / eq
     roe = ni / eq * 100

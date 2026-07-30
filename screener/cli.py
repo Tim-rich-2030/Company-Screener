@@ -53,6 +53,7 @@ def cmd_update(args) -> int:
         result = ingest.ingest_one(client, hit, record)
         if result["changed"]:
             prices.fill_quarter_prices(record)
+            store.fill_missing_shares(record)
             store.save(record)
         return hit, result
 
@@ -153,6 +154,7 @@ def cmd_backfill(args) -> int:
         result = ingest.backfill_one(
             client, corp_code, names.get(code, record.get("name", "")), periods, record)
         filled = prices.fill_quarter_prices(record)
+        store.fill_missing_shares(record)   # 주식수 없는 분기를 인접 분기에서 이어받는다
         if record.get("quarters"):
             store.save(record)
         return code, {**result, "prices": filled,
@@ -197,6 +199,58 @@ def cmd_backfill(args) -> int:
     return 0
 
 
+def cmd_fix_shares(args) -> int:
+    """
+    이미 저장된 종목의 주식수를 다시 받아 시가총액을 바로잡는다.
+
+    주식총수현황에서 `isu_stock_totqy`(발행'할' 주식의 총수 = 정관상 수권주식수)를
+    발행주식수로 잘못 읽던 시절의 데이터를 고치기 위한 명령이다. 그대로 두면
+    시가총액이 부풀려져 PBR·PER 이 통째로 틀린다.
+    """
+    client = _client()
+    corp_map = base.fetch_corp_code_map(client.api_key)
+    records = store.load_all()
+    if args.codes:
+        want = {c.strip().zfill(6) for c in args.codes.split(",") if c.strip()}
+        records = [r for r in records if r["code"] in want]
+    log(f"[복구] {len(records)}종목의 주식수를 다시 받습니다")
+
+    def work(record):
+        corp_code = corp_map.get(record["code"])
+        if not corp_code:
+            return record, 0, 0
+        fixed = 0
+        for qkey in store.sort_quarters(record.get("quarters", {})):
+            parsed = store.parse_quarter(qkey)
+            if not parsed:
+                continue
+            reprt = ingest.QUARTER_TO_REPRT[parsed[1]]
+            shares = ingest.fetch_shares(client, corp_code, parsed[0], reprt)
+            if shares and store.set_shares(record, qkey, shares):
+                fixed += 1
+        carried = store.fill_missing_shares(record)
+        store.save(record)
+        return record, fixed, carried
+
+    total_fixed = total_carried = 0
+    bar = tqdm(total=len(records), desc="주식수 복구", unit="종목")
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, config.DART_WORKERS)) as pool:
+            futures = [pool.submit(work, r) for r in records]
+            for fut in as_completed(futures):
+                _, fixed, carried = fut.result()
+                total_fixed += fixed
+                total_carried += carried
+                bar.update(1)
+    finally:
+        bar.close()
+
+    log(f"[복구] 재조회로 채운 분기 {total_fixed}개 / 인접 분기에서 이어받은 분기 "
+        f"{total_carried}개 / DART 호출 {client.calls}건")
+    site.build()
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="screener", description="코스피 분기 실적 시계열")
     sub = p.add_subparsers(dest="cmd")
@@ -218,6 +272,10 @@ def main(argv=None) -> int:
     bf.add_argument("--min-cap", type=int, default=config.MIN_MARKET_CAP_KRW,
                     dest="min_cap", help="--all 일 때 시가총액 하한(원)")
     bf.set_defaults(func=cmd_backfill)
+
+    fx = sub.add_parser("fix-shares", help="저장된 종목의 주식수·시가총액 재계산")
+    fx.add_argument("--codes", help="특정 종목만 (쉼표 구분). 비우면 전체")
+    fx.set_defaults(func=cmd_fix_shares)
 
     args = p.parse_args(argv)
     if not getattr(args, "func", None):

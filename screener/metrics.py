@@ -32,9 +32,11 @@ class QuarterContext:
         self.code = record.get("code", "")
         self.name = record.get("name", "")
         self.qkey = quarters[index]
-        self.price = self._slot.get("종가") or 0.0
-        self.mcap = self._slot.get("시가총액") or 0.0
-        self.shares = self._slot.get("상장주식수") or 0.0
+        # 없으면 0 이 아니라 None. 0 으로 두면 PBR·PER 이 "0.00" 으로 찍혀
+        # 마치 계산된 값처럼 보인다. None 이면 지표가 비고 정렬에서 뒤로 간다.
+        self.price = self._slot.get("종가")
+        self.mcap = self._slot.get("시가총액")
+        self.shares = self._slot.get("상장주식수")
 
     # --- 재무상태표 (이 분기 시점의 잔액) ---
     @property

@@ -21,6 +21,14 @@ on:
         description: '특정 종목만 (쉼표 구분). 비우면 전 종목 이어서'
         required: false
         default: ''
+      mode:
+        description: '무엇을 할지'
+        required: false
+        default: 'backfill'
+        type: choice
+        options:
+          - backfill      # 과거 분기 수집 (기본)
+          - fix-shares    # 저장된 종목의 주식수·시가총액만 다시 계산
 
 concurrency:
   group: screener-store      # update 워크플로와 store/ 를 동시에 건드리지 않게 한다
@@ -50,18 +58,28 @@ jobs:
           YEARS: ${{ github.event.inputs.years || '3' }}
           LIMIT: ${{ github.event.inputs.limit || '40' }}
           CODES: ${{ github.event.inputs.codes }}
+          MODE: ${{ github.event.inputs.mode || 'backfill' }}
         run: |
           if [ -z "$DART_API_KEY" ]; then
             echo "::error::DART_API_KEY 시크릿이 없습니다."
             exit 1
           fi
-          if [ -n "$CODES" ]; then
+          if [ "$MODE" = "fix-shares" ]; then
+            # 잘못 채워진 주식수(수권주식수)를 발행주식수로 바로잡고 시총 재계산
+            if [ -n "$CODES" ]; then
+              python -m screener fix-shares --codes "$CODES"
+            else
+              python -m screener fix-shares
+            fi
+          elif [ -n "$CODES" ]; then
             python -m screener backfill --codes "$CODES" --years "$YEARS"
           else
             python -m screener backfill --all --years "$YEARS" --limit "$LIMIT"
           fi
 
       - name: 변경분 커밋
+        env:
+          MODE: ${{ github.event.inputs.mode || 'backfill' }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -69,7 +87,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "변경 없음 — 소급이 이미 끝났을 수 있습니다"
           else
-            git commit -m "과거 실적 소급 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git commit -m "${MODE:-소급} 실행 $(date -u '+%Y-%m-%d %H:%M UTC')"
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
