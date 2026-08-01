@@ -62,7 +62,7 @@ body{
   position:absolute;left:0;top:0;width:300px;height:112px;
   offset-rotate:0deg;                 /* 회전 없이 항상 수평 */
   offset-anchor:50% 100%;             /* 밑면 중앙이 레일에 닿게 */
-  z-index:6;
+  z-index:6;transition:opacity .35s;
 }
 #cartInner{position:absolute;left:0;top:0;width:100%;height:100%;
   transform:translateY(-6px);will-change:transform}
@@ -174,11 +174,12 @@ body{
   font-size:420px;font-weight:900;letter-spacing:-20px;color:#fff;
   text-shadow:0 0 60px rgba(226,59,59,.85);opacity:0;
 }
-#count.go{animation:tick .4s ease-out both}
+#count.go{animation:tick 1s ease-out both}
 @keyframes tick{
   0%{opacity:0;transform:scale(.86)}
-  18%{opacity:1;transform:scale(1)}
-  100%{opacity:0;transform:scale(1.35)}
+  10%{opacity:1;transform:scale(1)}
+  62%{opacity:1;transform:scale(1.06)}     /* 한 박자 머무른 뒤에 사라진다 */
+  100%{opacity:0;transform:scale(1.4)}
 }
 </style>
 </head>
@@ -253,7 +254,11 @@ function rng(seed){
    translateX)가 카트를 따라간다. 화면 폭 1080 에 다 넣으면 지점 간격이 40px라
    카트도 개미도 안 보인다. 그래서 월드를 길게 깔고 가로로 흘린다.
    =========================================================================== */
-const P_MIN = 115, P_MAX = 320;         // 프리퀄의 130만~300만까지 담아야 한다
+// 프리퀄의 130만~300만까지 담아야 한다. 위쪽 여유(P_MAX)를 300만보다 넉넉히 두는
+// 이유는, 카트에 앉은 개미가 레일 위로 300px 가까이 솟아 제목과 겹치기 때문이다.
+// 세로를 눌러 담은 만큼 가로 간격도 같은 비율로 줄여야 경사가 그대로 유지된다.
+const P_MIN = 115, P_MAX = 355;
+const DX_SCALE = 0.85;
 const Y_TOP = 300, Y_BOT = 1380;
 const GROUND_Y = 1600;
 const CAM_X = 400;                      // 화면에서 카트가 놓일 x
@@ -285,8 +290,9 @@ const I_PEAK = 0, I_BOTTOM = 9;
 
 const ANCH = [];
 {
-  let x = 120;
-  for(const [p, dx] of SPEC){ x += dx; ANCH.push([x, py(p), p]); }
+  // 시작 x. 카트가 고점에 서 있는 동안 화면 왼쪽으로 잘리지 않을 만큼 띄운다.
+  let x = 340;
+  for(const [p, dx] of SPEC){ x += dx * DX_SCALE; ANCH.push([x, py(p), p]); }
 }
 const ax = i => ANCH[i][0], ay = i => ANCH[i][1];
 const WORLD_W = ax(ANCH.length - 1) + 900;
@@ -428,8 +434,8 @@ function tag(x, y, text, size, opacity){
   t.textContent = text;
   return t;
 }
-// 고점 라벨은 평평한 꼭대기 한가운데. 첫 지점에 붙이면 화면 왼쪽으로 잘린다.
-tag((ax(I_PEAK) + ax(I_PEAK + 1)) / 2, ay(I_PEAK) - 54, "고점 300만", 34, .62);
+// 고점 라벨은 평평한 꼭대기의 오른쪽 끝. 한가운데 두면 거기 서 있는 카트에 가린다.
+tag(ax(I_PEAK + 1) + 26, ay(I_PEAK) - 18, "고점 300만", 34, .62).setAttribute("text-anchor", "start");
 tag(ax(I_BOTTOM), ay(I_BOTTOM) + 64, "저점 130만", 34, .62);
 
 // 상한가 깃발. 승강장에 세워둔 카트가 이 자리를 덮으므로 카트보다 높이 띄운다.
@@ -649,10 +655,11 @@ const BEATS = [
   // 5번과 똑같은 말풍선. 반복이 요점이다.
   {a:12, A:"sit_02_hwanho",  B:"sit_02_hwanho",  say:"300만 가자!", cls:"hype"},
   // 두 번째 상승의 꼭대기(200만)를 지나 다시 떨어지기 시작하는 비트.
-  // 대사는 정점이 아니라 내려가기 시작한 뒤에 나와야 말이 된다 — sayAt 으로 늦춘다.
-  {a:14, A:"sit_03_bulan",   B:"sit_03_bulan",   say:"살려줘, 다신 안 해",
-   sayAt:.52, shake:true, shakeAt:.66},
-  // 같은 대사가 바닥에서 더 크게, 떨면서 한 번 더.
+  // 상기된 얼굴은 고점을 넘을 때까지 그대로 두고, 넘어간 뒤에 바뀐다 (faceAt).
+  // 대사는 없다 — 표정만으로 넘어가고, 비명은 바닥에서 한 번만 지른다.
+  {a:14, A:"sit_02_hwanho",  B:"sit_02_hwanho",
+   A2:"sit_03_bulan", B2:"sit_03_bulan", faceAt:.46, shake:true, shakeAt:.66},
+  // 급락한 저점에서 딱 한 번, 크게 떨면서.
   {a:15, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"살려줘, 다신 안 해",
    cls:"panic", ease:u => Math.pow(u, 2.2), shake:true, shakeAt:.12},
   {a:17, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"제발 본전만"},
@@ -668,9 +675,10 @@ BEATS.forEach(b => {
   b.idx = I_A0 + b.a;                     // 전체 지점 배열에서의 위치
 });
 
-const OPEN_MS = 1200, PREQ_MS = 4000, BEAT_MS = 3000;
+// 카운트다운은 숫자당 1초 — 실제로 초를 세는 속도여야 한다
+const COUNT_MS = 1000, OPEN_MS = COUNT_MS * 3, PREQ_MS = 4000, BEAT_MS = 3000;
 const BEATS_AT = OPEN_MS + PREQ_MS;
-const TOTAL_MS = BEATS_AT + BEATS.length * BEAT_MS;      // 53.2초
+const TOTAL_MS = BEATS_AT + BEATS.length * BEAT_MS;      // 55초
 
 /* ===========================================================================
    5. 요소
@@ -786,7 +794,7 @@ function placeBubble(worldX, worldY, cam){
   bubble.style.top  = worldY + "px";
 }
 
-let said = false;
+let said = false, faced = false;
 function applyBeat(i){
   const b = BEATS[i];
   setSprite(antA, "A", b.A);  setSprite(antB, "B", b.B);
@@ -796,7 +804,7 @@ function applyBeat(i){
   walkA.style.display = b.rideA ? "none" : "block";
   walkB.style.display = b.rideB ? "none" : "block";
 
-  said = false;
+  said = false; faced = false;
   if(b.say && !b.sayAt){ say(b.say, b.cls); said = true; }
   else hush();
   stage.classList.remove("shake");
@@ -806,9 +814,9 @@ function frame(now){
   if(!t0) t0 = now;
   const t = now - t0;
 
-  // --- 오프닝: 3 · 2 · 1 (각 0.4초) ---
+  // --- 오프닝: 3 · 2 · 1 (각 1초) ---
   if(t < OPEN_MS){
-    const n = 3 - Math.floor(t / 400);
+    const n = 3 - Math.floor(t / COUNT_MS);
     if(n !== lastCount){
       lastCount = n;
       const c = $("count");
@@ -816,10 +824,12 @@ function frame(now){
       c.classList.remove("go"); void c.offsetWidth; c.classList.add("go");
     }
     camera(0);
+    cart.style.opacity = 0;      // 카운트다운 3초 동안은 타이틀 카드만 보인다
     requestAnimationFrame(frame);
     return;
   }
   $("count").style.display = "none";
+  cart.style.opacity = 1;
 
   // --- 프리퀄: 실제 구간을 열차가 달린다 (300만 → 130만 → 상한가 171.8만) ---
   //     내려오는 도중 개미 둘이 카트에서 뛰어내려 바닥에 착지하고, 빈 카트는
@@ -877,6 +887,12 @@ function frame(now){
 
   // 대사를 비트 중간에 띄우는 경우 (정점을 지나 내려가기 시작한 뒤 등)
   if(b.sayAt && !said && u >= b.sayAt){ say(b.say, b.cls); said = true; }
+  // 표정도 비트 중간에 바꿀 수 있다 — 고점을 넘어가는 순간이 그렇다
+  if(b.faceAt && !faced && u >= b.faceAt){
+    faced = true;
+    setSprite(antA, "A", b.A2);  setSprite(antB, "B", b.B2);
+    setSprite(walkA, "A", b.A2); setSprite(walkB, "B", b.B2);
+  }
   // 흔들림도 실제로 떨어지기 시작한 뒤에만 준다
   if(b.shake) stage.classList.toggle("shake", u > (b.shakeAt ?? .35));
 
