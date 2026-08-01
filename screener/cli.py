@@ -248,8 +248,18 @@ def cmd_fix_shares(args) -> int:
                 continue
             reprt = ingest.QUARTER_TO_REPRT[parsed[1]]
             shares = ingest.fetch_shares(client, corp_code, parsed[0], reprt)
+            if shares and store.shares_look_wrong(record, qkey, shares):
+                log(f"[복구] {record['code']} {qkey} 주식수 {shares:,.0f} 는 앞뒤 분기와 "
+                    f"자릿수가 달라 버립니다")
+                continue
             if shares and store.set_shares(record, qkey, shares):
                 fixed += 1
+        # 이미 저장돼 있던 이상치도 걷어낸다. 다시 받아도 DART 가 같은 값을 주면
+        # 위에서 걸러지기만 할 뿐, 저장된 값은 그대로 남기 때문이다.
+        dropped = store.drop_implausible_shares(record)
+        if dropped:
+            log(f"[복구] {record['code']} {record.get('name','')} 주식수 이상치 제거: "
+                f"{', '.join(dropped)}")
         carried = store.fill_missing_shares(record)
         store.save(record)
         return record, fixed, carried
