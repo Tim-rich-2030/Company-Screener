@@ -1,4 +1,4 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>코스피 분기 실적 시계열</title><style>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>코스피 분기 실적 시계열</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0f1115"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="코스피 실적"><style>
 :root{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;--head:#f7f8fa;
 --pos:#0a7c3f;--neg:#c02626;--accent:#1a56db;--chip:#eef2ff;--sel:#dbe4ff}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8ec;--muted:#9aa1ac;
@@ -37,6 +37,12 @@ padding:2px 9px;font-size:11px}
    "싸 보이는데 살 수가 없는" 종목을 고르게 된다. */
 .halt{font-style:normal;font-size:11px;font-weight:700;margin-left:6px;
   padding:1px 5px;border-radius:4px;background:var(--neg);color:#fff;opacity:.85}
+/* 홈 화면에서 띄웠을 때 상태바 밑으로 내용이 들어가지 않게 */
+body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+.newbuild{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));
+  z-index:50;padding:12px 16px;border-radius:10px;background:var(--pos);
+  color:#fff;font-weight:700;font-size:14px;text-align:center;cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,.35)}
 .cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
 .card .k{color:var(--muted);font-size:11px}
@@ -63,7 +69,7 @@ padding:2px 10px;font-size:12px}
 <h1>코스피 분기 실적 시계열</h1>
 <div class="meta">292종목 · 2022Q1 ~ 2026Q1 ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
-<div class="meta"><span class="prog done">과거 수집 완료</span> <span class="prog">소급 마지막 실행 <time datetime="2026-07-31T08:27:18Z">2026-07-31T08:27:18Z</time></span> <span class="prog">공시 감지 마지막 실행 <time datetime="2026-08-01T23:23:45Z">2026-08-01T23:23:45Z</time></span></div>
+<div class="meta"><span class="prog done">과거 수집 완료</span> <span class="prog">소급 마지막 실행 <time datetime="2026-07-31T08:27:18Z">2026-07-31T08:27:18Z</time></span> <span class="prog">공시 감지 마지막 실행 <time datetime="2026-08-01T23:50:10Z">2026-08-01T23:50:10Z</time></span></div>
 <div class="meta" id="built"></div>
 </header>
 <div class="layout">
@@ -256,4 +262,26 @@ document.querySelectorAll('time[datetime]').forEach(function(el){
 search.addEventListener('input', renderList);
 renderList();
 if (DB.companies.length) select(DB.companies[0].code);
+</script><script>
+if ('serviceWorker' in navigator) {
+  addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').then(function(reg){
+      reg.addEventListener('updatefound', function(){
+        var sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', function(){
+          // 이미 돌고 있던 워커가 있는데 새 워커가 대기 = 새 빌드가 올라왔다
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            var bar = document.createElement('div');
+            bar.className = 'newbuild';
+            bar.textContent = '새 데이터가 있습니다 — 눌러서 새로고침';
+            bar.onclick = function(){ location.reload(); };
+            document.body.appendChild(bar);
+          }
+        });
+      });
+      setInterval(function(){ reg.update(); }, 15 * 60 * 1000);
+    }).catch(function(){});
+  });
+}
 </script></body></html>
