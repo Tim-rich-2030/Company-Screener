@@ -57,6 +57,12 @@ padding:2px 9px;font-size:11px}
    "싸 보이는데 살 수가 없는" 종목을 고르게 된다. */
 .halt{font-style:normal;font-size:11px;font-weight:700;margin-left:6px;
   padding:1px 5px;border-radius:4px;background:var(--neg);color:#fff;opacity:.85}
+/* 홈 화면에서 띄웠을 때 상태바 밑으로 내용이 들어가지 않게 */
+body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+.newbuild{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));
+  z-index:50;padding:12px 16px;border-radius:10px;background:var(--pos);
+  color:#fff;font-weight:700;font-size:14px;text-align:center;cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,.35)}
 .cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
 .card .k{color:var(--muted);font-size:11px}
@@ -344,14 +350,120 @@ def build(out_dir: str = None) -> str:
 
     script = JS.replace("__DATA__", json.dumps(payload, ensure_ascii=False))
     doc = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
-           '<meta name="viewport" content="width=device-width,initial-scale=1">'
+           '<meta name="viewport" content="width=device-width,initial-scale=1,'
+           'viewport-fit=cover">'
            '<title>코스피 분기 실적 시계열</title>'
+           # 홈 화면에 추가하면 주소창 없이 앱처럼 뜬다
+           '<link rel="manifest" href="manifest.webmanifest">'
+           '<meta name="theme-color" content="#0f1115">'
+           '<link rel="icon" href="icon-192.png">'
+           '<link rel="apple-touch-icon" href="apple-touch-icon.png">'
+           '<meta name="apple-mobile-web-app-capable" content="yes">'
+           '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+           '<meta name="apple-mobile-web-app-title" content="코스피 실적">'
            f'<style>{CSS}</style></head><body>{body}'
-           f'<script>{script}</script></body></html>')
+           f'<script>{script}</script>{SW_REGISTER}</body></html>')
 
     path = os.path.join(out_dir, "index.html")
     with open(path, "w", encoding="utf-8") as fp:
         fp.write(doc)
     # Pages가 _로 시작하는 경로를 Jekyll로 처리하지 않게 한다
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
+    _write_pwa(out_dir, payload.get("built_at", ""))
     return path
+
+
+MANIFEST = {
+    "name": "코스피 분기 실적 시계열",
+    "short_name": "코스피 실적",
+    "description": "DART 공시로 만든 분기별 실적·PBR·PER 시계열",
+    "start_url": ".",
+    "scope": ".",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0f1115",
+    "theme_color": "#0f1115",
+    "lang": "ko",
+    "icons": [
+        {"src": "icon-192.png", "sizes": "192x192", "type": "image/png",
+         "purpose": "any"},
+        {"src": "icon-512.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "any"},
+        {"src": "icon-512.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "maskable"},
+    ],
+}
+
+# 서비스워커. index.html 은 네트워크 우선 — 데이터가 본문에 박혀 있으므로 캐시를
+# 먼저 쓰면 낡은 숫자를 보게 된다. 아이콘 같은 정적 파일은 캐시 우선.
+# 오프라인이면 마지막으로 받은 화면을 그대로 띄운다.
+SW_JS = """\
+const V = '__VERSION__';
+const SHELL = ['./', './index.html', './icon-192.png', './icon-512.png',
+               './apple-touch-icon.png', './manifest.webmanifest'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys()
+    .then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const isPage = req.mode === 'navigate' || new URL(req.url).pathname.endsWith('/') ||
+                 new URL(req.url).pathname.endsWith('index.html');
+  if (isPage) {
+    // 숫자는 늘 최신이어야 한다. 네트워크가 죽었을 때만 캐시로 떨어진다.
+    e.respondWith(fetch(req)
+      .then(r => { const copy = r.clone();
+                   caches.open(V).then(c => c.put(req, copy)); return r; })
+      .catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));
+  } else {
+    e.respondWith(caches.match(req).then(r => r || fetch(req)));
+  }
+});
+"""
+
+# 새 빌드가 올라오면 알려준다. 수시로 열어보는 용도라 '언제 바뀌었는지'가 중요하다.
+SW_REGISTER = """<script>
+if ('serviceWorker' in navigator) {
+  addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').then(function(reg){
+      reg.addEventListener('updatefound', function(){
+        var sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', function(){
+          // 이미 돌고 있던 워커가 있는데 새 워커가 대기 = 새 빌드가 올라왔다
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            var bar = document.createElement('div');
+            bar.className = 'newbuild';
+            bar.textContent = '새 데이터가 있습니다 — 눌러서 새로고침';
+            bar.onclick = function(){ location.reload(); };
+            document.body.appendChild(bar);
+          }
+        });
+      });
+      setInterval(function(){ reg.update(); }, 15 * 60 * 1000);
+    }).catch(function(){});
+  });
+}
+</script>"""
+
+
+def _write_pwa(out_dir: str, version: str) -> None:
+    """
+    홈 화면에 추가해 앱처럼 쓰기 위한 파일들.
+
+    아이콘(icon-*.png, apple-touch-icon.png)은 저장소에 그대로 두고 여기서
+    건드리지 않는다. 매 빌드마다 다시 만들 이유가 없고, build() 는 docs/ 를
+    청소하지 않으므로 그대로 살아남는다.
+    """
+    with open(os.path.join(out_dir, "manifest.webmanifest"), "w", encoding="utf-8") as fp:
+        json.dump(MANIFEST, fp, ensure_ascii=False, indent=1)
+    # 캐시 이름에 빌드 시각을 넣어야 새 빌드가 옛 캐시를 밀어낸다.
+    # 값이 그대로면 브라우저가 sw.js 를 바뀌지 않은 것으로 보고 갱신하지 않는다.
+    with open(os.path.join(out_dir, "sw.js"), "w", encoding="utf-8") as fp:
+        fp.write(SW_JS.replace("__VERSION__", version or "dev"))
