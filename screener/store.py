@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import statistics
 import glob
 import datetime as dt
 
@@ -123,9 +124,13 @@ def merge_quarter(record: dict, qkey: str, values: dict, meta: dict = None) -> b
         if slot.get(key) is None:
             slot[key] = val
             changed = True
-    if changed:
-        for key, val in (meta or {}).items():
+    # 메타는 값이 이미 다 차 있어도 붙인다. changed 일 때만 붙이면, 나중에 새로
+    # 생긴 메타(통화 등)가 이미 수집된 분기에는 영영 달라붙지 못한다. 두산밥캣이
+    # 그랬다 — USD 공시인데 통화가 비어 있어 PBR 이 1,000배로 찍혔다.
+    for key, val in (meta or {}).items():
+        if val not in (None, ""):
             slot.setdefault(key, val)
+    if changed:
         slot["updated"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return changed
 
@@ -146,15 +151,100 @@ def set_price(record: dict, qkey: str, close: float, shares: float,
     return True
 
 
+# 앞뒤 분기가 다 있을 때: 이 배수를 넘게 튀면 공시 오류로 본다.
+SHARES_JUMP_LIMIT = 20
+# 한쪽 이웃밖에 없을 때(가장 최근·가장 오래된 분기)는 훨씬 크게 잡는다.
+# 여기서 잘못 지우면 이웃 값을 끌어와 채우므로 '빈 값'이 아니라 '틀린 값'이 된다.
+# 액면분할은 아무리 커도 50:1 수준이라(삼성전자 2018년) 200배면 안전하다.
+SHARES_EDGE_LIMIT = 200
+
+
+def _known_shares(record: dict) -> list:
+    """주식수가 채워진 분기의 (분기, 값) 목록."""
+    return [(q, s.get("상장주식수"))
+            for q, s in record.get("quarters", {}).items()
+            if s.get("상장주식수") and s["상장주식수"] > 0]
+
+
+def _neighbour_shares(record: dict, qkey: str) -> list:
+    """qkey 앞뒤로 가장 가까운, 주식수가 채워진 분기의 값."""
+    quarters = sort_quarters(record.get("quarters", {}), newest_first=False)
+    if qkey not in quarters:
+        return []
+    i = quarters.index(qkey)
+    out = []
+    for span in (range(i - 1, -1, -1), range(i + 1, len(quarters))):
+        for j in span:
+            val = record["quarters"][quarters[j]].get("상장주식수")
+            if val and val > 0:
+                out.append(val)
+                break
+    return out
+
+
+def shares_look_wrong(record: dict, qkey: str, shares: float,
+                      limit: float = SHARES_JUMP_LIMIT) -> bool:
+    """
+    다른 분기들과 자릿수가 어긋나는 주식수인지.
+
+    액면분할·증자는 한쪽 이웃과는 값이 맞는 '계단'이다(카프로 2024Q2 에 4천만 →
+    1억6900만). 반면 공시 오류는 한 분기만 솟은 '뾰족한 점'이다(LS에코에너지
+    2025Q4 가 정확히 100만 배, 카프로 2023Q2 가 1000배). 그래서 양쪽 이웃 모두와
+    어긋날 때만 오류로 본다 — 진짜 자본 변동을 오류로 몰지 않기 위해서다.
+    """
+    if not shares or shares <= 0:
+        return False
+    sides = _neighbour_shares(record, qkey)
+    if not sides:
+        return False                      # 견줄 이웃이 없으면 판단하지 않는다
+    if len(sides) == 2:
+        return all(max(shares, s) / min(shares, s) > limit for s in sides)
+    # 이웃이 한쪽뿐인 가장 최근·가장 오래된 분기. 그 하나뿐인 이웃이 하필 틀린
+    # 값이면 멀쩡한 분기가 같이 걸린다 — LS에코에너지 2026Q1 이 바로 앞 분기의
+    # 오류 때문에 그랬다. 그래서 이웃 하나가 아니라 나머지 분기 전체의 중앙값과
+    # 견준다. 오류는 한둘이고 정상값이 다수라 중앙값은 정상 쪽에 선다.
+    others = [v for q, v in _known_shares(record) if q != qkey]
+    ref = statistics.median(others) if others else sides[0]
+    return max(shares, ref) / min(shares, ref) > SHARES_EDGE_LIMIT
+
+
+def drop_implausible_shares(record: dict, limit: float = SHARES_JUMP_LIMIT) -> list:
+    """
+    이미 저장된 주식수 중 이웃과 자릿수가 어긋나는 것을 지운다.
+
+    지우기만 하면 fill_missing_shares 가 이웃 값을 이어받아 채우고 시가총액도
+    다시 계산한다. 반환값은 지운 분기 목록 — 조용히 고치면 안 되므로 호출부에서
+    로그로 남긴다.
+    """
+    quarters = sort_quarters(record.get("quarters", {}), newest_first=False)
+    # 판정을 먼저 다 끝내고 나서 지운다. 지우면서 판정하면 앞 분기를 지운 탓에 뒤
+    # 분기의 이웃이 사라져, 정작 틀린 값이 멀쩡한 값으로 통과한다.
+    dropped = [q for q in quarters
+               if shares_look_wrong(record, q,
+                                    record["quarters"][q].get("상장주식수"), limit)]
+    for qkey in dropped:
+        slot = record["quarters"][qkey]
+        slot.pop("상장주식수", None)
+        slot.pop("시가총액", None)
+        slot.pop("shares_src", None)
+    return dropped
+
+
 def set_shares(record: dict, qkey: str, shares: float) -> bool:
     """
     주식수를 덮어쓰고 시가총액을 다시 계산한다.
 
     merge_quarter 는 기존 값을 지키지만, 잘못 채워진 값을 바로잡을 때는 덮어써야 한다.
     (수권주식수를 발행주식수로 잘못 읽어 시총이 부풀려진 경우)
+
+    단, 이웃 분기들과 자릿수가 어긋나는 값은 받지 않는다. DART 가 그런 값을
+    돌려주기도 하는데, 그대로 쓰면 시가총액이 100만 배가 되어 PBR·PER 이 통째로
+    거짓이 된다. 값이 없는 편이 틀린 값보다 낫다.
     """
     slot = record.setdefault("quarters", {}).get(qkey)
     if slot is None or not shares or shares <= 0:
+        return False
+    if shares_look_wrong(record, qkey, shares):
         return False
     if slot.get("상장주식수") == shares and slot.get("시가총액"):
         return False

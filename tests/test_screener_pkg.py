@@ -122,6 +122,86 @@ def test_merge_does_not_overwrite():
     print("test_merge_does_not_overwrite: OK")
 
 
+def test_meta_attaches_to_already_filled_quarter():
+    """
+    통화처럼 나중에 생긴 메타는, 값이 이미 다 찬 분기에도 붙어야 한다.
+    changed 일 때만 붙이던 시절 두산밥캣이 USD 공시인데 통화가 비어
+    PBR 이 1,000배로 찍혔다.
+    """
+    rec = {"code": "241560", "name": "두산밥캣", "quarters": {}}
+    store.merge_quarter(rec, "2025Q4", {"매출액": 100.0}, {"fs_div": "CFS"})
+    # 새로 채울 값은 없지만(= changed False) 통화는 달라붙어야 한다
+    assert not store.merge_quarter(rec, "2025Q4", {"매출액": 999.0},
+                                   {"currency": "USD"})
+    assert rec["quarters"]["2025Q4"]["currency"] == "USD"
+    assert rec["quarters"]["2025Q4"]["매출액"] == 100.0
+    # 빈 문자열은 붙이지 않는다 — 나중에 진짜 값이 오는 걸 막으면 안 된다
+    rec2 = {"code": "005930", "quarters": {}}
+    store.merge_quarter(rec2, "2025Q4", {"매출액": 1.0}, {"currency": ""})
+    assert "currency" not in rec2["quarters"]["2025Q4"]
+    print("test_meta_attaches_to_already_filled_quarter: OK")
+
+
+def _shares_record(pairs):
+    return {"code": "000000", "quarters":
+            {q: {"상장주식수": v, "종가": 1000.0} for q, v in pairs}}
+
+
+def test_implausible_share_spike_is_dropped_but_real_split_kept():
+    """
+    한 분기만 자릿수가 튀는 값은 공시 오류, 한쪽 이웃과 맞으면 진짜 자본 변동이다.
+    실데이터에서 나온 두 경우를 그대로 재현한다.
+    """
+    # LS에코에너지 2025Q4 — 정확히 100만 배로 솟았다가 다음 분기에 되돌아온다
+    rec = _shares_record([("2025Q2", 30624879.0), ("2025Q3", 30624879.0),
+                          ("2025Q4", 30624879000000.0), ("2026Q1", 30624879.0)])
+    assert store.shares_look_wrong(rec, "2025Q4", 30624879000000.0)
+    assert store.drop_implausible_shares(rec) == ["2025Q4"]
+    assert "상장주식수" not in rec["quarters"]["2025Q4"]
+    # 지우고 나면 이웃 값을 이어받아 시가총액까지 복구된다
+    store.fill_missing_shares(rec)
+    assert rec["quarters"]["2025Q4"]["상장주식수"] == 30624879.0
+    assert approx(rec["quarters"]["2025Q4"]["시가총액"], 30624879.0 * 1000.0)
+
+    # 카프로 2024Q2 — 증자로 4천만 -> 1억6900만. 계단이므로 건드리면 안 된다
+    real = _shares_record([("2024Q1", 40000000.0), ("2024Q2", 168999996.0),
+                           ("2024Q3", 168999996.0), ("2024Q4", 168999996.0)])
+    assert not store.shares_look_wrong(real, "2024Q2", 168999996.0)
+    assert store.drop_implausible_shares(real) == []
+
+    # 20배를 넘는 액면분할이라도 한쪽 이웃과 맞으면 살려둔다
+    split = _shares_record([("2024Q1", 1000000.0), ("2024Q2", 50000000.0),
+                            ("2024Q3", 50000000.0)])
+    assert store.drop_implausible_shares(split) == []
+
+    # 가장 오래된/최근 분기는 이웃이 한쪽뿐이라 판단 근거가 약하다. 여기서 잘못
+    # 지우면 이웃 값을 끌어와 채우므로 틀린 값이 된다 — 그래서 기준을 크게 잡는다.
+    edge_split = _shares_record([("2024Q1", 1000000.0), ("2024Q2", 50000000.0)])
+    assert store.drop_implausible_shares(edge_split) == []   # 50:1 분할은 살린다
+    # 분기가 둘뿐인데 서로 100만 배 어긋나면 어느 쪽이 맞는지 알 길이 없다.
+    # 둘 다 버려 값을 비운다 — 반쪽을 믿고 남기면 100만 배 틀린 PBR 이 나온다.
+    edge_bad = _shares_record([("2025Q3", 30624879.0),
+                               ("2025Q4", 30624879000000.0)])
+    assert store.drop_implausible_shares(edge_bad) == ["2025Q3", "2025Q4"]
+    print("test_implausible_share_spike_is_dropped_but_real_split_kept: OK")
+
+
+def test_set_shares_refuses_implausible_value():
+    """다시 받아온 값이 여전히 틀렸으면 저장하지 않는다. 없는 편이 낫다."""
+    rec = _shares_record([("2025Q2", 30624879.0), ("2025Q3", 30624879.0),
+                          ("2026Q1", 30624879.0)])
+    rec["quarters"]["2025Q4"] = {"종가": 1000.0}
+    assert not store.set_shares(rec, "2025Q4", 30624879000000.0)
+    assert rec["quarters"]["2025Q4"].get("상장주식수") is None
+    # 멀쩡한 값은 그대로 받는다
+    assert store.set_shares(rec, "2025Q4", 30624879.0)
+    assert rec["quarters"]["2025Q4"]["상장주식수"] == 30624879.0
+    # 견줄 이웃이 없으면 판단하지 않고 받는다
+    lone = {"code": "000000", "quarters": {"2025Q4": {"종가": 1000.0}}}
+    assert store.set_shares(lone, "2025Q4", 12345.0)
+    print("test_set_shares_refuses_implausible_value: OK")
+
+
 def test_sort_quarters():
     keys = ["2024Q4", "2025Q1", "2023Q2", "2025Q4", "2025Q2"]
     assert store.sort_quarters(keys)[0] == "2025Q4"
@@ -481,6 +561,9 @@ if __name__ == "__main__":
         test_parse_report_name()
         test_detect_filters_and_dedupes()
         test_merge_does_not_overwrite()
+        test_meta_attaches_to_already_filled_quarter()
+        test_implausible_share_spike_is_dropped_but_real_split_kept()
+        test_set_shares_refuses_implausible_value()
         test_sort_quarters()
         test_save_load_roundtrip_and_trim()
         test_price_snapshot_is_immutable()
