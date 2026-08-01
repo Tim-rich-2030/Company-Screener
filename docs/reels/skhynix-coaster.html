@@ -99,42 +99,31 @@ body{
 
 /* --- 지상 개미 --- */
 .walker{
-  position:absolute;height:212px;width:auto;z-index:5;
+  /* 카트(z-index 6)보다 앞. 뛰어내리는 동안 카트 뒤로 숨으면 안 된다 */
+  position:absolute;height:212px;width:auto;z-index:7;
   filter:drop-shadow(0 8px 12px rgba(0,0,0,.55));
   transform:translate(-50%,-100%);
 }
 
-/* --- 말풍선 --- */
+/* --- 말풍선: 구름 모양. 윤곽선은 글자 폭을 재서 그때그때 그린다(drawCloud) --- */
 #bubble{position:absolute;z-index:9;transform:translate(-50%,-100%);opacity:0}
 #bubble.on{animation:pop .26s cubic-bezier(.2,1.7,.4,1) both}
 @keyframes pop{from{opacity:0;transform:translate(-50%,-88%) scale(.7)}
                to{opacity:1;transform:translate(-50%,-100%) scale(1)}}
-.balloon{
-  position:relative;padding:24px 40px;background:#fff;color:#14141b;
-  font-size:58px;font-weight:800;letter-spacing:-1px;white-space:nowrap;
-  border:7px solid #14141b;
-  border-radius:44px 52px 40px 56px/52px 40px 56px 44px;   /* 손그림 느낌 */
-  box-shadow:10px 12px 0 rgba(0,0,0,.4);
-  transform:rotate(-1.6deg);
-}
-.balloon::after{
-  content:"";position:absolute;left:50%;bottom:-38px;margin-left:-22px;
-  width:0;height:0;border:22px solid transparent;
-  border-top-color:#14141b;border-bottom:0;
-}
-.balloon::before{
-  content:"";position:absolute;left:50%;bottom:-27px;margin-left:-15px;z-index:1;
-  width:0;height:0;border:15px solid transparent;
-  border-top-color:#fff;border-bottom:0;
+#balloonWrap{position:relative;display:inline-block;transform:rotate(-1.6deg)}
+#cloud{position:absolute;z-index:1;overflow:visible;
+  filter:drop-shadow(9px 11px 0 rgba(0,0,0,.42))}
+#balloon{
+  position:relative;z-index:2;padding:18px 46px;white-space:nowrap;
+  font-family:"Nanum Pen Script","Pretendard Variable",Pretendard,cursive;
+  font-size:80px;line-height:1.15;letter-spacing:2px;color:#14141b;
 }
 /* 5번과 11번이 똑같이 보여야 한다 — 같은 클래스를 쓴다 */
-.balloon.hype{background:#FFE24A;color:#2a1600;border-color:#2a1600;
-  transform:rotate(1.8deg)}
-.balloon.hype::after{border-top-color:#2a1600}
-.balloon.hype::before{border-top-color:#FFE24A}
+#balloonWrap.hype{transform:rotate(1.8deg)}
+#balloonWrap.hype #balloon{color:#2a1600}
 /* 12번에서 한 번 나온 대사가 13번에 더 크게, 떨면서 다시 나온다 */
-.balloon.panic{font-size:80px;padding:26px 46px;color:#a30f0f;
-  animation:tremble .085s linear infinite}
+#balloonWrap.panic{animation:tremble .085s linear infinite}
+#balloonWrap.panic #balloon{font-size:112px;color:#a30f0f}
 @keyframes tremble{
   0%{transform:rotate(-1.6deg) translate(0,0)}
   25%{transform:rotate(-2.8deg) translate(-5px,3px)}
@@ -155,8 +144,8 @@ body{
 #axisUnit{position:absolute;left:22px;top:250px;font-size:25px;font-weight:600;
   color:rgba(255,255,255,.4);text-shadow:0 0 12px #0b0d18}
 #title{
-  position:absolute;left:0;right:0;top:64px;text-align:center;
-  font-size:62px;font-weight:900;letter-spacing:-2.5px;
+  position:absolute;left:0;right:0;top:54px;text-align:center;
+  font-size:58px;line-height:1.16;font-weight:900;letter-spacing:-2.5px;
   text-shadow:0 6px 24px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.6);
 }
 #foot{
@@ -215,12 +204,16 @@ body{
         <div class="wheel l"></div><div class="wheel r"></div>
       </div>
     </div></div>
-    <div id="bubble"><div class="balloon" id="balloon"></div></div>
+    <div id="bubble"><div id="balloonWrap">
+      <svg id="cloud"></svg><div id="balloon"></div>
+    </div></div>
   </div>
 
   <div id="hud">
     <div id="axisUnit">단위: 만원</div>
-    <div id="title">SK하이닉스 상한가 그 이후…</div>
+    <!-- 한 줄로 두면 62px에서 화면을 넘고, 자동으로 줄이면 44px까지 작아져
+         릴스 제목으로 약하다. 읽기 좋은 지점에서 직접 끊는다. -->
+    <div id="title">SK하이닉스 상한가 이후<br>개인에게 벌어질 일들..</div>
     <div id="foot">
       <div id="slogan">주식은 감정이 아닌 원칙대로</div>
       <div id="fineprint">
@@ -687,7 +680,12 @@ const sprite = (who, key) => `${ART}ant${who}_${key}.png`;
 const cart = $("cart"), cartInner = $("cartInner");
 const antA = $("antA"), antB = $("antB");
 const walkA = $("walkA"), walkB = $("walkB");
-const bubble = $("bubble"), balloon = $("balloon");
+const bubble = $("bubble"), balloon = $("balloon"), balloonWrap = $("balloonWrap");
+const cloud = $("cloud");
+const cloudPath = document.createElementNS(SVGNS, "path");
+cloudPath.setAttribute("stroke-width", 7);
+cloudPath.setAttribute("stroke-linejoin", "round");
+cloud.appendChild(cloudPath);
 const world = $("world"), stage = $("stage"), fitBox = $("fit");
 const layers = [[$("parkFar"), .22], [$("parkMid"), .48], [$("parkNear"), .86]];
 
@@ -724,9 +722,56 @@ const JUMP_U = .40, LAND_U = .56;                // 뛰어내리는 시점 / 착
 let t0 = 0, lastBeat = -1, lastCount = -1, phase = "";
 let camFreeze = null, groundHold = null, jumpFrom = null, preqSaid = false;
 
+/* --- 구름 말풍선 -----------------------------------------------------------
+   글자 상자 둘레를 봉우리(원호)로 두르고, 아래쪽 봉우리 하나를 꼬리로 바꿔
+   하나의 닫힌 path 로 만든다. 꼬리를 따로 그리면 몸통 윤곽선이 꼬리를 가로질러
+   지나가 지저분해진다. 대사 길이가 제각각이라 모양을 고정할 수 없으므로
+   글자 폭을 잰 뒤 그때그때 그린다.                                            */
+const CLOUD_M = 30, TAIL_H = 68;
+function drawCloud(w, h, cls){
+  const x0 = CLOUD_M, y0 = CLOUD_M, x1 = CLOUD_M + w, y1 = CLOUD_M + h;
+  const nx = Math.max(4, Math.round(w / 82));
+  const ny = Math.max(2, Math.round(h / 64));
+  const dx = w / nx, dy = h / ny;
+  const rx = dx * .62, ry = dy * .62;      // 반지름을 반폭보다 키워야 봉긋하다
+  const tailAt = Math.floor(nx / 2);
+  const n1 = v => v.toFixed(1);
+
+  let d = `M${n1(x0)},${n1(y0)}`;
+  for(let i = 0; i < nx; i++) d += `A${n1(rx)},${n1(rx)} 0 0 1 ${n1(x0+dx*(i+1))},${n1(y0)}`;
+  for(let j = 0; j < ny; j++) d += `A${n1(ry)},${n1(ry)} 0 0 1 ${n1(x1)},${n1(y0+dy*(j+1))}`;
+  for(let i = 0; i < nx; i++){                       // 아래쪽은 오른쪽 → 왼쪽
+    const px = x1 - dx * i, qx = x1 - dx * (i + 1);
+    d += (i === tailAt)
+      ? `L${n1((px+qx)/2 + 12)},${n1(y1 + TAIL_H)}L${n1(qx)},${n1(y1)}`
+      : `A${n1(rx)},${n1(rx)} 0 0 1 ${n1(qx)},${n1(y1)}`;
+  }
+  for(let j = 0; j < ny; j++) d += `A${n1(ry)},${n1(ry)} 0 0 1 ${n1(x0)},${n1(y1-dy*(j+1))}`;
+
+  const cw = w + CLOUD_M * 2, ch = h + CLOUD_M * 2 + TAIL_H;
+  cloud.setAttribute("width", cw);
+  cloud.setAttribute("height", ch);
+  cloud.setAttribute("viewBox", `0 0 ${cw} ${ch}`);
+  cloud.style.left = -CLOUD_M + "px";
+  cloud.style.top  = -CLOUD_M + "px";
+  cloudPath.setAttribute("d", d + "Z");
+  cloudPath.setAttribute("fill",   cls === "hype" ? "#FFE24A" : "#fff");
+  cloudPath.setAttribute("stroke", cls === "hype" ? "#2a1600" : "#14141b");
+}
+
 function say(text, cls){
-  balloon.className = "balloon" + (cls ? " " + cls : "");
+  balloonWrap.className = cls || "";
   balloon.textContent = text;
+  // 손글씨 폰트가 뜨지 않으면 대체 폰트가 훨씬 넓다. panic 대사는 112px라
+  // 구름이 화면 밖으로 나가므로, 실제 폭을 재서 들어올 때까지 줄인다.
+  balloon.style.fontSize = "";
+  const room = W - 130 - CLOUD_M * 2;
+  let size = parseFloat(getComputedStyle(balloon).fontSize);
+  while(balloon.scrollWidth > room && size > 42){
+    size -= 4;
+    balloon.style.fontSize = size + "px";
+  }
+  drawCloud(balloon.offsetWidth, balloon.offsetHeight, cls);   // 읽는 순간 레이아웃 확정
   bubble.classList.remove("on"); void bubble.offsetWidth;
   bubble.classList.add("on");
   bubble.style.opacity = 1;
@@ -736,7 +781,7 @@ function hush(){ bubble.classList.remove("on"); bubble.style.opacity = 0; }
 // 말풍선이 화면 밖으로 밀리지 않게 좌우로 붙잡는다 ("살려줘, 다신 안 해"처럼
 // 긴 대사는 카트가 화면 왼쪽에 있을 때 잘린다).
 function placeBubble(worldX, worldY, cam){
-  const half = balloon.offsetWidth / 2 + 26;
+  const half = balloon.offsetWidth / 2 + CLOUD_M + 26;
   bubble.style.left = Math.min(Math.max(worldX, half - cam), W - half - cam) + "px";
   bubble.style.top  = worldY + "px";
 }
@@ -801,7 +846,7 @@ function frame(now){
     // 착지할 때까지 남겨둬야 점프 동작과 대사가 이어진다.
     if(u > .28 && u < LAND_U){
       if(!preqSaid){ say("뛰어내려!"); preqSaid = true; }
-      placeBubble(cx, cy - 240, cam);
+      placeBubble(cx, cy - 300, cam);
     }else if(u >= LAND_U) hush();
 
     if(!riding){
@@ -864,7 +909,8 @@ function frame(now){
 
   // 말풍선은 타고 있으면 카트 위, 서 있으면 개미 위
   const riding = b.rideA || b.rideB;
-  placeBubble(riding ? cx : gx, riding ? cy - 240 : GROUND_Y - 240, cam);
+  // 구름 꼬리가 예전 삼각 꼬리보다 길어 그만큼 위로 올린다
+  placeBubble(riding ? cx : gx, riding ? cy - 300 : GROUND_Y - 300, cam);
 
   if(t < TOTAL_MS + 1200) requestAnimationFrame(frame);
   else stage.classList.remove("shake");
@@ -887,11 +933,10 @@ function preload(){
   return Promise.race([Promise.all(jobs), new Promise(res => setTimeout(res, 6000))]);
 }
 
-// 손글씨 폰트가 뜨지 않으면 대체 폰트가 훨씬 넓어 슬로건이 화면을 넘는다.
-// 폰트가 정해진 뒤 실제 폭을 재서 한 줄에 들어올 때까지 줄인다.
-function fitSlogan(){
-  const node = $("slogan"), room = W - 120;
-  for(let size = 86; size >= 46; size -= 2){
+// 손글씨 폰트가 뜨지 않으면 대체 폰트가 훨씬 넓어 한 줄에 안 들어간다.
+// 폰트가 정해진 뒤 실제 폭을 재서 들어올 때까지 줄인다.
+function fitOneLine(node, max, min, room){
+  for(let size = max; size >= min; size -= 2){
     node.style.fontSize = size + "px";
     if(node.scrollWidth <= room) return;
   }
@@ -906,7 +951,10 @@ function fitSlogan(){
   hush();
   camera(0);
 })();
-preload().then(() => { fitSlogan(); requestAnimationFrame(frame); });
+preload().then(() => {
+  fitOneLine($("slogan"), 86, 44, W - 120);
+  requestAnimationFrame(frame);
+});
 
 // 조작 UI 는 두지 않는다. 다시 보려면 아무데나 탭(또는 새로고침).
 addEventListener("pointerdown", () => location.reload());
