@@ -168,6 +168,7 @@ body{
   font-family:"Nanum Pen Script","Pretendard Variable",Pretendard,cursive;
   font-size:86px;line-height:1.05;color:#FFE24A;letter-spacing:1px;
   text-shadow:4px 5px 0 rgba(0,0,0,.6);transform:rotate(-1.2deg);
+  white-space:nowrap;                 /* 두 줄로 접히면 손글씨 맛이 죽는다 */
 }
 #fineprint{
   margin-top:22px;font-size:25px;line-height:1.45;font-weight:600;
@@ -221,7 +222,7 @@ body{
     <div id="axisUnit">단위: 만원</div>
     <div id="title">SK하이닉스 상한가 그 이후…</div>
     <div id="foot">
-      <div id="slogan">주가 급락에도 급등에도 항상 냉정함이 중요!!</div>
+      <div id="slogan">주식은 감정이 아닌 원칙대로</div>
       <div id="fineprint">
         본 콘텐츠는 투자 권유가 아닌 참고용으로 작성되었으며<br>
         투자 판단의 책임은 본인에게 있습니다.
@@ -654,10 +655,13 @@ const BEATS = [
   {a:11, A:"sit_05_ando",    B:"sit_05_ando",    say:"잘 버텼어"},
   // 5번과 똑같은 말풍선. 반복이 요점이다.
   {a:12, A:"sit_02_hwanho",  B:"sit_02_hwanho",  say:"300만 가자!", cls:"hype"},
-  // 12번에서 한 번, 13번에서 더 크게 한 번 — 대사도 두 번 반복된다.
-  {a:13, A:"sit_03_bulan",   B:"sit_03_bulan",   say:"살려줘, 다신 안 해"},
+  // 두 번째 상승의 꼭대기(200만)를 지나 다시 떨어지기 시작하는 비트.
+  // 대사는 정점이 아니라 내려가기 시작한 뒤에 나와야 말이 된다 — sayAt 으로 늦춘다.
+  {a:14, A:"sit_03_bulan",   B:"sit_03_bulan",   say:"살려줘, 다신 안 해",
+   sayAt:.52, shake:true, shakeAt:.66},
+  // 같은 대사가 바닥에서 더 크게, 떨면서 한 번 더.
   {a:15, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"살려줘, 다신 안 해",
-   cls:"panic", ease:u => Math.pow(u, 2.4), shake:true},
+   cls:"panic", ease:u => Math.pow(u, 2.2), shake:true, shakeAt:.12},
   {a:17, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"제발 본전만"},
   {a:18, A:"stand_02_ppudeut", B:"stand_02_ppudeut", rideA:false, rideB:false,
    say:"선방했다", ease:easeOut},
@@ -711,10 +715,33 @@ function camera(cam){
 /* ===========================================================================
    6. 재생
    =========================================================================== */
-const D_PARK  = anchorDist(I_LIMIT_UP);          // 상한가 = 승강장 왼쪽 끝
-const CAM_END = -(ax(I_LIMIT_UP) - CAM_X);       // 프리퀄이 끝나는 카메라 위치
-let t0 = 0, lastBeat = -1, lastCount = -1, phase = "", camFreeze = null, groundHold = null;
+const D_PEAK = anchorDist(I_PEAK);               // 300만 고점
+const D_PARK = anchorDist(I_LIMIT_UP);           // 상한가 = 승강장 왼쪽 끝
+// 꼭대기에서는 천천히 굴러 나가고, 떨어지면서 가속했다가, 승강장에 감속해 선다.
+const preqEase = u => u < .12 ? .06 * (u / .12) : .06 + .94 * easeOut((u - .12) / .88);
+const JUMP_U = .40, LAND_U = .56;                // 뛰어내리는 시점 / 착지 시점
 
+let t0 = 0, lastBeat = -1, lastCount = -1, phase = "";
+let camFreeze = null, groundHold = null, jumpFrom = null, preqSaid = false;
+
+function say(text, cls){
+  balloon.className = "balloon" + (cls ? " " + cls : "");
+  balloon.textContent = text;
+  bubble.classList.remove("on"); void bubble.offsetWidth;
+  bubble.classList.add("on");
+  bubble.style.opacity = 1;
+}
+function hush(){ bubble.classList.remove("on"); bubble.style.opacity = 0; }
+
+// 말풍선이 화면 밖으로 밀리지 않게 좌우로 붙잡는다 ("살려줘, 다신 안 해"처럼
+// 긴 대사는 카트가 화면 왼쪽에 있을 때 잘린다).
+function placeBubble(worldX, worldY, cam){
+  const half = balloon.offsetWidth / 2 + 26;
+  bubble.style.left = Math.min(Math.max(worldX, half - cam), W - half - cam) + "px";
+  bubble.style.top  = worldY + "px";
+}
+
+let said = false;
 function applyBeat(i){
   const b = BEATS[i];
   setSprite(antA, "A", b.A);  setSprite(antB, "B", b.B);
@@ -724,16 +751,9 @@ function applyBeat(i){
   walkA.style.display = b.rideA ? "none" : "block";
   walkB.style.display = b.rideB ? "none" : "block";
 
-  balloon.className = "balloon" + (b.cls ? " " + b.cls : "");
-  if(b.say){
-    balloon.textContent = b.say;
-    bubble.classList.remove("on"); void bubble.offsetWidth;
-    bubble.classList.add("on");
-    bubble.style.opacity = 1;
-  }else{
-    bubble.classList.remove("on");
-    bubble.style.opacity = 0;
-  }
+  said = false;
+  if(b.say && !b.sayAt){ say(b.say, b.cls); said = true; }
+  else hush();
   stage.classList.remove("shake");
 }
 
@@ -756,23 +776,48 @@ function frame(now){
   }
   $("count").style.display = "none";
 
-  // --- 프리퀄: 실제 구간을 카메라가 훑는다 (300만 → 130만 → 상한가) ---
+  // --- 프리퀄: 실제 구간을 열차가 달린다 (300만 → 130만 → 상한가 171.8만) ---
+  //     내려오는 도중 개미 둘이 카트에서 뛰어내려 바닥에 착지하고, 빈 카트는
+  //     혼자 바닥을 찍고 상한가로 튀어올라 승강장에 선다.
   if(t < BEATS_AT){
-    if(phase !== "preq"){
-      phase = "preq";
-      setSprite(walkA, "A", "stand_01_gomin");
-      setSprite(walkB, "B", "stand_01_gomin");
-      walkA.style.display = walkB.style.display = "block";
-      antA.style.opacity = antB.style.opacity = 0;
-      bubble.style.opacity = 0;
-      cart.style.offsetDistance = (D_PARK / TOTAL * 100) + "%";
-    }
+    if(phase !== "preq"){ phase = "preq"; jumpFrom = null; preqSaid = false; }
     const u = (t - OPEN_MS) / PREQ_MS;
-    const cam = camera(easeInOut(u) * CAM_END);
-    // 개미는 화면에 붙어 있고 그 뒤로 풍경과 트랙이 흐른다 — 올려다보는 구도
-    walkA.style.left = (340 - cam) + "px"; walkA.style.top = GROUND_Y + "px";
-    walkB.style.left = (560 - cam) + "px"; walkB.style.top = GROUND_Y + "px";
-    limitUp.setAttribute("opacity", clamp01((u - .62) / .22).toFixed(2));
+
+    const d = D_PEAK + (D_PARK - D_PEAK) * preqEase(u);
+    cart.style.offsetDistance = (d / TOTAL * 100) + "%";
+    const [cx, cy] = pointAt(d);
+    const cam = camera(-(cx - CAM_X));
+
+    const riding = u < JUMP_U;
+    const key = u < .12 ? "sit_02_hwanho"
+              : u < JUMP_U ? "sit_03_bulan"
+              : u < LAND_U ? "sit_04_sasaek" : "stand_01_gomin";
+    setSprite(antA, "A", key);  setSprite(antB, "B", key);
+    setSprite(walkA, "A", key); setSprite(walkB, "B", key);
+    antA.style.opacity = antB.style.opacity = riding ? 1 : 0;
+    walkA.style.display = walkB.style.display = riding ? "none" : "block";
+
+    // 뛰어내리기 직전에 신호를 준다 — 없으면 그냥 사라진 것처럼 보인다.
+    // 착지할 때까지 남겨둬야 점프 동작과 대사가 이어진다.
+    if(u > .28 && u < LAND_U){
+      if(!preqSaid){ say("뛰어내려!"); preqSaid = true; }
+      placeBubble(cx, cy - 240, cam);
+    }else if(u >= LAND_U) hush();
+
+    if(!riding){
+      if(jumpFrom === null) jumpFrom = [cx, cy];
+      // 착지 후에는 화면에 붙어 있게 둔다. 뒤로 풍경이 흐르니 걸어가는 것으로 읽힌다.
+      const j = clamp01((u - JUMP_U) / (LAND_U - JUMP_U));
+      const arc = Math.sin(Math.PI * j) * 120;          // 살짝 튀었다가 떨어진다
+      const drop = (node, screenX) => {
+        const tx = screenX - cam;
+        node.style.left = (jumpFrom[0] + (tx - jumpFrom[0]) * j) + "px";
+        node.style.top  = (jumpFrom[1] + (GROUND_Y - jumpFrom[1]) * j - arc) + "px";
+      };
+      drop(walkA, 300); drop(walkB, 520);
+    }
+
+    limitUp.setAttribute("opacity", clamp01((u - .82) / .14).toFixed(2));
     requestAnimationFrame(frame);
     return;
   }
@@ -785,8 +830,10 @@ function frame(now){
   const b  = BEATS[bi];
   if(bi !== lastBeat){ lastBeat = bi; applyBeat(bi); }
 
-  // 급락 구간의 흔들림은 실제로 떨어지기 시작한 뒤에만 준다
-  if(b.shake) stage.classList.toggle("shake", u > .35);
+  // 대사를 비트 중간에 띄우는 경우 (정점을 지나 내려가기 시작한 뒤 등)
+  if(b.sayAt && !said && u >= b.sayAt){ say(b.say, b.cls); said = true; }
+  // 흔들림도 실제로 떨어지기 시작한 뒤에만 준다
+  if(b.shake) stage.classList.toggle("shake", u > (b.shakeAt ?? .35));
 
   const from = bi === 0 ? D_PARK : anchorDist(BEATS[bi - 1].idx);
   const to   = anchorDist(b.idx);
@@ -815,13 +862,9 @@ function frame(now){
   else camFreeze = null;
   cam = camera(cam);
 
-  // 말풍선은 타고 있으면 카트 위, 서 있으면 개미 위. 다만 "살려줘, 다신 안 해"
-  // 처럼 긴 대사는 화면 밖으로 밀려 잘리므로 좌우로 붙잡아 둔다.
+  // 말풍선은 타고 있으면 카트 위, 서 있으면 개미 위
   const riding = b.rideA || b.rideB;
-  const half = balloon.offsetWidth / 2 + 26;
-  const want = riding ? cx : gx;
-  bubble.style.left = Math.min(Math.max(want, half - cam), W - half - cam) + "px";
-  bubble.style.top  = (riding ? cy - 240 : GROUND_Y - 240) + "px";
+  placeBubble(riding ? cx : gx, riding ? cy - 240 : GROUND_Y - 240, cam);
 
   if(t < TOTAL_MS + 1200) requestAnimationFrame(frame);
   else stage.classList.remove("shake");
@@ -844,9 +887,26 @@ function preload(){
   return Promise.race([Promise.all(jobs), new Promise(res => setTimeout(res, 6000))]);
 }
 
-applyBeat(0);
-camera(0);
-preload().then(() => requestAnimationFrame(frame));
+// 손글씨 폰트가 뜨지 않으면 대체 폰트가 훨씬 넓어 슬로건이 화면을 넘는다.
+// 폰트가 정해진 뒤 실제 폭을 재서 한 줄에 들어올 때까지 줄인다.
+function fitSlogan(){
+  const node = $("slogan"), room = W - 120;
+  for(let size = 86; size >= 46; size -= 2){
+    node.style.fontSize = size + "px";
+    if(node.scrollWidth <= room) return;
+  }
+}
+
+// 첫 프레임은 프리퀄의 시작 자세 — 300만 꼭대기에 개미를 태운 카트가 서 있다
+(function initFirstFrame(){
+  cart.style.offsetDistance = (D_PEAK / TOTAL * 100) + "%";
+  setSprite(antA, "A", "sit_02_hwanho"); setSprite(antB, "B", "sit_02_hwanho");
+  antA.style.opacity = antB.style.opacity = 1;
+  walkA.style.display = walkB.style.display = "none";
+  hush();
+  camera(0);
+})();
+preload().then(() => { fitSlogan(); requestAnimationFrame(frame); });
 
 // 조작 UI 는 두지 않는다. 다시 보려면 아무데나 탭(또는 새로고침).
 addEventListener("pointerdown", () => location.reload());
