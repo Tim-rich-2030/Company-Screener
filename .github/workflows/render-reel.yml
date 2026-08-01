@@ -1,0 +1,268 @@
+name: 릴스 MP4 렌더링
+
+# 화면녹화를 손으로 뜨지 않아도 되게, 릴스 HTML을 러너에서 재생시켜 MP4로 뽑는다.
+# 결과물은 저장소에 커밋하지 않고 Actions 아티팩트로만 올린다 (한 편에 수십 MB).
+on:
+  workflow_dispatch:
+    inputs:
+      page:
+        description: '렌더링할 HTML (저장소 기준 경로)'
+        default: 'docs/reels/skhynix-coaster.html'
+      name:
+        description: '결과 파일 이름 (확장자 제외)'
+        default: 'skhynix-coaster'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-reel
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1. ffmpeg·한글 폰트 설치
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+          fc-cache -f > /dev/null
+          # 폰트가 없으면 한글이 전부 두부(□)로 찍힌다. 여기서 잡아야 58초를 버리지 않는다.
+          if ! fc-list | grep -qi "noto sans cjk"; then
+            echo "::error::Noto Sans CJK 설치 실패 — 한글이 깨진 채로 렌더링됩니다"
+            exit 1
+          fi
+          ffmpeg -version | head -1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 2. Playwright(Chromium) 설치
+        run: |
+          set -euo pipefail
+          pip install --quiet playwright
+          playwright install --with-deps chromium
+
+      - name: 3. 로컬 서버 기동
+        env:
+          PAGE: ${{ inputs.page }}
+        run: |
+          set -euo pipefail
+          # file:// 로 열면 상대경로 이미지(../assets/ants/)가 막힌다. HTTP로 서빙한다.
+          if [ ! -f "$PAGE" ]; then
+            echo "::error::$PAGE 가 저장소에 없습니다"
+            exit 1
+          fi
+          nohup python -m http.server 8000 --bind 127.0.0.1 > server.log 2>&1 &
+          echo $! > server.pid
+          for _ in $(seq 1 30); do
+            if curl -sf -o /dev/null "http://127.0.0.1:8000/$PAGE"; then
+              echo "서버 기동 완료: http://127.0.0.1:8000/$PAGE"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::로컬 서버가 30초 안에 뜨지 않았습니다"
+          cat server.log
+          exit 1
+
+      - name: 4. 녹화 스크립트 준비
+        run: |
+          set -euo pipefail
+          # YAML 블록 스칼라는 블록 들여쓰기를 이미 벗겨서 넘겨준다. 여기 보이는
+          # 10칸은 러너에 도착할 때 사라지므로 heredoc 을 그대로 쓰면 된다.
+          cat > render_reel.py <<'PY'
+          """릴스 HTML을 열어 재생 전체를 webm으로 녹화한다."""
+          import asyncio, os, sys
+          from playwright.async_api import async_playwright
+
+          URL     = os.environ["REEL_URL"]
+          OUT_DIR = "video"
+          TAIL_MS = int(os.environ.get("TAIL_MS", "3000"))
+          FALLBACK_MS = int(os.environ.get("FALLBACK_MS", "60000"))
+          W, H = 1080, 1920
+
+          def stage(msg):  print(f"::group::[render] {msg}", flush=True)
+          def done():      print("::endgroup::", flush=True)
+
+          def emit(key, value):
+              out = os.environ.get("GITHUB_OUTPUT")
+              if out:
+                  with open(out, "a") as fh:
+                      fh.write(f"{key}={value}\n")
+
+          async def main():
+              problems = []
+              async with async_playwright() as p:
+                  stage("Chromium 실행")
+                  browser = await p.chromium.launch(args=[
+                      "--hide-scrollbars",                  # 스크롤바가 프레임에 찍히지 않게
+                      "--force-device-scale-factor=1",
+                      "--autoplay-policy=no-user-gesture-required",
+                  ])
+                  ctx = await browser.new_context(
+                      viewport={"width": W, "height": H},
+                      device_scale_factor=1,
+                      record_video_dir=OUT_DIR,
+                      record_video_size={"width": W, "height": H},
+                  )
+                  page = await ctx.new_page()
+                  # 콘솔 메시지에는 URL 이 없어 favicon 404 인지 스프라이트 404 인지
+                  # 구분이 안 된다. 응답을 직접 보고 무엇이 실패했는지 남긴다.
+                  page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}")
+                          if r.status >= 400 and "favicon" not in r.url else None)
+                  page.on("requestfailed", lambda r: problems.append(
+                      f"요청 실패 {r.url} ({r.failure})") if "favicon" not in r.url else None)
+                  page.on("pageerror", lambda e: problems.append(f"pageerror: {e}"))
+                  done()
+
+                  stage(f"페이지 열기 — {URL}")
+                  resp = await page.goto(URL, wait_until="load", timeout=60_000)
+                  if resp is None or not resp.ok:
+                      raise SystemExit(f"::error::페이지 열기 실패 (status={resp and resp.status})")
+                  done()
+
+                  stage("스프라이트 로딩 확인")
+                  # 개미가 한 장이라도 안 뜨면 녹화본을 통째로 버려야 한다. 먼저 잡는다.
+                  await page.wait_for_function(
+                      "document.getElementById('antA').naturalWidth > 0", timeout=60_000)
+                  done()
+
+                  stage("재생 시작 대기")
+                  # 폰트·이미지 프리로드가 끝나야 첫 프레임이 돈다.
+                  # 카운트다운에 숫자가 찍히는 순간이 재생 t=0 이다.
+                  await page.wait_for_function(
+                      "document.getElementById('count').textContent.trim() !== ''",
+                      timeout=60_000)
+                  done()
+
+                  stage("총 길이 확인")
+                  # HTML 안의 상수를 그대로 읽는다. 비트를 늘려도 워크플로는 그대로 둔다.
+                  total = await page.evaluate(
+                      "typeof TOTAL_MS === 'number' ? TOTAL_MS : null")
+                  if not total:
+                      total = FALLBACK_MS
+                      print(f"::warning::TOTAL_MS 를 읽지 못해 기본값 {FALLBACK_MS}ms 사용")
+                  wait_ms = total + TAIL_MS
+                  print(f"재생 {total}ms + 여유 {TAIL_MS}ms = {wait_ms}ms", flush=True)
+                  done()
+
+                  stage(f"녹화 중 ({wait_ms/1000:.1f}초)")
+                  await page.wait_for_timeout(wait_ms)
+                  done()
+
+                  stage("녹화 마무리")
+                  video = page.video
+                  await ctx.close()          # 컨텍스트를 닫아야 webm 이 완성된다
+                  await browser.close()
+                  path = await video.path()
+                  done()
+
+              size = os.path.getsize(path)
+              print(f"webm: {path} ({size/1e6:.1f} MB)", flush=True)
+              if size < 200_000:
+                  raise SystemExit(f"::error::녹화본이 {size} bytes 뿐입니다 — 렌더링 실패로 봅니다")
+              if problems:
+                  print("::warning::페이지가 오류를 보고했습니다:", flush=True)
+                  for line in problems[:20]:
+                      print("  " + line, flush=True)
+              emit("webm", path)
+              emit("wait_s", f"{wait_ms/1000:.3f}")
+
+          try:
+              asyncio.run(main())
+          except SystemExit:
+              raise
+          except Exception as exc:
+              print(f"::error::녹화 중 예외 {type(exc).__name__}: {exc}", file=sys.stderr)
+              sys.exit(1)
+          PY
+          python -c "import ast,sys; ast.parse(open('render_reel.py').read())"
+
+      - name: 5. 애니메이션 녹화
+        id: rec
+        env:
+          REEL_URL: http://127.0.0.1:8000/${{ inputs.page }}
+          TAIL_MS: '3000'
+        run: python render_reel.py
+
+      - name: 6. MP4 변환
+        id: mp4
+        env:
+          WEBM: ${{ steps.rec.outputs.webm }}
+          WAIT_S: ${{ steps.rec.outputs.wait_s }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WEBM")
+          # Playwright 는 페이지가 열린 순간부터 녹화하지만, 화면이 안 바뀌는 동안에는
+          # 프레임을 만들지 않는다. 그래서 로딩 구간이 앞에 13초쯤 붙기도 하고 아예
+          # 없기도 한다 (실측: 70.8s / 57.9s). 앞에서 재는 건 못 믿고, 끝은 확실하다 —
+          # 대기가 끝나자마자 컨텍스트를 닫으니 영상 끝 = 재생 끝이다. 끝에서 역산한다.
+          # 여유를 앞에 두면 로딩 중 반쯤 그려진 화면이 딸려 들어오므로 두지 않는다.
+          START=$(python -c "print(max(0.0, $DUR - $WAIT_S))")
+          echo "webm 길이 ${DUR}s / 재생 ${WAIT_S}s → ${START}s 부터 사용"
+
+          ffmpeg -y -hide_banner -loglevel warning \
+            -ss "$START" -i "$WEBM" \
+            -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 \
+            -t "$WAIT_S" \
+            -c:v libx264 -preset slow -crf 19 -pix_fmt yuv420p -r 30 \
+            -vf "scale=1080:1920:flags=lanczos,setsar=1" \
+            -c:a aac -b:a 128k -shortest -movflags +faststart \
+            "out/${NAME}.mp4"
+
+          ls -la "out/${NAME}.mp4"
+          echo "file=out/${NAME}.mp4" >> "$GITHUB_OUTPUT"
+
+      - name: 7. 결과 검증
+        env:
+          FILE: ${{ steps.mp4.outputs.file }}
+          WAIT_S: ${{ steps.rec.outputs.wait_s }}
+        run: |
+          set -euo pipefail
+          probe() { ffprobe -v error -select_streams "$1" -show_entries "$2" -of csv=p=0 "$FILE"; }
+          SIZE=$(probe v:0 stream=width,height)
+          FPS=$(probe v:0 stream=r_frame_rate)
+          ACODEC=$(probe a:0 stream=codec_name)
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$FILE")
+          echo "해상도=$SIZE  fps=$FPS  오디오=$ACODEC  길이=${DUR}s"
+
+          [ "$SIZE" = "1080,1920" ] || { echo "::error::해상도가 1080x1920 이 아닙니다 ($SIZE)"; exit 1; }
+          [ "$FPS"  = "30/1" ]      || { echo "::error::30fps 가 아닙니다 ($FPS)"; exit 1; }
+          # 인스타는 오디오 트랙이 없는 파일을 거르는 경우가 있어 무음 트랙을 넣었다
+          [ "$ACODEC" = "aac" ]     || { echo "::error::무음 오디오 트랙이 없습니다"; exit 1; }
+          python -c "import sys; d=float('$DUR'); w=float('$WAIT_S'); sys.exit('::error::길이가 %.1fs 로 예상(%.1fs)과 다릅니다' % (d, w) if abs(d - w) > 1.5 else 0)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.name }}
+          path: out/*.mp4
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 실패 진단
+        if: failure()
+        run: |
+          echo "::group::server.log";      tail -60 server.log 2>/dev/null || echo "(없음)"; echo "::endgroup::"
+          echo "::group::video/";          ls -la video 2>/dev/null || echo "(없음)";       echo "::endgroup::"
+          echo "::group::out/";            ls -la out 2>/dev/null   || echo "(없음)";       echo "::endgroup::"
+          echo "::group::ffmpeg";          ffmpeg -version 2>/dev/null | head -1 || echo "(미설치)"; echo "::endgroup::"
+          echo "::group::한글 폰트";        fc-list 2>/dev/null | grep -i "noto sans cjk" | head -3 || echo "(없음)"; echo "::endgroup::"
+
+      - name: 서버 정리
+        if: always()
+        run: |
+          [ -f server.pid ] && kill "$(cat server.pid)" 2>/dev/null || true
+          exit 0
