@@ -292,11 +292,21 @@ def test_build_emits_pwa_files():
         assert any(i["purpose"] == "maskable" for i in man["icons"])
 
         sw = open(os.path.join(cfg.SITE_DIR, "sw.js"), encoding="utf-8").read()
-        # 캐시 이름이 빌드마다 달라야 새 빌드가 옛 캐시를 밀어낸다.
-        # 고정 문자열이면 브라우저가 sw.js 를 안 바뀐 것으로 보고 갱신하지 않는다.
         assert "__VERSION__" not in sw
         # 숫자가 본문에 박혀 있으므로 페이지는 반드시 네트워크 우선이어야 한다
         assert "fetch(req)" in sw and "caches.match" in sw
+
+        # 데이터가 바뀌면 캐시 이름도 반드시 바뀌어야 한다. 안 바뀌면 브라우저가
+        # sw.js 를 그대로라고 보고 새 빌드를 영영 감지하지 못해 갱신 알림이 죽는다.
+        # (처음엔 built_at 을 썼는데, 소급 수집이 끝난 뒤로 고정이라 실제로 죽었다.)
+        rec["quarters"]["2026Q1"]["매출액"] = 8.5e13
+        store.save(rec)
+        site.build(cfg.SITE_DIR)
+        sw2 = open(os.path.join(cfg.SITE_DIR, "sw.js"), encoding="utf-8").read()
+        assert sw2 != sw, "데이터가 바뀌었는데 서비스워커 캐시 이름이 그대로입니다"
+        # 반대로 아무것도 안 바뀌면 그대로여야 한다 — 헛알림이 뜨면 안 된다
+        site.build(cfg.SITE_DIR)
+        assert open(os.path.join(cfg.SITE_DIR, "sw.js"), encoding="utf-8").read() == sw2
     finally:
         cfg.FACTS_DIR, cfg.SITE_DIR = old_facts, old_site
         shutil.rmtree(tmp, ignore_errors=True)
