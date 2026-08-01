@@ -202,6 +202,66 @@ def test_set_shares_refuses_implausible_value():
     print("test_set_shares_refuses_implausible_value: OK")
 
 
+def test_frozen_price_marks_halted_ticker():
+    """
+    거래정지 종목은 마지막 체결가가 그대로 남아 분기말 종가가 안 움직인다.
+    실데이터의 카프로(9분기 3,660원)·금양(5분기 9,900원)이 그 경우다.
+    """
+    def rec(closes):
+        return {"code": "006380", "quarters":
+                {q: {"종가": c} for q, c in closes}}
+
+    halted = rec([("2025Q2", 3660.0), ("2025Q3", 3660.0),
+                  ("2025Q4", 3660.0), ("2026Q1", 3660.0)])
+    got = store.frozen_price_run(halted)
+    assert got == {"quarters": 4, "close": 3660.0, "since": "2025Q2"}
+
+    # 거래가 살아 있으면 잡히지 않는다
+    live = rec([("2025Q3", 3600.0), ("2025Q4", 4280.0), ("2026Q1", 3660.0)])
+    assert store.frozen_price_run(live) is None
+
+    # 최신 분기부터 이어진 구간만 센다. 과거에 같은 값이 있어도 끊기면 거기까지다.
+    resumed = rec([("2025Q1", 3660.0), ("2025Q2", 3660.0),
+                   ("2025Q3", 4000.0), ("2025Q4", 4100.0), ("2026Q1", 4100.0)])
+    assert store.frozen_price_run(resumed)["quarters"] == 2
+    assert store.frozen_price_run(resumed)["close"] == 4100.0
+
+    # 한 분기만 같으면(= 비교 대상이 하나뿐) 판단하지 않는다
+    assert store.frozen_price_run(rec([("2026Q1", 3660.0)])) is None
+    # 기준 분기 수를 올리면 짧은 구간은 빠진다
+    assert store.frozen_price_run(halted, min_quarters=5) is None
+    print("test_frozen_price_marks_halted_ticker: OK")
+
+
+def test_site_marks_halted_company():
+    """정지 종목은 목록과 상세 양쪽에 표시돼야 한다."""
+    tmp = tempfile.mkdtemp()
+    try:
+        rec = {"code": "006380", "name": "카프로", "quarters": {
+            q: {"종가": 3660.0, "상장주식수": 168999996.0,
+                "시가총액": 3660.0 * 168999996.0, "자본총계": 7.0e10,
+                "지배주주지분": 7.0e10, "매출액": 1.0e10, "영업이익": 1.0e9,
+                "순이익": 1.0e9, "지배주주순이익": 1.0e9, "자산총계": 2.0e11,
+                "부채총계": 1.3e11}
+            for q in ("2025Q2", "2025Q3", "2025Q4", "2026Q1")}}
+        old_facts, old_site = cfg.FACTS_DIR, cfg.SITE_DIR
+        cfg.FACTS_DIR = os.path.join(tmp, "facts")
+        cfg.SITE_DIR = os.path.join(tmp, "docs")
+        os.makedirs(cfg.FACTS_DIR, exist_ok=True)
+        store.save(rec)
+        path = site.build(cfg.SITE_DIR)
+        page = open(path, encoding="utf-8").read()
+        assert '"halted": true' in page or '"halted":true' in page
+        assert "거래정지 의심" in page      # 상세 배지
+        assert 'class="halt"' in page       # 목록 표시
+        # 근거를 화면에 같이 띄운다 — 단정이 아니라 추정이므로
+        assert "4개 분기 연속" in page or "c.halted.quarters" in page
+    finally:
+        cfg.FACTS_DIR, cfg.SITE_DIR = old_facts, old_site
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("test_site_marks_halted_company: OK")
+
+
 def test_sort_quarters():
     keys = ["2024Q4", "2025Q1", "2023Q2", "2025Q4", "2025Q2"]
     assert store.sort_quarters(keys)[0] == "2025Q4"
@@ -564,6 +624,8 @@ if __name__ == "__main__":
         test_meta_attaches_to_already_filled_quarter()
         test_implausible_share_spike_is_dropped_but_real_split_kept()
         test_set_shares_refuses_implausible_value()
+        test_frozen_price_marks_halted_ticker()
+        test_site_marks_halted_company()
         test_sort_quarters()
         test_save_load_roundtrip_and_trim()
         test_price_snapshot_is_immutable()

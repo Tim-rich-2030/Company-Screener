@@ -16,7 +16,7 @@ import quarterly_dashboard as qd
 
 from . import config
 from .metrics import compute_timeseries
-from .store import load_all, load_state, sort_quarters
+from .store import load_all, load_state, sort_quarters, frozen_price_run
 
 CSS = """
 :root{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;--head:#f7f8fa;
@@ -53,6 +53,10 @@ main{padding:16px 18px 50px;overflow-x:auto}
 .tag{background:var(--chip);color:var(--muted);border-radius:999px;
 padding:2px 9px;font-size:11px}
 .tag.warn{color:var(--neg)}
+/* 목록에서 거래정지 의심 종목을 한눈에. 값이 멈춰 있는 걸 모르고 PBR을 읽으면
+   "싸 보이는데 살 수가 없는" 종목을 고르게 된다. */
+.halt{font-style:normal;font-size:11px;font-weight:700;margin-left:6px;
+  padding:1px 5px;border-radius:4px;background:var(--neg);color:#fff;opacity:.85}
 .cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
 .card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
 .card .k{color:var(--muted);font-size:11px}
@@ -98,7 +102,9 @@ function renderList(){
     return !t || c.name.toLowerCase().indexOf(t) >= 0 || c.code.indexOf(t) >= 0; });
   list.innerHTML = rows.map(function(c){
     return '<div class="item' + (current === c.code ? ' on' : '') + '" data-code="' + c.code +
-      '"><b>' + esc(c.name) + '</b><span>' + esc(c.latest || '') + '</span></div>';
+      '"><b>' + esc(c.name) +
+      (c.halted ? '<i class="halt" title="분기말 종가가 여러 분기째 그대로입니다">정지?</i>' : '') +
+      '</b><span>' + esc(c.latest || '') + '</span></div>';
   }).join('') || '<div class="empty">검색 결과 없음</div>';
   list.querySelectorAll('.item').forEach(function(el){
     el.addEventListener('click', function(){ select(el.dataset.code); });
@@ -225,6 +231,9 @@ function select(code){
     (c.report ? '<span class="tag">최근 ' + esc(c.report) + '</span>' : '') +
     (c.currency && c.currency !== 'KRW'
       ? '<span class="tag warn">' + esc(c.currency) + ' 공시 — PBR·PER 계산 안 함</span>' : '') +
+    (c.halted
+      ? '<span class="tag warn">거래정지 의심 — ' + c.halted.quarters + '개 분기 연속 종가 ' +
+        c.halted.close.toLocaleString('ko-KR') + '원</span>' : '') +
     '</div>' +
     '<div class="cards">' + cards + '</div>' + charts +
     '<div style="overflow-x:auto"><table><thead>' + head + '</thead><tbody>' + body +
@@ -234,7 +243,13 @@ function select(code){
     '분기말 시점에는 아직 그 분기 실적이 공시되기 전이므로, ' +
     '"그때 이 PER로 살 수 있었다"는 뜻은 아닙니다.<br>' +
     'PER은 최근 4분기 순이익이 적자면 계산하지 않습니다(–). ' +
-    '금융지주·은행·보험은 자본 구조가 달라 제조업과 같은 기준으로 비교하면 안 됩니다.</div>';
+    '금융지주·은행·보험은 자본 구조가 달라 제조업과 같은 기준으로 비교하면 안 됩니다.' +
+    (c.halted
+      ? '<br><b>거래정지 의심</b>은 분기말 종가가 ' + c.halted.quarters +
+        '개 분기 연속 같은 값이라는 뜻입니다(' + esc(c.halted.since) +
+        ' 이후). 거래정지 목록을 직접 조회한 것이 아니라 주가가 멈춘 것을 보고 ' +
+        '추정한 것이므로, 매매 전에 반드시 확인하세요.' : '') +
+    '</div>';
 }
 // 마지막 실행 시각을 보는 사람의 시간대로, '몇 시간 전'까지 함께 보여준다
 document.querySelectorAll('time[datetime]').forEach(function(el){
@@ -266,6 +281,7 @@ def build(out_dir: str = None) -> str:
         if not ts["quarters"]:
             continue
         latest_slot = rec["quarters"].get(ts["quarters"][0], {})
+        halted = frozen_price_run(rec)
         data[rec["code"]] = {
             "name": rec.get("name") or rec["code"],
             "quarters": ts["quarters"],
@@ -273,10 +289,12 @@ def build(out_dir: str = None) -> str:
             "fs_div": {"CFS": "연결", "OFS": "별도"}.get(latest_slot.get("fs_div"), ""),
             "report": latest_slot.get("report_nm", ""),
             "currency": (latest_slot.get("currency") or "KRW").upper(),
+            "halted": halted,
         }
         companies.append({"code": rec["code"],
                           "name": rec.get("name") or rec["code"],
-                          "latest": ts["quarters"][0]})
+                          "latest": ts["quarters"][0],
+                          "halted": bool(halted)})
     companies.sort(key=lambda c: c["name"])
 
     state = load_state()
