@@ -3,30 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>SK하이닉스 코스터</title>
+<title>SK하이닉스 상한가 그 이후…</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap">
 <style>
 /* ---------------------------------------------------------------------------
    릴스용 애니메이션 (1080x1920). 화면녹화 전용이라 조작 UI는 하나도 두지 않는다.
    다시 보려면 새로고침하거나 화면을 탭한다.
    --------------------------------------------------------------------------- */
 :root{
-  --rail:#E23B3B;          /* 실제 구간 레일 */
-  --rail-dim:#E23B3B;      /* 예측 구간도 같은 색, 투명도로만 구분 */
-  --ink:#fff;
+  --rail:#E23B3B;
+  --up:#E2453B;      /* 상승 — 국내 관례대로 빨강 */
+  --down:#3B6FE2;    /* 하락 — 파랑 */
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden}
 body{
   font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
               system-ui,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
-  color:var(--ink);-webkit-font-smoothing:antialiased;
-  cursor:none;                       /* 녹화에 마우스 커서가 찍히지 않게 */
+  color:#fff;-webkit-font-smoothing:antialiased;
+  cursor:none;                        /* 녹화에 커서가 찍히지 않게 */
 }
 
+#fit{position:absolute;left:0;top:0;transform-origin:0 0}
 #stage{
   position:absolute;left:0;top:0;width:1080px;height:1920px;
-  transform-origin:0 0;background:#050507;overflow:hidden;
+  transform-origin:0 0;background:#080a12;overflow:hidden;
 }
 #stage.shake{animation:shake .28s linear infinite}
 @keyframes shake{
@@ -34,98 +38,86 @@ body{
   50%{transform:translate(7px,-8px)} 75%{transform:translate(-5px,-4px)}
   100%{transform:translate(0,0)}
 }
-/* shake 는 #stage 의 scale 을 덮어쓰므로 별도 래퍼에 scale 을 건다 */
-#fit{position:absolute;left:0;top:0;transform-origin:0 0}
 
-/* --- 배경 --- */
-#sky{
-  position:absolute;inset:0;
-  background:
-    radial-gradient(120% 70% at 50% 8%, #1b1030 0%, #0a0a14 55%, #050507 100%);
-}
-#stars{position:absolute;inset:0;opacity:.55}
+/* --- 밤하늘 --- */
+#sky{position:absolute;inset:0;
+  background:linear-gradient(#0d1024 0%, #171a30 42%, #232338 74%, #2b2733 100%)}
+#stars{position:absolute;inset:0}
+
+/* --- 유원지 배경 3겹. 원경은 느리게, 근경은 빠르게 흐른다 --- */
+.park{position:absolute;left:0;top:0;height:1920px;will-change:transform}
+#parkFar{z-index:1} #parkMid{z-index:2} #parkNear{z-index:4}
 #ground{
-  position:absolute;left:0;right:0;top:1560px;bottom:0;
-  background:linear-gradient(#141420 0%, #08080e 100%);
-  border-top:3px solid rgba(255,255,255,.14);
+  position:absolute;left:0;right:0;top:1600px;bottom:0;z-index:3;
+  background:linear-gradient(#2b2b38 0%, #16161f 55%, #0d0d14 100%);
+  border-top:4px solid #3b3b4c;
 }
 
 /* --- 월드(카메라가 좌우로 미는 레이어) --- */
-#world{position:absolute;left:0;top:0;height:1920px;will-change:transform}
+#world{position:absolute;left:0;top:0;height:1920px;z-index:5;will-change:transform}
 #track{position:absolute;left:0;top:0}
 
 /* --- 카트 --- */
 #cart{
-  position:absolute;left:0;top:0;width:340px;height:118px;
-  offset-rotate:0deg;                /* 회전 없이 항상 수평 */
-  offset-anchor:50% 100%;            /* 밑면 중앙이 레일에 닿게 */
+  position:absolute;left:0;top:0;width:300px;height:112px;
+  offset-rotate:0deg;                 /* 회전 없이 항상 수평 */
+  offset-anchor:50% 100%;             /* 밑면 중앙이 레일에 닿게 */
   z-index:6;
 }
 #cartInner{position:absolute;left:0;top:0;width:100%;height:100%;
   transform:translateY(-6px);will-change:transform}
 .cartBody{
   position:absolute;left:0;top:0;width:100%;height:100%;
-  border-radius:18px 18px 26px 26px;
+  border-radius:16px 16px 24px 24px;
   background:linear-gradient(#ff6a3d,#c2261b);
-  box-shadow:0 10px 0 rgba(0,0,0,.35), inset 0 4px 0 rgba(255,255,255,.28);
+  box-shadow:0 10px 0 rgba(0,0,0,.38), inset 0 4px 0 rgba(255,255,255,.28);
   border:5px solid #2b0b09;
 }
 .rider{
-  position:absolute;bottom:26px;height:214px;width:auto;
-  filter:drop-shadow(0 6px 10px rgba(0,0,0,.45));
+  position:absolute;bottom:24px;height:200px;width:auto;
+  filter:drop-shadow(0 6px 10px rgba(0,0,0,.5));
   z-index:1;transition:opacity .18s;
 }
-#antA{left:-22px}
-#antB{right:-22px;transform:scaleX(-1)}
+#antA{left:-18px}
+#antB{right:-18px;transform:scaleX(-1)}
 .cartFront{
-  position:absolute;left:0;bottom:0;width:100%;height:74px;
-  border-radius:0 0 22px 22px;
+  position:absolute;left:0;bottom:0;width:100%;height:72px;
+  border-radius:0 0 20px 20px;
   background:linear-gradient(#e2492a,#a71d14);
   border-top:4px solid rgba(0,0,0,.3);
-  z-index:2;
+  z-index:2;display:grid;place-items:center;
 }
-.cartFront::after{
-  content:"";position:absolute;left:50%;top:22px;transform:translateX(-50%);
-  width:120px;height:8px;border-radius:4px;background:rgba(255,255,255,.25);
+.cartFront span{
+  font-size:25px;font-weight:900;letter-spacing:-1px;color:#ffe9de;
+  text-shadow:0 2px 0 rgba(0,0,0,.45);
 }
 .wheel{
-  position:absolute;bottom:-19px;width:38px;height:38px;border-radius:50%;
+  position:absolute;bottom:-18px;width:36px;height:36px;border-radius:50%;
   background:#17171d;border:5px solid #4a4a55;z-index:3;
 }
-.wheel.l{left:44px} .wheel.r{right:44px}
+.wheel.l{left:40px} .wheel.r{right:40px}
 
 /* --- 지상 개미 --- */
 .walker{
-  position:absolute;height:250px;width:auto;z-index:5;
-  filter:drop-shadow(0 8px 12px rgba(0,0,0,.5));
+  position:absolute;height:212px;width:auto;z-index:5;
+  filter:drop-shadow(0 8px 12px rgba(0,0,0,.55));
   transform:translate(-50%,-100%);
 }
-
-/* --- 배경 코스터의 카트 --- */
-.bgcart{
-  position:absolute;z-index:1;opacity:0;
-  transform:translate(-50%,-100%);
-  filter:brightness(0.4) blur(1px);
-}
-.bgcart img{height:96px;width:auto;display:block}   /* 40% 크기 */
 
 /* --- 말풍선 --- */
-#bubble{
-  position:absolute;z-index:9;transform:translate(-50%,-100%);
-  opacity:0;pointer-events:none;
-}
+#bubble{position:absolute;z-index:9;transform:translate(-50%,-100%);opacity:0}
 #bubble.on{animation:pop .26s cubic-bezier(.2,1.7,.4,1) both}
 @keyframes pop{from{opacity:0;transform:translate(-50%,-88%) scale(.7)}
                to{opacity:1;transform:translate(-50%,-100%) scale(1)}}
 .balloon{
-  position:relative;padding:26px 42px;background:#fff;color:#14141b;
-  font-size:60px;font-weight:800;letter-spacing:-1px;white-space:nowrap;
+  position:relative;padding:24px 40px;background:#fff;color:#14141b;
+  font-size:58px;font-weight:800;letter-spacing:-1px;white-space:nowrap;
   border:7px solid #14141b;
-  border-radius:44px 52px 40px 56px/52px 40px 56px 44px;  /* 손그림 느낌 */
-  box-shadow:10px 12px 0 rgba(0,0,0,.35);
+  border-radius:44px 52px 40px 56px/52px 40px 56px 44px;   /* 손그림 느낌 */
+  box-shadow:10px 12px 0 rgba(0,0,0,.4);
   transform:rotate(-1.6deg);
 }
-.balloon::after{                                   /* 꼬리 */
+.balloon::after{
   content:"";position:absolute;left:50%;bottom:-38px;margin-left:-22px;
   width:0;height:0;border:22px solid transparent;
   border-top-color:#14141b;border-bottom:0;
@@ -135,43 +127,62 @@ body{
   width:0;height:0;border:15px solid transparent;
   border-top-color:#fff;border-bottom:0;
 }
-/* 5번 비트와 11번 비트가 똑같이 보여야 한다 — 같은 클래스를 쓴다 */
-.balloon.hype{
-  background:#FFE24A;color:#2a1600;border-color:#2a1600;transform:rotate(1.8deg);
-}
+/* 5번과 11번이 똑같이 보여야 한다 — 같은 클래스를 쓴다 */
+.balloon.hype{background:#FFE24A;color:#2a1600;border-color:#2a1600;
+  transform:rotate(1.8deg)}
 .balloon.hype::after{border-top-color:#2a1600}
 .balloon.hype::before{border-top-color:#FFE24A}
+/* 12번에서 한 번 나온 대사가 13번에 더 크게, 떨면서 다시 나온다 */
+.balloon.panic{font-size:80px;padding:26px 46px;color:#a30f0f;
+  animation:tremble .085s linear infinite}
+@keyframes tremble{
+  0%{transform:rotate(-1.6deg) translate(0,0)}
+  25%{transform:rotate(-2.8deg) translate(-5px,3px)}
+  50%{transform:rotate(-.4deg) translate(4px,-4px)}
+  75%{transform:rotate(-2.2deg) translate(-3px,-2px)}
+  100%{transform:rotate(-1.6deg) translate(0,0)}
+}
 
-/* --- HUD (월드와 무관하게 고정) --- */
+/* --- HUD --- */
 #hud{position:absolute;inset:0;pointer-events:none;z-index:20}
 .grid{position:absolute;left:0;right:0;height:0;border-top:1px dashed rgba(255,255,255,.10)}
 .gridlab{
-  position:absolute;left:24px;transform:translateY(-50%);
-  font-size:30px;font-weight:700;color:rgba(255,255,255,.42);
+  position:absolute;left:22px;transform:translateY(-50%);
+  font-size:29px;font-weight:700;color:rgba(255,255,255,.5);
   font-variant-numeric:tabular-nums;
-  text-shadow:0 0 12px #050507, 0 0 6px #050507;   /* 트랙과 겹쳐도 읽히게 */
+  text-shadow:0 0 14px #0b0d18, 0 0 6px #0b0d18;
 }
-#axisUnit{position:absolute;left:24px;top:352px;font-size:26px;color:rgba(255,255,255,.35);font-weight:600}
+#axisUnit{position:absolute;left:22px;top:250px;font-size:25px;font-weight:600;
+  color:rgba(255,255,255,.4);text-shadow:0 0 12px #0b0d18}
 #title{
-  position:absolute;right:34px;top:60px;text-align:right;
+  position:absolute;left:0;right:0;top:64px;text-align:center;
+  font-size:62px;font-weight:900;letter-spacing:-2.5px;
+  text-shadow:0 6px 24px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.6);
 }
-#title b{display:block;font-size:56px;font-weight:900;letter-spacing:-2px}
-#title span{display:block;margin-top:8px;font-size:28px;font-weight:600;color:rgba(255,255,255,.5)}
-#disclaimer{
-  position:absolute;left:0;right:0;bottom:70px;text-align:center;
-  font-size:30px;font-weight:600;color:rgba(255,255,255,.6);letter-spacing:-.5px;
+#foot{
+  position:absolute;left:0;right:0;bottom:0;padding:0 60px 96px;text-align:center;
+  background:linear-gradient(rgba(8,10,18,0) 0%, rgba(8,10,18,.82) 38%, rgba(8,10,18,.95) 100%);
+  padding-top:120px;
+}
+#slogan{
+  font-family:"Nanum Pen Script","Pretendard Variable",Pretendard,cursive;
+  font-size:86px;line-height:1.05;color:#FFE24A;letter-spacing:1px;
+  text-shadow:4px 5px 0 rgba(0,0,0,.6);transform:rotate(-1.2deg);
+}
+#fineprint{
+  margin-top:22px;font-size:25px;line-height:1.45;font-weight:600;
+  color:rgba(255,255,255,.62);letter-spacing:-.4px;
 }
 #handle{
-  position:absolute;right:34px;bottom:26px;
-  font-size:26px;font-weight:700;color:rgba(255,255,255,.38);
+  position:absolute;right:34px;bottom:26px;z-index:21;
+  font-size:26px;font-weight:700;color:rgba(255,255,255,.45);
 }
 
 /* --- 오프닝 카운트다운 --- */
 #count{
   position:absolute;inset:0;display:grid;place-items:center;z-index:30;
   font-size:420px;font-weight:900;letter-spacing:-20px;color:#fff;
-  text-shadow:0 0 60px rgba(226,59,59,.8);
-  opacity:0;
+  text-shadow:0 0 60px rgba(226,59,59,.85);opacity:0;
 }
 #count.go{animation:tick .4s ease-out both}
 @keyframes tick{
@@ -185,18 +196,21 @@ body{
 <div id="fit"><div id="stage">
   <div id="sky"></div>
   <svg id="stars" width="1080" height="1920"></svg>
+
+  <div class="park" id="parkFar"></div>
+  <div class="park" id="parkMid"></div>
   <div id="ground"></div>
+  <div class="park" id="parkNear"></div>
 
   <div id="world">
     <svg id="track" height="1920"></svg>
-    <div id="bgcarts"></div>
     <img class="walker" id="walkA" alt="">
     <img class="walker" id="walkB" alt="">
     <div id="cart"><div id="cartInner">
       <div class="cartBody">
         <img class="rider" id="antA" alt="">
         <img class="rider" id="antB" alt="">
-        <div class="cartFront"></div>
+        <div class="cartFront"><span>SK하이닉스 코스터</span></div>
         <div class="wheel l"></div><div class="wheel r"></div>
       </div>
     </div></div>
@@ -205,73 +219,111 @@ body{
 
   <div id="hud">
     <div id="axisUnit">단위: 만원</div>
-    <div id="title"><b>SK하이닉스 코스터</b><span>2026-07-31 종가 171.8만원 기준</span></div>
-    <div id="disclaimer">예측선은 개인 의견이며 투자 권유가 아닙니다</div>
-    <div id="handle">@ggujungbuja</div>
+    <div id="title">SK하이닉스 상한가 그 이후…</div>
+    <div id="foot">
+      <div id="slogan">주가 급락에도 급등에도 항상 냉정함이 중요!!</div>
+      <div id="fineprint">
+        본 콘텐츠는 투자 권유가 아닌 참고용으로 작성되었으며<br>
+        투자 판단의 책임은 본인에게 있습니다.
+      </div>
+    </div>
   </div>
+  <div id="handle">@ggujungbuja</div>
 
   <div id="count"></div>
 </div></div>
 
 <script>
 "use strict";
+const SVGNS = "http://www.w3.org/2000/svg";
+const W = 1080, H = 1920;
+const $ = id => document.getElementById(id);
+
+/* ===========================================================================
+   0. 난수 — 새로고침할 때마다 배경이 달라지면 녹화를 다시 찍어야 한다.
+      씨앗을 고정해 항상 같은 그림이 나오게 한다.
+   =========================================================================== */
+function rng(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 /* ===========================================================================
    1. 좌표계
    ---------------------------------------------------------------------------
-   주가(만원)를 y 로, 시간축을 x 로 놓은 월드를 만들고 카메라(=#world 의
-   translateX)가 카트를 따라간다. 화면 폭 1080 에 22개 지점을 다 넣으면 지점
-   간격이 40px 밖에 안 되어 카트도 개미도 안 보인다. 그래서 월드를 길게 깔고
-   가로로 흘린다.
+   주가(만원)를 y 로, 시간축을 x 로 놓은 월드를 만들고 카메라(=레이어의
+   translateX)가 카트를 따라간다. 화면 폭 1080 에 다 넣으면 지점 간격이 40px라
+   카트도 개미도 안 보인다. 그래서 월드를 길게 깔고 가로로 흘린다.
    =========================================================================== */
-const W = 1080, H = 1920;
-
-// 2026-07-31 종가(171.8만) 이후의 예측 경로. 단위 만원.
-const REAL_CLOSE = 171.8;
-const PRED = [180,190,200,205,210,200,190,180,160,170,180,190,200,160,140,160,170,180,190,210,230];
-const ANCH = [REAL_CLOSE, ...PRED];          // 22개 지점
-
-const P_MIN = 130, P_MAX = 240;              // y 매핑 범위 (눈금은 140~230)
-const Y_TOP = 430, Y_BOT = 1300;
-const GROUND_Y = 1560;
-const X0 = 700, STEP = 265;                  // 예측 시작 x, 지점 간격
-const PLATFORM_X = 120;                      // 출발 승강장 왼쪽 끝
-const SEG = 24;                              // 지점 사이 샘플 수
-const CAM_X = 400;                           // 화면에서 카트가 놓일 x
+const P_MIN = 115, P_MAX = 320;         // 프리퀄의 130만~300만까지 담아야 한다
+const Y_TOP = 300, Y_BOT = 1380;
+const GROUND_Y = 1600;
+const CAM_X = 400;                      // 화면에서 카트가 놓일 x
+const SEG = 22;                         // 지점 사이 샘플 수
 
 const py = p => Y_TOP + (P_MAX - p) / (P_MAX - P_MIN) * (Y_BOT - Y_TOP);
-const px = i => X0 + i * STEP;
+const pv = y => P_MAX - (y - Y_TOP) / (Y_BOT - Y_TOP) * (P_MAX - P_MIN);
 
-const WORLD_W = px(ANCH.length - 1) + 900;
+// [가격(만원), 직전 지점과의 가로 간격]
+// 간격을 좁히면 그만큼 기울기가 서진다. 급락·급등 구간을 일부러 좁혔다.
+const SPEC = [
+  // ── 프리퀄: 실제 구간 (300만 고점 → 130만 → 상한가 171.8만) ──
+  [300, 0], [300, 190], [292, 150], [272, 145], [244, 140], [212, 140],
+  [180, 140], [152, 140], [132, 145], [130, 130],
+  [171.8, 105],                          // 수직에 가까운 상한가
+  // ── 출발 승강장 ──
+  [171.8, 300],
+  // ── 코스터 ──
+  [180, 235], [190, 235], [200, 235], [205, 200], [210, 200],
+  [200, 200], [190, 200], [180, 200], [160, 190], [170, 200],
+  [180, 200], [190, 210], [200, 210],
+  [160, 175], [140, 165],                // 급락
+  [160, 190], [170, 200], [180, 210], [190, 210], [210, 200],
+  [230, 195],                            // 마지막 급등
+];
+const I_LIMIT_UP = 10;                   // 상한가 지점 (프리퀄의 끝)
+const I_A0       = 11;                   // 비트 a:0 = 승강장 오른쪽 끝
+const I_PEAK = 0, I_BOTTOM = 9;
 
-/* Catmull-Rom 보간 — 지점을 그대로 지나면서 부드럽게 이어준다. */
-function catmullRom(pts, seg){
-  const out = [], P = [pts[0], ...pts, pts[pts.length - 1]];
+const ANCH = [];
+{
+  let x = 120;
+  for(const [p, dx] of SPEC){ x += dx; ANCH.push([x, py(p), p]); }
+}
+const ax = i => ANCH[i][0], ay = i => ANCH[i][1];
+const WORLD_W = ax(ANCH.length - 1) + 900;
+const CAM_MIN = -(WORLD_W - W);
+
+/* --- Centripetal Catmull-Rom --------------------------------------------
+   균등(uniform) 방식은 간격이 크게 다른 지점이 붙어 있으면 고리를 만든다.
+   상한가처럼 거의 수직인 구간이 있으니 centripetal(alpha=0.5)을 쓴다.        */
+function catmullRom(pts, seg, alpha){
+  const P = [pts[0], ...pts, pts[pts.length - 1]];
+  const out = [];
+  const knot = (t, a, b) => t + Math.pow(Math.hypot(b[0]-a[0], b[1]-a[1]), alpha) || t + 1e-4;
   for(let i = 1; i < P.length - 2; i++){
-    const [x0,y0]=P[i-1], [x1,y1]=P[i], [x2,y2]=P[i+1], [x3,y3]=P[i+2];
+    const p0=P[i-1], p1=P[i], p2=P[i+1], p3=P[i+2];
+    const t0=0, t1=knot(t0,p0,p1), t2=knot(t1,p1,p2), t3=knot(t2,p2,p3);
     for(let j = 0; j < seg; j++){
-      const t=j/seg, t2=t*t, t3=t2*t;
-      out.push([
-        .5*(2*x1 + (-x0+x2)*t + (2*x0-5*x1+4*x2-x3)*t2 + (-x0+3*x1-3*x2+x3)*t3),
-        .5*(2*y1 + (-y0+y2)*t + (2*y0-5*y1+4*y2-y3)*t2 + (-y0+3*y1-3*y2+y3)*t3)
-      ]);
+      const t = t1 + (t2 - t1) * (j / seg);
+      const mix = (a, b, ta, tb) => {
+        const d = (tb - ta) || 1e-6, u = (t - ta) / d;
+        return [a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u];
+      };
+      const A1 = mix(p0,p1,t0,t1), A2 = mix(p1,p2,t1,t2), A3 = mix(p2,p3,t2,t3);
+      const B1 = mix(A1,A2,t0,t2), B2 = mix(A2,A3,t1,t3);
+      out.push(mix(B1,B2,t1,t2));
     }
   }
   out.push(pts[pts.length - 1]);
   return out;
 }
-
-const anchorPts = ANCH.map((p, i) => [px(i), py(p)]);
-const curvePts  = catmullRom(anchorPts, SEG);
-
-// 승강장(실제 구간): 7/31 종가 높이의 평평한 직선. 여기까지가 확정된 사실이고
-// 오른쪽부터는 전부 예측이다.
-const platPts = [];
-for(let j = 0; j < SEG; j++){
-  platPts.push([PLATFORM_X + (X0 - PLATFORM_X) * (j / SEG), py(REAL_CLOSE)]);
-}
-const PTS = platPts.concat(curvePts);
-const REAL_END = platPts.length;                 // 이 인덱스가 곧 경계
-const anchorIdx = k => REAL_END + k * SEG;
+const PTS = catmullRom(ANCH.map(a => [a[0], a[1]]), SEG, 0.5);
+const anchorIdx = k => k * SEG;
 
 // 누적 거리 — 카트 위치를 거리로 다루면 구간마다 속도를 조절하기 쉽다.
 const CUM = [0];
@@ -284,112 +336,294 @@ const anchorDist = k => CUM[anchorIdx(k)];
 function pointAt(d){
   d = Math.max(0, Math.min(TOTAL, d));
   let lo = 0, hi = CUM.length - 1;
-  while(lo < hi - 1){ const mid = (lo + hi) >> 1; (CUM[mid] <= d ? lo = mid : hi = mid); }
+  while(lo < hi - 1){ const m = (lo + hi) >> 1; (CUM[m] <= d ? lo = m : hi = m); }
   const span = CUM[hi] - CUM[lo] || 1, t = (d - CUM[lo]) / span;
   return [PTS[lo][0] + (PTS[hi][0]-PTS[lo][0])*t, PTS[lo][1] + (PTS[hi][1]-PTS[lo][1])*t];
 }
-
-const dOf = pts => "M" + pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L");
-const D_ALL  = dOf(PTS);
-const D_REAL = dOf(PTS.slice(0, REAL_END + 1));
-const D_PRED = dOf(PTS.slice(REAL_END));
+// x 는 계속 증가하므로 x 로도 바로 찾을 수 있다 (봉차트 생성에 쓴다)
+function yAtX(x){
+  if(x <= PTS[0][0]) return PTS[0][1];
+  if(x >= PTS[PTS.length-1][0]) return PTS[PTS.length-1][1];
+  let lo = 0, hi = PTS.length - 1;
+  while(lo < hi - 1){ const m = (lo + hi) >> 1; (PTS[m][0] <= x ? lo = m : hi = m); }
+  const span = PTS[hi][0] - PTS[lo][0] || 1, t = (x - PTS[lo][0]) / span;
+  return PTS[lo][1] + (PTS[hi][1]-PTS[lo][1])*t;
+}
 
 /* ===========================================================================
-   2. 트랙 그리기 — 레일 2줄 + 침목 + 지지 기둥
+   2. 트랙 — 지지 철골 → 봉차트 → 레일 순서로 겹친다
    =========================================================================== */
-const SVGNS = "http://www.w3.org/2000/svg";
-const svg = document.getElementById("track");
+const svg = $("track");
 svg.setAttribute("width", WORLD_W);
 svg.setAttribute("viewBox", `0 0 ${WORLD_W} ${H}`);
-
-function el(tag, attrs, parent){
+const el = (tag, attrs, parent) => {
   const n = document.createElementNS(SVGNS, tag);
   for(const k in attrs) n.setAttribute(k, attrs[k]);
   (parent || svg).appendChild(n);
   return n;
-}
-const g = name => el("g", {id: name});
+};
+const f1 = v => v.toFixed(1);
 
-// --- 배경(보조) 트랙: 메인보다 아래·뒤쪽으로 평행하게 한 줄 ---
-const gBg = g("bg");
-gBg.setAttribute("transform", "translate(60,250)");
-gBg.setAttribute("opacity", ".28");
-for(let i = 0; i < PTS.length; i += 12){
-  el("line", {x1:PTS[i][0], y1:PTS[i][1], x2:PTS[i][0], y2:GROUND_Y,
-              stroke:"#3a2430", "stroke-width":3}, gBg);
-}
-el("path", {d:D_ALL, fill:"none", stroke:"#4d2e3a", "stroke-width":7}, gBg);
-
-// --- 지지 기둥. 촘촘하면 창살처럼 보여 개미가 안 보인다 — 90px 정도씩 띄운다 ---
-const gCol = g("cols");
-for(let i = 0; i < PTS.length; i += 8){
-  const real = i <= REAL_END;
-  el("line", {x1:PTS[i][0], y1:PTS[i][1], x2:PTS[i][0], y2:GROUND_Y,
-              stroke:"#7d1f1f",
-              "stroke-width": real ? 8 : 3,
-              "stroke-opacity": real ? .8 : .28,
-              "stroke-dasharray": real ? "none" : "14 12"}, gCol);
-}
-
-// --- 레일: 같은 경로를 4px 어긋나게 두 번 (2줄) + 짧은 대시(침목) ---
-function rails(d, opacity, dash){
-  const grp = el("g", {"stroke-opacity":opacity});
-  el("path", {d, fill:"none", stroke:"var(--rail)", "stroke-width":26,
-              "stroke-linecap":"butt", "stroke-dasharray":"6 22",
-              "stroke-opacity":opacity * .9}, grp);          // 침목
-  for(const dy of [-2, 2]){
-    const p = el("path", {d, fill:"none", stroke:"var(--rail)", "stroke-width":7,
-                          "stroke-linecap":"round"}, grp);
-    p.setAttribute("transform", `translate(0,${dy})`);
-    if(dash) p.setAttribute("stroke-dasharray", dash);
+// --- X자 트러스: 선을 하나하나 만들면 요소가 수천 개가 된다. 한 path 로 묶는다 ---
+(function truss(){
+  const seg = [];
+  for(let x = PTS[0][0]; x < PTS[PTS.length-1][0]; x += 148){
+    const top = yAtX(x), h = GROUND_Y - top;
+    if(h < 70) continue;
+    const lx = y => x - 22 - 24 * (y - top) / h;      // 아래로 갈수록 벌어진다
+    const rx = y => x + 22 + 24 * (y - top) / h;
+    seg.push(`M${f1(lx(top))},${f1(top)}L${f1(lx(GROUND_Y))},${GROUND_Y}`);
+    seg.push(`M${f1(rx(top))},${f1(top)}L${f1(rx(GROUND_Y))},${GROUND_Y}`);
+    const cells = Math.max(1, Math.round(h / 125));
+    for(let c = 0; c < cells; c++){
+      const y0 = top + h * c / cells, y1 = top + h * (c + 1) / cells;
+      seg.push(`M${f1(lx(y1))},${f1(y1)}L${f1(rx(y1))},${f1(y1)}`);
+      seg.push(`M${f1(lx(y0))},${f1(y0)}L${f1(rx(y1))},${f1(y1)}`);
+      seg.push(`M${f1(rx(y0))},${f1(y0)}L${f1(lx(y1))},${f1(y1)}`);
+    }
   }
-  return grp;
+  el("path", {d: seg.join(""), fill:"none", stroke:"#6e4a4a",
+              "stroke-width":3.4, "stroke-opacity":.55, "stroke-linecap":"round"});
+})();
+
+// --- 봉차트: 일봉 데이터가 없으므로 경로 좌표에서 OHLC 를 만든다.
+//     한 봉의 구간 안에서 시작/끝 값이 시가·종가, 그 사이 최대·최소가 고가·저가다.
+(function candles(){
+  const STEP = 27, HALF = 9, OFF = 26;      // OFF: 레일보다 살짝 아래로 내린다
+  const up = [], down = [];
+  const x0 = PTS[0][0], x1 = PTS[PTS.length-1][0];
+  for(let cx = x0 + STEP; cx < x1 - STEP; cx += STEP){
+    const a = cx - STEP/2, b = cx + STEP/2;
+    let hi = -1e9, lo = 1e9;
+    for(let s = 0; s <= 6; s++){
+      const v = pv(yAtX(a + (b - a) * s / 6));
+      if(v > hi) hi = v; if(v < lo) lo = v;
+    }
+    const open = pv(yAtX(a)), close = pv(yAtX(b));
+    const yo = py(open) + OFF, yc = py(close) + OFF;
+    const top = Math.min(yo, yc), bot = Math.max(yo, yc);
+    const bh = Math.max(4, bot - top);
+    const box = `M${f1(cx-HALF)},${f1(top)}h${HALF*2}v${f1(bh)}h${-HALF*2}Z`;
+    const wick = `M${f1(cx-1.6)},${f1(py(hi)+OFF)}h3.2v${f1(py(lo)-py(hi))}h-3.2Z`;
+    (close >= open ? up : down).push(wick, box);
+  }
+  const g = el("g", {opacity:.6});
+  el("path", {d: up.join(""),   fill:"var(--up)"},   g);
+  el("path", {d: down.join(""), fill:"var(--down)"}, g);
+})();
+
+// --- 레일: 굵은 2줄 + 촘촘한 침목 + 금속 하이라이트 1줄 ---
+(function rails(){
+  const d = "M" + PTS.map(p => f1(p[0]) + "," + f1(p[1])).join("L");
+  el("path", {d, fill:"none", stroke:"#8d1f1f", "stroke-width":34,
+              "stroke-dasharray":"5 13"});                       // 침목
+  for(const dy of [-4, 4]){
+    const p = el("path", {d, fill:"none", stroke:"var(--rail)",
+                          "stroke-width":9, "stroke-linecap":"round"});
+    p.setAttribute("transform", `translate(0,${dy})`);
+  }
+  const hl = el("path", {d, fill:"none", stroke:"#ffd9d4", "stroke-width":2.6,
+                         "stroke-opacity":.8, "stroke-linecap":"round"});
+  hl.setAttribute("transform", "translate(0,-6.6)");             // 금속 하이라이트
+})();
+
+// --- 프리퀄 구간 표시 ---
+function tag(x, y, text, size, opacity){
+  const t = el("text", {x, y, fill:"#fff", "fill-opacity":opacity,
+                        "font-size":size, "font-weight":800, "text-anchor":"middle"});
+  t.textContent = text;
+  return t;
 }
-rails(D_REAL, 1, null);            // 확정 구간: 불투명, 실선
-rails(D_PRED, .5, "26 18");        // 예측 구간: 반투명, 점선
+// 고점 라벨은 평평한 꼭대기 한가운데. 첫 지점에 붙이면 화면 왼쪽으로 잘린다.
+tag((ax(I_PEAK) + ax(I_PEAK + 1)) / 2, ay(I_PEAK) - 54, "고점 300만", 34, .62);
+tag(ax(I_BOTTOM), ay(I_BOTTOM) + 64, "저점 130만", 34, .62);
 
-// --- 예측 경계 표시 ---
-const bx = X0;
-el("line", {x1:bx, y1:300, x2:bx, y2:GROUND_Y, stroke:"#fff", "stroke-width":3,
-            "stroke-opacity":.45, "stroke-dasharray":"12 14"});
-const lab = el("text", {x:bx + 18, y:352, fill:"#fff", "fill-opacity":.85,
-                        "font-size":38, "font-weight":800});
-lab.textContent = "여기부터는 예측";
-const lab2 = el("text", {x:bx - 18, y:352, fill:"#fff", "fill-opacity":.45,
-                         "font-size":32, "font-weight":700, "text-anchor":"end"});
-lab2.textContent = "출발 승강장";
+// 상한가 깃발. 승강장에 세워둔 카트가 이 자리를 덮으므로 카트보다 높이 띄운다.
+const LX = ax(I_LIMIT_UP), LY = ay(I_LIMIT_UP);
+const limitUp = el("g", {opacity:0});
+el("line", {x1:LX, y1:LY-20, x2:LX, y2:LY-300, stroke:"#FFE24A", "stroke-width":6}, limitUp);
+el("path", {d:`M${LX},${LY-300}l158,29l-158,29Z`, fill:"#FFE24A"}, limitUp);
+const lu = el("text", {x:LX+22, y:LY-257, fill:"#3a2600",
+                       "font-size":34, "font-weight":900}, limitUp);
+lu.textContent = "상한가";
+const lu2 = el("text", {x:LX, y:LY-322, fill:"#FFE24A", "font-size":31,
+                        "font-weight":800, "text-anchor":"middle"}, limitUp);
+lu2.textContent = "171.8만";
 
-// --- 지점별 가격 라벨 ---
-ANCH.forEach((p, i) => {
-  const t = el("text", {x:px(i), y:py(p) - 44, fill:"#fff", "fill-opacity":.5,
-                        "font-size":30, "font-weight":700, "text-anchor":"middle"});
-  t.textContent = i === 0 ? "171.8" : String(p);
-});
+// --- 코스터 구간의 지점 가격 ---
+for(let i = I_A0 + 1; i < ANCH.length; i++){
+  const t = el("text", {x:ax(i), y:ay(i) - 40, fill:"#fff", "fill-opacity":.42,
+                        "font-size":28, "font-weight":700, "text-anchor":"middle"});
+  t.textContent = String(ANCH[i][2]);
+}
 
 /* ===========================================================================
-   3. 별 (배경 장식)
+   3. 유원지 배경 — SVG 도형으로 그린 평면 일러스트.
+      밤 유원지 분위기라 어둡고 채도가 낮다. 캐릭터와 레일이 앞에 있으므로
+      배경은 대비를 낮게 유지한다.
    =========================================================================== */
+function park(host, factor, seed, kind){
+  const width = Math.ceil(Math.abs(CAM_MIN) * factor) + W + 500;
+  const s = document.createElementNS(SVGNS, "svg");
+  s.setAttribute("width", width); s.setAttribute("height", H);
+  s.setAttribute("viewBox", `0 0 ${width} ${H}`);
+  host.appendChild(s);
+  host.style.width = width + "px";
+  const add = (tag, attrs) => {
+    const n = document.createElementNS(SVGNS, tag);
+    for(const k in attrs) n.setAttribute(k, attrs[k]);
+    s.appendChild(n); return n;
+  };
+  const R = rng(seed);
+  const G = GROUND_Y;
+
+  if(kind === "far"){
+    // 능선
+    let d = `M0,${G}`;
+    for(let x = 0; x <= width; x += 160){
+      d += `L${x},${(G - 150 - 70*Math.sin(x/620) - 40*Math.sin(x/210)).toFixed(1)}`;
+    }
+    add("path", {d: d + `L${width},${G}Z`, fill:"#1b2131"});
+
+    for(let x = 40; x < width; x += 900 + R()*500){
+      // 대관람차
+      const cy = G - 300 - R()*90, r = 190 + R()*70;
+      add("path", {d:`M${x-r*.55},${G}L${x},${cy}L${x+r*.55},${G}`,
+                   stroke:"#2c3448", "stroke-width":11, fill:"none"});
+      add("circle", {cx:x, cy, r, fill:"none", stroke:"#333d54", "stroke-width":8});
+      add("circle", {cx:x, cy, r:r*.62, fill:"none", stroke:"#2c3448", "stroke-width":5});
+      for(let k = 0; k < 14; k++){
+        const a = k / 14 * Math.PI * 2;
+        const ex = x + Math.cos(a)*r, ey = cy + Math.sin(a)*r;
+        add("line", {x1:x, y1:cy, x2:ex.toFixed(1), y2:ey.toFixed(1),
+                     stroke:"#2c3448", "stroke-width":4});
+        add("rect", {x:(ex-14).toFixed(1), y:(ey-9).toFixed(1), width:28, height:22,
+                     rx:7, fill: k % 4 === 0 ? "#6a5b46" : "#3d4863"});
+      }
+      add("circle", {cx:x, cy, r:20, fill:"#404a63"});
+    }
+    // 나무 (원경)
+    for(let x = 0; x < width; x += 110 + R()*130){
+      const h = 130 + R()*120, t = G - 120 - R()*60;
+      add("rect", {x:x-7, y:t, width:14, height:h*.4, fill:"#1a202c"});
+      add("path", {d:`M${x-h*.36},${t+18}L${x},${t-h*.62}L${x+h*.36},${t+18}Z`,
+                   fill:"#1e2734"});
+    }
+  }
+
+  if(kind === "mid"){
+    for(let x = 260; x < width; x += 1100 + R()*700){
+      // 회전목마
+      const top = G - 330, rr = 175;
+      add("rect", {x:x-rr, y:G-70, width:rr*2, height:70, rx:10, fill:"#2c2839"});
+      add("ellipse", {cx:x, cy:G-70, rx:rr, ry:26, fill:"#3a3448"});
+      for(let k = -2; k <= 2; k++){
+        add("rect", {x:x + k*62 - 4, y:top+58, width:8, height:G-128-top-58+8,
+                     fill:"#4a4256"});
+      }
+      // 원뿔 지붕 — 줄무늬
+      for(let k = 0; k < 10; k++){
+        const a0 = -Math.PI + k/10*Math.PI, a1 = -Math.PI + (k+1)/10*Math.PI;
+        add("path", {d:`M${x},${top-72}L${(x+Math.cos(a0)*rr).toFixed(1)},${top+58}` +
+                       `A${rr},${rr} 0 0 1 ${(x+Math.cos(a1)*rr).toFixed(1)},${top+58}Z`,
+                     fill: k % 2 ? "#5b4a5c" : "#6d5566"});
+      }
+      add("path", {d:`M${x},${top-104}v34`, stroke:"#7d6a72", "stroke-width":7});
+      add("path", {d:`M${x},${top-104}l52,15l-52,15Z`, fill:"#8a6a5e"});
+      // 목마
+      for(let k = -1; k <= 1; k++){
+        const hx = x + k*105, hy = G - 150;
+        add("rect", {x:hx-30, y:hy-26, width:60, height:34, rx:14, fill:"#5d5468"});
+        add("rect", {x:hx+16, y:hy-46, width:24, height:28, rx:9, fill:"#5d5468"});
+        add("rect", {x:hx-22, y:hy+6, width:9, height:30, fill:"#4b4356"});
+        add("rect", {x:hx+14, y:hy+6, width:9, height:30, fill:"#4b4356"});
+      }
+    }
+    // 텐트
+    for(let x = 120; x < width; x += 470 + R()*420){
+      const w2 = 105 + R()*45, h = 160 + R()*60;
+      for(let k = 0; k < 6; k++){
+        const xa = x - w2 + w2*2*k/6, xb = x - w2 + w2*2*(k+1)/6;
+        add("path", {d:`M${xa.toFixed(1)},${G}L${x},${G-h}L${xb.toFixed(1)},${G}Z`,
+                     fill: k % 2 ? "#3b3446" : "#494055"});
+      }
+      add("path", {d:`M${x},${G-h}v-34`, stroke:"#5a5166", "stroke-width":5});
+      add("path", {d:`M${x},${G-h-34}l38,11l-38,11Z`, fill:"#7a5f52"});
+    }
+  }
+
+  if(kind === "near"){
+    // 부스
+    for(let x = 90; x < width; x += 520 + R()*380){
+      const w2 = 130 + R()*70, h = 150 + R()*40, top = G - h;
+      add("rect", {x:x-w2, y:top, width:w2*2, height:h, rx:8, fill:"#221f2d"});
+      add("rect", {x:x-w2, y:G-46, width:w2*2, height:46, fill:"#2e2a3a"});
+      for(let k = 0; k < 8; k++){          // 줄무늬 차양
+        const xa = x - w2 - 16 + (w2*2+32)*k/8, xb = x - w2 - 16 + (w2*2+32)*(k+1)/8;
+        add("path", {d:`M${xa.toFixed(1)},${top-6}L${xb.toFixed(1)},${top-6}` +
+                       `L${(xb-8).toFixed(1)},${top+42}L${(xa-8).toFixed(1)},${top+42}Z`,
+                     fill: k % 2 ? "#5f4145" : "#8d8579"});
+      }
+      add("rect", {x:x-52, y:top-64, width:104, height:40, rx:8, fill:"#3b3346"});
+      add("rect", {x:x-38, y:top-52, width:76, height:16, rx:6, fill:"#584c62"});
+    }
+    // 가로등 + 만국기
+    let prev = null;
+    for(let x = 200; x < width; x += 380 + R()*140){
+      const h = 260 + R()*50, top = G - h;
+      add("rect", {x:x-6, y:top, width:12, height:h, rx:5, fill:"#39364a"});
+      add("circle", {cx:x, cy:top, r:44, fill:"#d9a441", opacity:.13});
+      add("circle", {cx:x, cy:top, r:22, fill:"#d9a441", opacity:.28});
+      add("path", {d:`M${x-17},${top+6}L${x+17},${top+6}L${x+9},${top-20}L${x-9},${top-20}Z`,
+                   fill:"#c79a45"});
+      if(prev){                            // 두 등 사이에 늘어진 깃발 줄
+        const mid = (prev[0] + x) / 2, sag = Math.min(prev[1], top) + 78;
+        add("path", {d:`M${prev[0]},${prev[1]+16}Q${mid},${sag} ${x},${top+16}`,
+                     fill:"none", stroke:"#4c4459", "stroke-width":3});
+        for(let k = 1; k < 8; k++){
+          const u = k/8, ix = prev[0] + (x-prev[0])*u;
+          const iy = (1-u)*(1-u)*(prev[1]+16) + 2*(1-u)*u*sag + u*u*(top+16);
+          add("path", {d:`M${ix.toFixed(1)},${iy.toFixed(1)}l13,0l-6.5,20Z`,
+                       fill: ["#5e4646","#42506a","#615a44","#4a5f4a"][k % 4]});
+        }
+      }
+      prev = [x, top];
+    }
+    // 울타리
+    for(let x = 0; x < width; x += 46){
+      add("rect", {x, y:G+8, width:12, height:56, rx:5, fill:"#3a3648"});
+    }
+    add("rect", {x:0, y:G+26, width, height:9, fill:"#3a3648"});
+  }
+  return host;
+}
+park($("parkFar"),  0.22, 7311, "far");
+park($("parkMid"),  0.48, 9042, "mid");
+park($("parkNear"), 0.86, 4155, "near");
+
+/* --- 별 --- */
 (function(){
-  const s = document.getElementById("stars");
-  let seed = 20260731;
-  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-  for(let i = 0; i < 90; i++){
+  const s = $("stars"), R = rng(20260731);
+  // 달은 흐르지 않게 하늘 레이어에 둔다 (패럴랙스에 넣으면 도중에 사라진다)
+  const moon = document.createElementNS(SVGNS, "circle");
+  moon.setAttribute("cx", 906); moon.setAttribute("cy", 236);
+  moon.setAttribute("r", 62); moon.setAttribute("fill", "#3f4763");
+  s.appendChild(moon);
+  for(let i = 0; i < 110; i++){
     const c = document.createElementNS(SVGNS, "circle");
-    c.setAttribute("cx", (rnd() * W).toFixed(0));
-    c.setAttribute("cy", (rnd() * 1200).toFixed(0));
-    c.setAttribute("r", (rnd() * 2 + .6).toFixed(1));
+    c.setAttribute("cx", (R()*W).toFixed(0));
+    c.setAttribute("cy", (R()*900).toFixed(0));
+    c.setAttribute("r", (R()*2 + .6).toFixed(1));
     c.setAttribute("fill", "#fff");
-    c.setAttribute("fill-opacity", (rnd() * .5 + .15).toFixed(2));
+    c.setAttribute("fill-opacity", (R()*.45 + .12).toFixed(2));
     s.appendChild(c);
   }
 })();
 
-/* ===========================================================================
-   4. 눈금 (HUD — 월드와 같이 흐르지 않는다)
-   =========================================================================== */
+/* --- 눈금 --- */
 (function(){
-  const hud = document.getElementById("hud");
-  for(const p of [140,160,180,200,220,230]){
+  const hud = $("hud");
+  for(const p of [140, 180, 220, 260, 300]){
     const y = py(p);
     const line = document.createElement("div");
     line.className = "grid"; line.style.top = y + "px";
@@ -400,96 +634,65 @@ ANCH.forEach((p, i) => {
 })();
 
 /* ===========================================================================
-   5. 비트 시트 — 각 3초
-   ---------------------------------------------------------------------------
-   a  : 이 비트가 끝나는 지점(ANCH 인덱스)
-   A/B: 그 비트에서 쓸 스프라이트
-   ride: 카트 탑승 여부 (false 면 지상에 서 있다)
+   4. 비트 시트 — 각 3초. a 는 이 비트가 끝나는 지점(승강장 기준 번호)
    =========================================================================== */
 const easeInOut = u => -(Math.cos(Math.PI * u) - 1) / 2;
 const easeOut   = u => 1 - Math.pow(1 - u, 3);
 const clamp01   = u => Math.max(0, Math.min(1, u));
 
 const BEATS = [
-  // 1. 171.8만 — 배경 코스터가 지나간다
-  {a:0,  A:"stand_01_gomin", B:"stand_01_gomin", rideA:false, rideB:false, bg:true},
-  // 2. 180만
+  {a:0,  A:"stand_01_gomin", B:"stand_01_gomin", rideA:false, rideB:false},
   {a:1,  A:"stand_01_gomin", B:"stand_01_gomin", rideA:false, rideB:false,
    say:"다시 사야 하나?"},
-  // 3. 190만 — A 탑승
-  {a:2,  A:"sit_02_hwanho",  B:"stand_01_gomin", rideA:true,  rideB:false, say:"타자!"},
-  // 4. 200만 — B 탑승
+  {a:2,  A:"sit_02_hwanho",  B:"stand_01_gomin", rideB:false, say:"타자!"},
   {a:3,  A:"sit_02_hwanho",  B:"sit_02_hwanho",  say:"나도!"},
-  // 5. 205만
   {a:4,  A:"sit_02_hwanho",  B:"sit_02_hwanho",  say:"300만 가자!", cls:"hype"},
-  // 6. 210만 — 정점에서 잠시 정지
   {a:5,  A:"sit_02_hwanho",  B:"sit_02_hwanho",  ease:u => easeOut(clamp01(u / .5))},
-  // 7. 200 → 190
   {a:7,  A:"sit_03_bulan",   B:"sit_03_bulan",   say:"단기 조정 일거야!"},
-  // 8. 180만
   {a:8,  A:"sit_03_bulan",   B:"sit_03_bulan",   say:"어…?"},
-  // 9. 160만
   {a:9,  A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"본전만!!"},
-  // 10. 170 → 180
   {a:11, A:"sit_05_ando",    B:"sit_05_ando",    say:"잘 버텼어"},
-  // 11. 190만 — 5번과 똑같은 말풍선. 반복이 요점이다.
+  // 5번과 똑같은 말풍선. 반복이 요점이다.
   {a:12, A:"sit_02_hwanho",  B:"sit_02_hwanho",  say:"300만 가자!", cls:"hype"},
-  // 12. 200만
-  {a:13, A:"sit_03_bulan",   B:"sit_03_bulan"},
-  // 13. 140만 — 급락. 카트가 빨라지고 화면이 흔들린다.
+  // 12번에서 한 번, 13번에서 더 크게 한 번 — 대사도 두 번 반복된다.
+  {a:13, A:"sit_03_bulan",   B:"sit_03_bulan",   say:"살려줘, 다신 안 해"},
   {a:15, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"살려줘, 다신 안 해",
-   ease:u => Math.pow(u, 2.4), shake:true},
-  // 14. 160 → 170
+   cls:"panic", ease:u => Math.pow(u, 2.4), shake:true},
   {a:17, A:"sit_04_sasaek",  B:"sit_04_sasaek",  say:"제발 본전만"},
-  // 15. 180만 — 하차
   {a:18, A:"stand_02_ppudeut", B:"stand_02_ppudeut", rideA:false, rideB:false,
-   say:"선방했다", ease:easeOut, alight:true},
-  // 16. 190 → 230 — 빈 카트만 급등, 개미는 올려다본다
+   say:"선방했다", ease:easeOut},
   {a:21, A:"stand_03_mangyeon", B:"stand_03_mangyeon", rideA:false, rideB:false,
-   ease:u => Math.pow(clamp01(u / .72), 1.8), bg:true, finale:true},
+   ease:u => Math.pow(clamp01(u / .72), 1.8), finale:true},
 ];
 BEATS.forEach(b => {
   if(b.rideA === undefined) b.rideA = true;
   if(b.rideB === undefined) b.rideB = true;
   if(!b.ease) b.ease = easeInOut;
+  b.idx = I_A0 + b.a;                     // 전체 지점 배열에서의 위치
 });
 
-const BEAT_MS = 3000, OPEN_MS = 1200;
-const TOTAL_MS = OPEN_MS + BEATS.length * BEAT_MS;    // 49.2초
+const OPEN_MS = 1200, PREQ_MS = 4000, BEAT_MS = 3000;
+const BEATS_AT = OPEN_MS + PREQ_MS;
+const TOTAL_MS = BEATS_AT + BEATS.length * BEAT_MS;      // 53.2초
 
 /* ===========================================================================
-   6. 요소 준비
+   5. 요소
    =========================================================================== */
 const ART = "../assets/ants/";
 const sprite = (who, key) => `${ART}ant${who}_${key}.png`;
-const $ = id => document.getElementById(id);
-
 const cart = $("cart"), cartInner = $("cartInner");
 const antA = $("antA"), antB = $("antB");
 const walkA = $("walkA"), walkB = $("walkB");
 const bubble = $("bubble"), balloon = $("balloon");
 const world = $("world"), stage = $("stage"), fitBox = $("fit");
+const layers = [[$("parkFar"), .22], [$("parkMid"), .48], [$("parkNear"), .86]];
 
 world.style.width = WORLD_W + "px";
-cart.style.offsetPath = `path("${D_ALL}")`;
-cart.style.offsetDistance = "0%";
-
-// 배경 코스터의 카트 3대
-const bgCarts = [];
-for(let i = 0; i < 3; i++){
-  const d = document.createElement("div");
-  d.className = "bgcart";
-  const im = document.createElement("img");
-  im.src = sprite("A", "sit_02_hwanho"); im.alt = "";
-  d.appendChild(im); $("bgcarts").appendChild(d);
-  bgCarts.push({el:d, lead: 1600 + i * 620});
-}
+cart.style.offsetPath = `path("M${PTS.map(p => f1(p[0]) + "," + f1(p[1])).join("L")}")`;
 
 function setSprite(img, who, key){
-  const src = sprite(who, key);
-  if(img.dataset.key !== key){ img.src = src; img.dataset.key = key; }
+  if(img.dataset.key !== key){ img.src = sprite(who, key); img.dataset.key = key; }
 }
-
 function fit(){
   const s = Math.min(innerWidth / W, innerHeight / H);
   fitBox.style.transform = `scale(${s})`;
@@ -498,11 +701,19 @@ function fit(){
 }
 addEventListener("resize", fit); fit();
 
+function camera(cam){
+  cam = Math.max(CAM_MIN, Math.min(0, cam));
+  world.style.transform = `translateX(${cam}px)`;
+  for(const [node, k] of layers) node.style.transform = `translateX(${cam * k}px)`;
+  return cam;
+}
+
 /* ===========================================================================
-   7. 재생 루프
+   6. 재생
    =========================================================================== */
-let t0 = 0, lastBeat = -1, lastCount = -1;
-let camFreeze = null, groundHold = null;
+const D_PARK  = anchorDist(I_LIMIT_UP);          // 상한가 = 승강장 왼쪽 끝
+const CAM_END = -(ax(I_LIMIT_UP) - CAM_X);       // 프리퀄이 끝나는 카메라 위치
+let t0 = 0, lastBeat = -1, lastCount = -1, phase = "", camFreeze = null, groundHold = null;
 
 function applyBeat(i){
   const b = BEATS[i];
@@ -539,29 +750,51 @@ function frame(now){
       c.textContent = String(n);
       c.classList.remove("go"); void c.offsetWidth; c.classList.add("go");
     }
+    camera(0);
     requestAnimationFrame(frame);
     return;
   }
   $("count").style.display = "none";
 
-  const bt = t - OPEN_MS;
+  // --- 프리퀄: 실제 구간을 카메라가 훑는다 (300만 → 130만 → 상한가) ---
+  if(t < BEATS_AT){
+    if(phase !== "preq"){
+      phase = "preq";
+      setSprite(walkA, "A", "stand_01_gomin");
+      setSprite(walkB, "B", "stand_01_gomin");
+      walkA.style.display = walkB.style.display = "block";
+      antA.style.opacity = antB.style.opacity = 0;
+      bubble.style.opacity = 0;
+      cart.style.offsetDistance = (D_PARK / TOTAL * 100) + "%";
+    }
+    const u = (t - OPEN_MS) / PREQ_MS;
+    const cam = camera(easeInOut(u) * CAM_END);
+    // 개미는 화면에 붙어 있고 그 뒤로 풍경과 트랙이 흐른다 — 올려다보는 구도
+    walkA.style.left = (340 - cam) + "px"; walkA.style.top = GROUND_Y + "px";
+    walkB.style.left = (560 - cam) + "px"; walkB.style.top = GROUND_Y + "px";
+    limitUp.setAttribute("opacity", clamp01((u - .62) / .22).toFixed(2));
+    requestAnimationFrame(frame);
+    return;
+  }
+  limitUp.setAttribute("opacity", 1);
+
+  // --- 비트 ---
+  const bt = t - BEATS_AT;
   const bi = Math.min(BEATS.length - 1, Math.floor(bt / BEAT_MS));
   const u  = clamp01((bt - bi * BEAT_MS) / BEAT_MS);
   const b  = BEATS[bi];
-
   if(bi !== lastBeat){ lastBeat = bi; applyBeat(bi); }
 
   // 급락 구간의 흔들림은 실제로 떨어지기 시작한 뒤에만 준다
   if(b.shake) stage.classList.toggle("shake", u > .35);
 
-  // --- 카트 위치 ---
-  const from = bi === 0 ? 0 : anchorDist(BEATS[bi - 1].a);
-  const to   = anchorDist(b.a);
+  const from = bi === 0 ? D_PARK : anchorDist(BEATS[bi - 1].idx);
+  const to   = anchorDist(b.idx);
   const d    = from + (to - from) * clamp01(b.ease(u));
   cart.style.offsetDistance = (d / TOTAL * 100) + "%";
   const [cx, cy] = pointAt(d);
 
-  // 마지막 비트: 목표 지점에 닿은 뒤 빈 카트만 화면 위로 사라진다
+  // 마지막 비트: 목표에 닿은 뒤 빈 카트만 화면 위로 사라진다
   if(b.finale){
     const over = clamp01((u - .72) / .28);
     cartInner.style.transform =
@@ -569,54 +802,34 @@ function frame(now){
     cartInner.style.opacity = String(1 - over * .9);
   }
 
-  // --- 지상 개미 ---
-  // 15번에서 내린 뒤에는 카트 옆을 따라 걷다가, 16번에 들어서는 순간 그 자리에
-  // 멈춘다. 카메라도 같은 순간 멈추므로 카트만 화면 밖으로 올라가고 개미는 남는다.
-  if(b.finale){
-    if(groundHold === null) groundHold = cx;
-  }else{
-    groundHold = null;
-  }
+  // 16번에 들어서는 순간 개미와 카메라가 함께 멈춘다.
+  // 그래야 카트만 올라가고 개미는 화면에 남아 올려다본다.
+  if(b.finale){ if(groundHold === null) groundHold = cx; }
+  else groundHold = null;
   const gx = groundHold !== null ? groundHold : cx;
-  walkA.style.left = (gx - 120) + "px"; walkA.style.top = GROUND_Y + "px";
-  walkB.style.left = (gx + 120) + "px"; walkB.style.top = GROUND_Y + "px";
+  walkA.style.left = (gx - 110) + "px"; walkA.style.top = GROUND_Y + "px";
+  walkB.style.left = (gx + 110) + "px"; walkB.style.top = GROUND_Y + "px";
 
-  // --- 말풍선: 타고 있으면 카트 위, 서 있으면 개미 위 ---
-  const riding = b.rideA || b.rideB;
-  bubble.style.left = (riding ? cx : gx) + "px";
-  bubble.style.top  = (riding ? cy - 250 : GROUND_Y - 275) + "px";
-
-  // --- 카메라: 카트를 따라가되 마지막 비트에서는 멈춰 개미를 남긴다 ---
   let cam = -(cx - CAM_X);
-  if(b.finale){
-    if(camFreeze === null) camFreeze = cam;
-    cam = camFreeze;
-  }else{
-    camFreeze = null;
-  }
-  cam = Math.max(-(WORLD_W - W), Math.min(0, cam));
-  world.style.transform = `translateX(${cam}px)`;
+  if(b.finale){ if(camFreeze === null) camFreeze = cam; cam = camFreeze; }
+  else camFreeze = null;
+  cam = camera(cam);
 
-  // --- 배경 코스터: 1번·16번 비트에만 위로 지나간다 ---
-  for(const bc of bgCarts){
-    if(b.bg){
-      const lead = bc.lead - u * (bc.lead + 900);
-      const [bxp, byp] = pointAt(d + lead);
-      bc.el.style.left = (bxp + 60) + "px";
-      bc.el.style.top  = (byp + 250) + "px";
-      bc.el.style.opacity = .95;
-    }else{
-      bc.el.style.opacity = 0;
-    }
-  }
+  // 말풍선은 타고 있으면 카트 위, 서 있으면 개미 위. 다만 "살려줘, 다신 안 해"
+  // 처럼 긴 대사는 화면 밖으로 밀려 잘리므로 좌우로 붙잡아 둔다.
+  const riding = b.rideA || b.rideB;
+  const half = balloon.offsetWidth / 2 + 26;
+  const want = riding ? cx : gx;
+  bubble.style.left = Math.min(Math.max(want, half - cam), W - half - cam) + "px";
+  bubble.style.top  = (riding ? cy - 240 : GROUND_Y - 240) + "px";
 
   if(t < TOTAL_MS + 1200) requestAnimationFrame(frame);
   else stage.classList.remove("shake");
 }
 
 /* ===========================================================================
-   8. 시작 — 폰트와 이미지가 다 준비된 뒤에 튼다.
-   중간에 스프라이트가 늦게 뜨면 녹화본을 다시 찍어야 한다.
+   7. 시작 — 폰트와 이미지가 다 준비된 뒤에 튼다.
+      중간에 스프라이트가 늦게 뜨면 녹화본을 다시 찍어야 한다.
    =========================================================================== */
 function preload(){
   const keys = ["sit_02_hwanho","sit_03_bulan","sit_04_sasaek","sit_05_ando",
@@ -624,19 +837,15 @@ function preload(){
   const jobs = [];
   for(const who of ["A","B"]) for(const k of keys){
     jobs.push(new Promise(res => {
-      const im = new Image();
-      im.onload = im.onerror = res;
-      im.src = sprite(who, k);
+      const im = new Image(); im.onload = im.onerror = res; im.src = sprite(who, k);
     }));
   }
   jobs.push(document.fonts ? document.fonts.ready : Promise.resolve());
-  return Promise.race([
-    Promise.all(jobs),
-    new Promise(res => setTimeout(res, 6000))    // 못 받아도 6초 뒤엔 시작
-  ]);
+  return Promise.race([Promise.all(jobs), new Promise(res => setTimeout(res, 6000))]);
 }
 
 applyBeat(0);
+camera(0);
 preload().then(() => requestAnimationFrame(frame));
 
 // 조작 UI 는 두지 않는다. 다시 보려면 아무데나 탭(또는 새로고침).

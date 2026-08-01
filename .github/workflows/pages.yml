@@ -1,0 +1,41 @@
+name: 사이트 배포
+
+# docs/ 는 두 가지 경로로 바뀐다.
+#   1. 수집 워크플로가 대시보드를 다시 만들어 커밋할 때 — 그 워크플로가 직접 배포한다
+#   2. 사람이 docs/ 안의 파일을 고쳐 main 에 머지할 때 — 배포하는 곳이 없었다
+# 2번 때문에 저장소에는 파일이 있는데 사이트는 404가 나는 일이 생긴다. 스케줄이
+# 돌 때까지(길면 몇 시간) 기다려야 반영됐다. 이 워크플로가 그 구멍을 메운다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# 배포는 한 번에 하나만. 수집 워크플로의 배포와 겹치면 뒤엣것이 이깁니다.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
