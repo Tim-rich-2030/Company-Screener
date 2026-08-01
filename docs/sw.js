@@ -1,4 +1,4 @@
-const V = '2026-07-31T08:27:18Z';
+const V = '7390b1ab11a5';
 const SHELL = ['./', './index.html', './icon-192.png', './icon-512.png',
                './apple-touch-icon.png', './manifest.webmanifest'];
 
