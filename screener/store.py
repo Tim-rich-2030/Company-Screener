@@ -208,6 +208,35 @@ def shares_look_wrong(record: dict, qkey: str, shares: float,
     return max(shares, ref) / min(shares, ref) > SHARES_EDGE_LIMIT
 
 
+def frozen_price_run(record: dict, min_quarters: int = 2) -> dict | None:
+    """
+    최신 분기부터 종가가 몇 분기째 한 원도 안 움직였는지.
+
+    거래정지 종목은 마지막 체결가가 그대로 남아, 시세 조회가 어느 날짜를 물어도
+    같은 값을 돌려준다. 그래서 분기말 종가가 여러 분기 연속 똑같아진다. 거래가
+    살아 있는 종목이 분기말마다 정확히 같은 값으로 끝날 일은 사실상 없다.
+    (카프로는 9분기째 3,660원, 금양은 5분기째 9,900원이다.)
+
+    KRX 의 거래정지 목록을 받아오는 쪽이 정확하지만 로그인이 필요하다. 여기서는
+    이미 가진 데이터만으로 판단하므로 '단정'이 아니라 '의심'까지만 말한다.
+    반환값에 근거(몇 분기·얼마)를 담아 화면에 그대로 띄운다.
+    """
+    quarters = sort_quarters(record.get("quarters", {}))
+    closes = [(q, record["quarters"][q].get("종가")) for q in quarters]
+    closes = [(q, c) for q, c in closes if c]
+    if len(closes) < min_quarters:
+        return None
+    price = closes[0][1]
+    run = 0
+    for _, close in closes:
+        if close != price:
+            break
+        run += 1
+    if run < min_quarters:
+        return None
+    return {"quarters": run, "close": price, "since": closes[run - 1][0]}
+
+
 def drop_implausible_shares(record: dict, limit: float = SHARES_JUMP_LIMIT) -> list:
     """
     이미 저장된 주식수 중 이웃과 자릿수가 어긋나는 것을 지운다.
