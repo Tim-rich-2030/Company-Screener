@@ -11,6 +11,7 @@
 import os
 import sys
 import json
+import re
 import shutil
 import tempfile
 import datetime as dt
@@ -262,6 +263,46 @@ def test_site_marks_halted_company():
     print("test_site_marks_halted_company: OK")
 
 
+def test_build_emits_pwa_files():
+    """홈 화면에 추가해 앱처럼 쓰려면 manifest·서비스워커·아이콘 링크가 있어야 한다."""
+    tmp = tempfile.mkdtemp()
+    try:
+        rec = {"code": "005930", "name": "삼성전자", "quarters": {
+            "2026Q1": {"종가": 70000.0, "상장주식수": 5969782550.0,
+                       "시가총액": 70000.0 * 5969782550.0, "자본총계": 3.0e14,
+                       "지배주주지분": 3.0e14, "매출액": 7.9e13, "영업이익": 6.0e12,
+                       "순이익": 5.0e12, "지배주주순이익": 5.0e12,
+                       "자산총계": 5.0e14, "부채총계": 2.0e14}}}
+        old_facts, old_site = cfg.FACTS_DIR, cfg.SITE_DIR
+        cfg.FACTS_DIR = os.path.join(tmp, "facts")
+        cfg.SITE_DIR = os.path.join(tmp, "docs")
+        os.makedirs(cfg.FACTS_DIR, exist_ok=True)
+        store.save(rec)
+        path = site.build(cfg.SITE_DIR)
+        page = open(path, encoding="utf-8").read()
+
+        assert '<link rel="manifest"' in page
+        assert 'apple-touch-icon' in page
+        assert "serviceWorker" in page
+
+        man = json.load(open(os.path.join(cfg.SITE_DIR, "manifest.webmanifest"),
+                             encoding="utf-8"))
+        assert man["display"] == "standalone"
+        assert {i["sizes"] for i in man["icons"]} == {"192x192", "512x512"}
+        assert any(i["purpose"] == "maskable" for i in man["icons"])
+
+        sw = open(os.path.join(cfg.SITE_DIR, "sw.js"), encoding="utf-8").read()
+        # 캐시 이름이 빌드마다 달라야 새 빌드가 옛 캐시를 밀어낸다.
+        # 고정 문자열이면 브라우저가 sw.js 를 안 바뀐 것으로 보고 갱신하지 않는다.
+        assert "__VERSION__" not in sw
+        # 숫자가 본문에 박혀 있으므로 페이지는 반드시 네트워크 우선이어야 한다
+        assert "fetch(req)" in sw and "caches.match" in sw
+    finally:
+        cfg.FACTS_DIR, cfg.SITE_DIR = old_facts, old_site
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("test_build_emits_pwa_files: OK")
+
+
 def test_sort_quarters():
     keys = ["2024Q4", "2025Q1", "2023Q2", "2025Q4", "2025Q2"]
     assert store.sort_quarters(keys)[0] == "2025Q4"
@@ -372,8 +413,13 @@ def test_site_build():
 
     assert "테스트전자" in doc and "005930" in doc
     assert '"companies"' in doc and '"metrics"' in doc
-    # 자체 완결형이어야 GitHub Pages·로컬 어디서든 동일하게 뜬다
-    assert "https://" not in doc and "<script src" not in doc and "<link" not in doc
+    # 자체 완결형이어야 GitHub Pages·로컬 어디서든 동일하게 뜬다.
+    # PWA 때문에 <link>(manifest·아이콘)는 생겼지만 전부 같은 출처의 상대경로다.
+    # 지켜야 할 건 '태그가 없을 것'이 아니라 '바깥으로 요청이 나가지 않을 것'이다.
+    assert "https://" not in doc and "http://" not in doc
+    assert "<script src" not in doc
+    for attr in re.findall(r'(?:href|src)="([^"]+)"', doc):
+        assert not attr.startswith(("http://", "https://", "//")), f"외부 참조: {attr}"
     assert "prefers-color-scheme" in doc
     assert os.path.exists(os.path.join(cfg.SITE_DIR, ".nojekyll"))
     print("test_site_build: OK")
@@ -626,6 +672,7 @@ if __name__ == "__main__":
         test_set_shares_refuses_implausible_value()
         test_frozen_price_marks_halted_ticker()
         test_site_marks_halted_company()
+        test_build_emits_pwa_files()
         test_sort_quarters()
         test_save_load_roundtrip_and_trim()
         test_price_snapshot_is_immutable()
