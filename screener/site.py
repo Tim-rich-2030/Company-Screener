@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import json
 import html
+import hashlib
 
 import quarterly_dashboard as qd
 
@@ -369,7 +370,11 @@ def build(out_dir: str = None) -> str:
         fp.write(doc)
     # Pages가 _로 시작하는 경로를 Jekyll로 처리하지 않게 한다
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
-    _write_pwa(out_dir, payload.get("built_at", ""))
+    # 서비스워커 캐시 이름은 페이지 내용의 해시로 짓는다. 시각을 쓰면 안 된다 —
+    # built_at 은 소급 수집이 끝난 뒤로 고정이라 sw.js 가 매번 같아지고,
+    # 그러면 브라우저가 새 빌드를 영영 감지하지 못해 갱신 알림이 죽는다.
+    # 해시로 두면 숫자가 바뀔 때만 정확히 바뀐다.
+    _write_pwa(out_dir, hashlib.sha256(doc.encode("utf-8")).hexdigest()[:12])
     return path
 
 
@@ -453,7 +458,7 @@ if ('serviceWorker' in navigator) {
 </script>"""
 
 
-def _write_pwa(out_dir: str, version: str) -> None:
+def _write_pwa(out_dir: str, version: str) -> None:                      # noqa: D401
     """
     홈 화면에 추가해 앱처럼 쓰기 위한 파일들.
 
@@ -463,7 +468,7 @@ def _write_pwa(out_dir: str, version: str) -> None:
     """
     with open(os.path.join(out_dir, "manifest.webmanifest"), "w", encoding="utf-8") as fp:
         json.dump(MANIFEST, fp, ensure_ascii=False, indent=1)
-    # 캐시 이름에 빌드 시각을 넣어야 새 빌드가 옛 캐시를 밀어낸다.
-    # 값이 그대로면 브라우저가 sw.js 를 바뀌지 않은 것으로 보고 갱신하지 않는다.
+    # version 은 index.html 의 내용 해시다. 내용이 바뀔 때만 sw.js 가 바뀌므로
+    # 갱신 알림이 '진짜 새 데이터일 때만' 뜬다.
     with open(os.path.join(out_dir, "sw.js"), "w", encoding="utf-8") as fp:
         fp.write(SW_JS.replace("__VERSION__", version or "dev"))
