@@ -181,6 +181,46 @@ def test_source_label():
     print("test_source_label: OK")
 
 
+def test_disparity_percentile_beats_minmax_in_a_wide_band():
+    """
+    60일 min-max 는 최고·최저 딱 두 날이 눈금을 정해서, 밴드가 넓어지면 중간이
+    뭉개지고 극단에서는 0%/100% 에 붙는다. 백분위는 분포 전체를 쓴다.
+    """
+    # 한 번 크게 튀었다가 좁게 움직이는 구간 — min-max 가 망가지는 전형.
+    # 꼬리를 55개로 둬야 이상치(index 40)가 마지막 60일 안에 들어온다.
+    vals = [100.0] * 40 + [200.0] + [100.0 + (i % 5) for i in range(55)]
+    s = series(vals)
+    got = ms.analyse(s, "20991231")
+    assert got["band_high"] == 200.0, "이상치가 밴드 안에 있어야 하는 테스트다"
+    # 이상치 하나가 밴드 상단을 200 으로 밀어 올려 위치가 바닥에 눌린다
+    assert got["band_pos"] < 10
+    # 백분위는 같은 상황에서도 등급이 살아 있다
+    assert got["stretch_pct"] is not None
+    assert 0 < got["stretch_pct"] < 100
+    print("test_disparity_percentile_beats_minmax_in_a_wide_band: OK")
+
+
+def test_percentile_extremes_and_bounds():
+    """가장 눌린 날은 0 에 가깝고 가장 뜬 날은 100 에 가까워야 한다."""
+    # 조용하다가 마지막에 급등 -> 오늘이 1년 중 가장 뜬 날
+    spike = ms.analyse(series([100.0] * 200 + [130.0]), "20991231")
+    assert spike["stretch_pct"] == 100.0
+    # 조용하다가 급락 -> 가장 눌린 날
+    crash = ms.analyse(series([100.0] * 200 + [70.0]), "20991231")
+    assert crash["stretch_pct"] < 1.0
+    for r in (spike, crash):
+        assert 0 <= r["stretch_pct"] <= 100
+
+    # 등차로 오르기만 하면 이격도는 오히려 줄어든다(격차는 일정한데 분모가 커진다).
+    # 백분위는 '주가가 올랐나'가 아니라 '평균에서 얼마나 벌어졌나'를 재는 값이다.
+    ramp = ms.analyse(series(list(range(1, 200))), "20991231")
+    assert ramp["disparity"] > 0 and ramp["stretch_pct"] < 5
+    # 이력이 모자라면 만들어내지 않는다
+    short = ms.analyse(series([100.0 + i for i in range(30)]), "20991231")
+    assert short["stretch_pct"] is None
+    print("test_percentile_extremes_and_bounds: OK")
+
+
 if __name__ == "__main__":
     test_sma_and_disparity()
     test_trend_thresholds()
@@ -192,4 +232,6 @@ if __name__ == "__main__":
     test_krx_outage_falls_back_instead_of_crashing()
     test_check_krx_without_credentials_is_not_an_error()
     test_source_label()
+    test_disparity_percentile_beats_minmax_in_a_wide_band()
+    test_percentile_extremes_and_bounds()
     print("\nALL MARKET SIGNAL TESTS PASSED")
