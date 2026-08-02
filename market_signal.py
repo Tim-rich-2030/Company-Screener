@@ -32,7 +32,8 @@ import datetime as dt
 import requests
 
 # --- 계산 기준 (여기만 고치면 판정이 바뀐다) ---------------------------------
-SMA_WINDOW = 20          # 이동평균 일수
+SMA_WINDOW = 20          # 판정 기준이 되는 이동평균 (이격도·기울기)
+SMA_LINES = (20, 60, 120)  # 차트에 그리는 이동평균들
 SLOPE_DAYS = 5           # 20일선 기울기를 재는 구간
 BAND_DAYS = 60           # 고점·저점 밴드 구간
 PCTILE_DAYS = 250        # 이격도 백분위를 매길 기간 (약 1년)
@@ -118,16 +119,17 @@ def _fetch_pykrx(spec: dict, start: dt.date, end: dt.date) -> dict:
     except Exception as exc:
         log(f"  pykrx 실패: {type(exc).__name__}: {exc}")
         return {}
-    if df is None or df.empty or "종가" not in df.columns:
+    need = ("시가", "고가", "저가", "종가")
+    if df is None or df.empty or any(c not in df.columns for c in need):
         return {}
     out = {}
-    for idx, close in df["종가"].items():
+    for idx, row in df[list(need)].iterrows():
         try:
-            value = float(close)
+            bar = [round(float(row[c]), 2) for c in need]
         except (TypeError, ValueError):
             continue
-        if value > 0:
-            out[idx.strftime("%Y%m%d")] = round(value, 2)
+        if bar[3] > 0:
+            out[idx.strftime("%Y%m%d")] = bar
     return out
 
 
@@ -148,13 +150,13 @@ def _fetch_naver(spec: dict, days: int) -> dict:
         log(f"  네이버 실패: {type(exc).__name__}: {exc}")
         return {}
     out = {}
-    for ymd, _o, _h, _l, close in ITEM_RE.findall(text):
+    for ymd, o, h, l, c in ITEM_RE.findall(text):
         try:
-            value = float(close)
+            bar = [round(float(x), 2) for x in (o, h, l, c)]
         except ValueError:
             continue
-        if value > 0:
-            out[ymd] = round(value, 2)
+        if bar[3] > 0:
+            out[ymd] = bar
     return out
 
 
@@ -191,9 +193,29 @@ def collect(years: int = YEARS) -> dict:
 # 계산 — 전부 종가 기준
 # =============================================================================
 
+def close_of(bar):
+    """
+    저장값에서 종가만 꺼낸다.
+
+    시세는 [시가, 고가, 저가, 종가] 로 담는다(봉차트를 그리려면 넷 다 필요하다).
+    다만 계산은 규칙대로 전부 종가 기준이라, 여기서 한 번만 꺼내 쓴다.
+    예전에 종가 하나만 저장하던 파일도 그대로 읽히게 숫자면 그 값을 쓴다.
+    """
+    if isinstance(bar, (list, tuple)):
+        return bar[3] if len(bar) >= 4 else None
+    return bar
+
+
 def _upto(series: dict, as_of: str) -> list:
     """as_of 이하 날짜를 오름차순 (날짜, 종가) 로."""
-    return sorted(((d, v) for d, v in series.items() if d <= as_of))
+    rows = []
+    for d, v in series.items():
+        if d > as_of:
+            continue
+        c = close_of(v)
+        if c:
+            rows.append((d, c))
+    return sorted(rows)
 
 
 def trend_label(slope_pct: float) -> str:
@@ -258,6 +280,11 @@ def analyse(series: dict, as_of: str) -> dict | None:
     pos = (close - low) / (high - low) * 100 if high > low else None
 
     slope = ((sma - prev_sma) / prev_sma * 100) if prev_sma else None
+    # 차트에 20·60·120일선을 함께 그린다. 값이 모자라 못 구하는 선은 비운다.
+    lines = {}
+    for w in SMA_LINES:
+        v = sma_at(rows, window=w)
+        lines[f"sma{w}"] = round(v, 2) if v is not None else None
     return {
         "date": date,
         "close": round(close, 2),
@@ -272,6 +299,7 @@ def analyse(series: dict, as_of: str) -> dict | None:
         "stretch_pct": (round(sp, 1) if (sp := disparity_percentile(rows))
                         is not None else None),
         "stretch_days": min(len(rows) - SMA_WINDOW, PCTILE_DAYS),
+        **lines,
     }
 
 
@@ -283,7 +311,11 @@ def analyse_ratio(kosdaq: dict, kospi: dict, as_of: str) -> dict | None:
     것은 최근 코스닥이 코스피보다 더 올랐거나 덜 빠졌다는 뜻이다.
     """
     common = sorted(set(kosdaq) & set(kospi))
-    ratio = {d: kosdaq[d] / kospi[d] for d in common if kospi[d]}
+    ratio = {}
+    for d in common:
+        a, b = close_of(kosdaq[d]), close_of(kospi[d])
+        if a and b:
+            ratio[d] = a / b
     rows = _upto(ratio, as_of)
     if len(rows) < SMA_WINDOW:
         return None
@@ -328,7 +360,7 @@ def compute(payload: dict, as_of: str = None) -> dict:
         "source": source_label(payload.get("sources")),
         "params": {"sma": SMA_WINDOW, "slope_days": SLOPE_DAYS,
                    "band_days": BAND_DAYS, "trend_flat_pct": TREND_FLAT_PCT,
-                   "lead_flat_pct": LEAD_FLAT_PCT},
+                   "lead_flat_pct": LEAD_FLAT_PCT, "sma_lines": list(SMA_LINES)},
     }
 
 
@@ -368,7 +400,10 @@ def report(result: dict) -> None:
     for name, d in result["indices"].items():
         print(f"\n[{name}]")
         print(f"  종가            {d['close']:>12,.2f}")
-        print(f"  20일선          {d['sma20']:>12,.2f}")
+        for w in SMA_LINES:
+            v = d.get(f"sma{w}")
+            label = f"{w}일선"
+            print(f"  {label:<14}" + ("–" if v is None else f"{v:>12,.2f}"))
         print(f"  이격도          {fmt_signed(d['disparity']):>12} %")
         print(f"  20일선 기울기   {fmt_signed(d['slope_pct']):>12} %  "
               f"({SLOPE_DAYS}일) → {d['trend']}")
