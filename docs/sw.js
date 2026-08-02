@@ -1,4 +1,4 @@
-const V = '5306e18dd397';
+const V = '1af9785a931b';
 const SHELL = ['./', './index.html', './icon-192.png', './icon-512.png',
                './apple-touch-icon.png', './manifest.webmanifest'];
 
