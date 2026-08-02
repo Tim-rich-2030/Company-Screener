@@ -35,6 +35,8 @@ import requests
 SMA_WINDOW = 20          # 이동평균 일수
 SLOPE_DAYS = 5           # 20일선 기울기를 재는 구간
 BAND_DAYS = 60           # 고점·저점 밴드 구간
+PCTILE_DAYS = 250        # 이격도 백분위를 매길 기간 (약 1년)
+PCTILE_MIN = 60          # 이만큼도 없으면 백분위를 매기지 않는다
 YEARS = 3                # 수집할 과거 기간
 
 # 20일선이 5일 동안 이만큼도 못 움직이면 방향이 없다고 본다 (%)
@@ -214,6 +216,35 @@ def trend_label(slope_pct: float) -> str:
     return "횡보"
 
 
+def disparity_percentile(rows: list, window: int = SMA_WINDOW,
+                         lookback: int = PCTILE_DAYS):
+    """
+    오늘 이격도가 최근 1년 이격도 분포에서 몇 번째인지 (0=가장 눌림, 100=가장 뜸).
+
+    60일 고점·저점 안의 위치는 밴드가 넓어지면 못 쓴다. 2026년처럼 60일 사이에
+    지수가 40% 움직이면 밴드 폭이 63%가 되고, 그 안의 '28.5%'는 아무것도 말해
+    주지 않는다. 게다가 min-max 는 이상치 딱 두 날(최고·최저)이 눈금을 통째로
+    정해 버려서, 극단에서는 0%·100% 에 붙어 버린다.
+
+    백분위는 '지금 이 시장 기준으로' 얼마나 드문 상태인지를 말한다. 변동성이
+    커지면 분포도 같이 넓어지므로 국면이 바뀌어도 뜻이 유지되고, 단위가 없어서
+    코스피와 코스닥을 나란히 놓고 볼 수 있다.
+    """
+    if len(rows) < window + PCTILE_MIN:
+        return None
+    closes = [v for _d, v in rows]
+    hist = []
+    for i in range(window, len(closes)):
+        sma = sum(closes[i - window:i]) / window
+        if sma:
+            hist.append((closes[i] - sma) / sma * 100)
+    hist = hist[-lookback:]
+    if len(hist) < PCTILE_MIN:
+        return None
+    today = hist[-1]
+    return sum(1 for v in hist if v <= today) / len(hist) * 100
+
+
 def sma_at(rows: list, window: int = SMA_WINDOW, offset: int = 0):
     """rows 끝에서 offset 만큼 거슬러 올라간 지점의 단순이동평균."""
     end = len(rows) - offset
@@ -250,6 +281,9 @@ def analyse(series: dict, as_of: str) -> dict | None:
         "band_high": round(high, 2),
         "band_low": round(low, 2),
         "band_pos": round(pos, 1) if pos is not None else None,
+        "stretch_pct": (round(sp, 1) if (sp := disparity_percentile(rows))
+                        is not None else None),
+        "stretch_days": min(len(rows) - SMA_WINDOW, PCTILE_DAYS),
     }
 
 
@@ -353,7 +387,11 @@ def report(result: dict) -> None:
         print(f"  {d['band_days']}일 고점       {d['band_high']:>12,.2f}")
         print(f"  {d['band_days']}일 저점       {d['band_low']:>12,.2f}")
         pos = d["band_pos"]
-        print(f"  밴드 내 위치    {'–' if pos is None else f'{pos:>12.1f} %'}")
+        print(f"  밴드 내 위치    {'–' if pos is None else f'{pos:>12.1f} %'}"
+              "   (밴드가 넓으면 뜻이 약해진다)")
+        sp = d.get("stretch_pct")
+        print(f"  이격도 백분위   {'–' if sp is None else f'{sp:>12.1f} %'}"
+              f"   최근 {d.get('stretch_days', PCTILE_DAYS)}일 중")
     r = result.get("ratio")
     print("\n[코스닥 ÷ 코스피]")
     if not r:

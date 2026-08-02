@@ -91,6 +91,18 @@ var cls = function(v){ return v === null || v === undefined ? 'flat'
   : v > 0 ? 'up' : v < 0 ? 'down' : 'flat'; };
 var trendCls = {'상승':'up', '하락':'down'};
 
+// 백분위는 '몇 %'보다 '하위/상위 몇 %'가 바로 읽힌다
+function stretch(d){
+  var v = d.stretch_pct;
+  if (v === null || v === undefined) return '–';
+  return v <= 50 ? '하위 ' + v.toFixed(0) + '%' : '상위 ' + (100 - v).toFixed(0) + '%';
+}
+// 눌려 있으면 파랑, 떠 있으면 빨강 — 이격도 색과 같은 방향
+function stretchCls(v){
+  if (v === null || v === undefined) return 'flat';
+  return v <= 20 ? 'down' : v >= 80 ? 'up' : 'flat';
+}
+
 function card(name, d){
   return '' +
     '<section class="card">' +
@@ -100,9 +112,11 @@ function card(name, d){
              '20일선 ' + num(d.sma20, 2)) +
         cell('20일선 방향', d.trend, trendCls[d.trend] || 'flat',
              signed(d.slope_pct, 2) + '% / ' + PARAMS.slope_days + '일') +
-        cell(d.band_days + '일 밴드 위치',
-             d.band_pos === null ? '–' : d.band_pos.toFixed(1) + '%', 'flat',
-             num(d.band_low, 2) + ' ~ ' + num(d.band_high, 2)) +
+        // 60일 밴드 안의 위치는 밴드가 넓어지면 뜻이 약해진다. 대신 '지금 이
+        // 시장 기준으로 얼마나 드문 상태인가'를 백분위로 보여준다.
+        cell('이격도 백분위', stretch(d), stretchCls(d.stretch_pct),
+             '최근 ' + (d.stretch_days || 250) + '일 · ' +
+             d.band_days + '일 범위 ' + num(d.band_low, 0) + '~' + num(d.band_high, 0)) +
         cell('고점 대비',
              ((d.close / d.band_high - 1) * 100).toFixed(2) + '%',
              cls(d.close / d.band_high - 1),
