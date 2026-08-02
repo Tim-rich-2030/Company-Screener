@@ -267,15 +267,42 @@ def test_news_prefers_the_title_attribute():
     print("test_news_prefers_the_title_attribute: OK")
 
 
-def test_news_blanks_a_group_that_duplicates_another(monkey=None):
-    """
-    두 갈래가 똑같은 기사를 돌려주면 뒤쪽을 비운다.
+def _article(n, title=None):
+    return (f'<a href="/news/news_read.naver?article_id={n}&office_id=2">'
+            f'{title or f"기사 제목 {n} 입니다"}</a>')
 
-    '주요뉴스' 와 '많이 본 뉴스' 에 같은 목록이 붙어 있으면, 빈 칸보다 나쁘다 —
-    빈 칸은 고장으로 보이지만 같은 목록은 진짜 두 갈래로 읽힌다.
+
+def test_news_second_group_skips_what_the_first_took():
     """
-    same = ('<a href="/news/news_read.naver?article_id=1&office_id=2">'
-            '똑같은 기사 제목입니다</a>')
+    '많이 본 뉴스' 페이지에도 상단에 주요뉴스 블록이 통째로 들어 있다.
+    앞에서부터 세면 두 갈래가 똑같은 목록이 되므로, 앞 갈래가 가져간 기사는
+    건너뛰고 그 아래에 있는 것을 집는다.
+    """
+    first = _article(1) + _article(2)
+    second = _article(1) + _article(2) + _article(7) + _article(8)
+    docs = {"a": first, "b": second}
+    orig_fetch, orig_feeds = mn.fetch, mn.FEEDS
+    mn.fetch = lambda url: (docs[url], "테스트")
+    mn.FEEDS = [("주요뉴스", "a"), ("많이 본 뉴스", "b")]
+    try:
+        out = mn.collect()
+    finally:
+        mn.fetch, mn.FEEDS = orig_fetch, orig_feeds
+    eq([i["id"] for i in out["groups"][0]["items"]], ["2/1", "2/2"], "앞 갈래")
+    eq([i["id"] for i in out["groups"][1]["items"]], ["2/7", "2/8"],
+       "뒤 갈래는 겹치지 않는 것만")
+    eq(out["failed"], [], "둘 다 채워졌다")
+    print("test_news_second_group_skips_what_the_first_took: OK")
+
+
+def test_news_blanks_a_group_that_is_purely_a_duplicate():
+    """
+    겹치는 것을 빼고 나서 아무것도 안 남으면 그 갈래는 빈다.
+
+    같은 목록에 서로 다른 이름표를 붙이는 것은 빈 칸보다 나쁘다 — 빈 칸은
+    고장으로 보이지만 같은 목록은 진짜 두 갈래로 읽힌다.
+    """
+    same = _article(1) + _article(2)
     orig_fetch, orig_feeds = mn.fetch, mn.FEEDS
     mn.fetch = lambda url: (same, "테스트")
     mn.FEEDS = [("주요뉴스", "a"), ("많이 본 뉴스", "b")]
@@ -283,10 +310,25 @@ def test_news_blanks_a_group_that_duplicates_another(monkey=None):
         out = mn.collect()
     finally:
         mn.fetch, mn.FEEDS = orig_fetch, orig_feeds
-    eq(len(out["groups"][0]["items"]), 1, "앞쪽은 남는다")
-    eq(out["groups"][1]["items"], [], "뒤쪽은 비운다")
-    eq(out["failed"], ["많이 본 뉴스"], "비운 갈래를 기록한다")
-    print("test_news_blanks_a_group_that_duplicates_another: OK")
+    eq(len(out["groups"][0]["items"]), 2, "앞쪽은 남는다")
+    eq(out["groups"][1]["items"], [], "뒤쪽은 빈다")
+    eq(out["failed"], ["많이 본 뉴스"], "빈 갈래를 기록한다")
+    print("test_news_blanks_a_group_that_is_purely_a_duplicate: OK")
+
+
+def test_news_title_keeps_apostrophes():
+    """
+    제목 안의 작은따옴표에서 잘리면 안 된다.
+
+    ["\\']([^"\\']+)["\\'] 로 두면 큰따옴표로 연 속성이라도 안쪽 작은따옴표에서
+    멈춘다. 실제로 "해외부동산 1호 리츠인데" 처럼 문장 중간이 통째로 사라진
+    제목이 배포됐다.
+    """
+    full = "해외부동산 1호 리츠인데 '파산 위기' 왜"
+    doc = ('<a href="/news/news_read.naver?article_id=1&office_id=2" '
+           f'title="{full}">해외부동산 1호 리츠인데...</a>')
+    eq(mn.parse(doc)[0]["title"], full, "작은따옴표 너머까지 읽는다")
+    print("test_news_title_keeps_apostrophes: OK")
 
 
 def test_tree_backs_off_to_the_last_trading_day():
@@ -298,21 +340,39 @@ def test_tree_backs_off_to_the_last_trading_day():
     """
     import datetime as dt
 
+    class Frame:
+        """휴장일에도 KRX 는 행을 돌려준다. 다만 종가가 전부 0 이다."""
+        def __init__(self, closes):
+            self.closes = closes
+            self.empty = not closes
+
+        def __contains__(self, k):
+            return k == "종가"
+
+        def __getitem__(self, k):
+            class Col:
+                def __init__(self, v): self.v = v
+                def __gt__(self, n):
+                    return Col([x > n for x in self.v])
+                def any(self): return any(self.v)
+            return Col(self.closes)
+
     class Calendar:
-        """20260731(금)까지만 시세가 있다."""
+        """20260731(금)까지만 실제 거래가 있다."""
         def __init__(self):
             self.asked = []
 
         def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
             self.asked.append(date)
-            class DF:
-                def __init__(self, empty): self.empty = empty
-            return DF(date > "20260731")
+            # 휴장일에도 943행이 오는데 값이 0 이다 — 이게 실제로 있었던 일이다.
+            return Frame([0, 0, 0] if date > "20260731" else [70000, 5000, 320])
 
     cal = Calendar()
     got = mt.last_trading_day(cal, dt.date(2026, 8, 2))   # 일요일
     eq(got, "20260731", "금요일로 물러선다")
     eq(cal.asked, ["20260802", "20260801", "20260731"], "하루씩 거슬러 올라간다")
+    assert not mt.traded(Frame([0, 0, 0])), "값이 0 인 표는 거래일이 아니다"
+    assert mt.traded(Frame([1, 0, 0])), "하나라도 거래됐으면 거래일"
 
     class Dead:
         def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
@@ -337,6 +397,8 @@ if __name__ == "__main__":
     test_news_dedupes_the_same_article_across_sections()
     test_news_decoding_ignores_a_lying_charset()
     test_news_prefers_the_title_attribute()
-    test_news_blanks_a_group_that_duplicates_another()
+    test_news_title_keeps_apostrophes()
+    test_news_second_group_skips_what_the_first_took()
+    test_news_blanks_a_group_that_is_purely_a_duplicate()
     test_tree_backs_off_to_the_last_trading_day()
     print("\nALL BOARD TESTS PASSED")
