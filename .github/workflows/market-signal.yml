@@ -45,12 +45,16 @@ jobs:
       # 아래 둘은 실패해도 워크플로를 세우지 않는다. 지수는 이미 받아 뒀고,
       # 시장 지도나 뉴스 하나 때문에 그것까지 못 배포하면 손해가 더 크다.
       # 실패하면 화면의 그 칸만 빈다.
-      - name: 시장 지도 수집 (전 종목 등락·업종)
+      # 관리종목·환기종목 목록을 못 받으면 그 조건은 걸러지지 않는다. 그러면
+      # 곧바로 --dump 를 돌려 원본 구조를 로그에 남긴다.
+      - name: 시장 지도 수집 (전 종목 등락·업종·제외목록)
         continue-on-error: true
         env:
           KRX_ID: ${{ secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_PW }}
-        run: python market_tree.py
+        run: |
+          python market_flags.py || python market_flags.py --dump
+          python market_tree.py
 
       # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
       # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
