@@ -135,6 +135,52 @@ def test_insufficient_history_is_refused():
     print("test_insufficient_history_is_refused: OK")
 
 
+def test_krx_outage_falls_back_instead_of_crashing():
+    """
+    pykrx 는 import 하는 순간 KRX 로그인을 시도한다. 그래서 KRX 가 죽어 있으면
+    import 문에서 예외가 난다 — ImportError 만 잡으면 수집 전체가 트레이스백으로
+    죽는다. 지수 시세는 네이버로도 받을 수 있으니 멈출 이유가 없다.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def boom(name, *a, **kw):
+        if name.startswith("pykrx"):
+            raise OSError("KRX 접속 불가 (테스트)")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = boom
+    try:
+        got = ms._fetch_pykrx(ms.INDICES["코스피"],
+                              dt.date(2026, 1, 1), dt.date(2026, 8, 1))
+        assert got == {}, "예외를 삼키고 빈 결과를 돌려줘야 폴백이 돈다"
+    finally:
+        builtins.__import__ = real_import
+    print("test_krx_outage_falls_back_instead_of_crashing: OK")
+
+
+def test_check_krx_without_credentials_is_not_an_error():
+    """계정을 안 넣은 것은 선택이다 — 실행을 실패시키면 안 된다."""
+    saved = {k: os.environ.pop(k, None) for k in ("KRX_ID", "KRX_PW")}
+    try:
+        assert not ms.krx_credentials()
+        assert ms.check_krx() == 0
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+    print("test_check_krx_without_credentials_is_not_an_error: OK")
+
+
+def test_source_label():
+    """어디서 받은 값인지 화면·CLI 에 드러나야 계정이 죽은 걸 알아챈다."""
+    assert ms.source_label({"코스피": "pykrx", "코스닥": "pykrx"}) == "pykrx"
+    assert ms.source_label({"코스피": "pykrx", "코스닥": "naver"}) == "naver+pykrx"
+    assert ms.source_label({}) == ""
+    assert ms.source_label(None) == ""
+    print("test_source_label: OK")
+
+
 if __name__ == "__main__":
     test_sma_and_disparity()
     test_trend_thresholds()
@@ -143,4 +189,7 @@ if __name__ == "__main__":
     test_as_of_uses_only_past_data()
     test_compute_clamps_and_reports_both_indices()
     test_insufficient_history_is_refused()
+    test_krx_outage_falls_back_instead_of_crashing()
+    test_check_krx_without_credentials_is_not_an_error()
+    test_source_label()
     print("\nALL MARKET SIGNAL TESTS PASSED")

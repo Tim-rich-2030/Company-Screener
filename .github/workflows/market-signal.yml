@@ -36,6 +36,10 @@ jobs:
         run: pip install -q -r requirements.txt
 
       - name: 지수 수집 및 계산
+        env:
+          # 없어도 돌아간다 — 그때는 네이버 차트로 받는다.
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_signal.py --collect
 
       - name: 변경분 커밋
@@ -63,3 +67,12 @@ jobs:
           path: docs
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # 마지막에 둔다 — 여기서 실패해도 위에서 데이터는 이미 저장·배포된 뒤다.
+      # 계정을 넣어 뒀는데 만료·비밀번호 변경으로 조용히 네이버로 넘어가면
+      # 몇 달이 지나도 모른다. 그래서 실행을 빨갛게 만들어 알린다.
+      - name: KRX 로그인 상태 확인 (데이터 수집과 무관)
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: python market_signal.py --check-krx

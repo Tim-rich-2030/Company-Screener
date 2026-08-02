@@ -63,11 +63,64 @@ def log(msg: str) -> None:
 # 수집
 # =============================================================================
 
-def _fetch_pykrx(spec: dict, start: dt.date, end: dt.date) -> dict:
-    """pykrx 로 지수 일봉 종가. KRX 로그인이 필요해지면 빈 dict."""
+def krx_credentials() -> bool:
+    """KRX 로그인 정보가 환경에 있는지. pykrx 는 KRX_ID/KRX_PW 를 직접 읽는다."""
+    return bool(os.environ.get("KRX_ID") and os.environ.get("KRX_PW"))
+
+
+def check_krx() -> int:
+    """
+    KRX 계정이 실제로 쓸 수 있는 상태인지 확인한다.
+
+    로그인 성공과 데이터 수신은 별개라 조회까지 해본다. 자격 증명을 넣어 뒀는데
+    조용히 네이버로 넘어가 버리면, 계정이 만료돼도 몇 달 동안 모른다.
+    """
+    if not krx_credentials():
+        log("::warning::KRX_ID / KRX_PW 가 없습니다 — 네이버 차트로 받습니다. "
+            "pykrx 를 쓰려면 저장소 Secrets 에 두 값을 넣으세요.")
+        return 0                      # 안 넣은 것은 선택이지 오류가 아니다
     try:
-        from pykrx import stock
+        # pykrx 는 import 하는 순간 로그인을 시도한다. 그래서 ImportError 만
+        # 잡으면 KRX 가 죽었을 때 여기서 트레이스백째로 터진다.
+        from pykrx.website.comm.auth import build_krx_session
     except ImportError:
+        log("::error::pykrx 가 설치되지 않았습니다")
+        return 1
+    except Exception as exc:
+        log(f"::error::KRX 에 접속하지 못했습니다 ({type(exc).__name__}) — "
+            "KRX 장애이거나 네트워크가 막힌 경우입니다. 계정 문제와는 다릅니다")
+        return 1
+    try:
+        session = build_krx_session()
+    except Exception as exc:
+        # 계정이 틀린 것과 KRX 에 닿지 못한 것은 다르다. 여기서 '비밀번호를
+        # 확인하라'고 하면 멀쩡한 계정을 몇 번씩 다시 넣게 만든다.
+        log(f"::error::KRX 에 접속하지 못했습니다 ({type(exc).__name__}) — "
+            "KRX 장애이거나 네트워크가 막힌 경우입니다. 계정 문제와는 다릅니다")
+        return 1
+    if session is None:
+        log("::error::KRX 로그인 실패 — 아이디·비밀번호를 확인하세요")
+        return 1
+
+    end = dt.date.today()
+    got = _fetch_pykrx(INDICES["코스피"], end - dt.timedelta(days=20), end)
+    if len(got) < 3:
+        log(f"::error::KRX 로그인은 됐지만 조회가 비었습니다 ({len(got)}일치). "
+            "계정 상태나 이용 약관 동의를 확인하세요")
+        return 1
+    log(f"KRX 정상 — 로그인 후 코스피 {len(got)}일치 조회 확인")
+    return 0
+
+
+def _fetch_pykrx(spec: dict, start: dt.date, end: dt.date) -> dict:
+    """pykrx 로 지수 일봉 종가. KRX 로그인이 안 되면 빈 dict."""
+    try:
+        # import 시점에 KRX 로그인을 시도하므로 ImportError 만 잡으면 안 된다.
+        # KRX 가 죽어 있으면 여기서 예외가 나는데, 그건 네이버로 넘어갈 상황이지
+        # 수집 전체를 멈출 상황이 아니다.
+        from pykrx import stock
+    except Exception as exc:
+        log(f"  pykrx 불러오기 실패: {type(exc).__name__}")
         return {}
     try:
         df = stock.get_index_ohlcv_by_date(start.strftime("%Y%m%d"),
@@ -119,12 +172,20 @@ def collect(years: int = YEARS) -> dict:
     """지수별 {YYYYMMDD: 종가}. pykrx 를 먼저 쓰고 막히면 네이버로 간다."""
     end = dt.date.today()
     start = end - dt.timedelta(days=int(365.25 * years) + 10)
+    has_krx = krx_credentials()
+    if not has_krx:
+        log("KRX_ID / KRX_PW 없음 — 네이버 차트로 받습니다")
     series, sources = {}, {}
     for name, spec in INDICES.items():
         log(f"[수집] {name}")
-        data = _fetch_pykrx(spec, start, end)
+        data = _fetch_pykrx(spec, start, end) if has_krx else {}
         source = "pykrx"
         if len(data) < SMA_WINDOW + SLOPE_DAYS:
+            if has_krx:
+                # 계정을 넣어 뒀는데 못 받았다는 건 계정 쪽 문제일 수 있다.
+                # 데이터는 네이버로 채우되 조용히 넘어가지는 않는다.
+                log(f"::warning::{name}: KRX 계정이 있는데 pykrx 가 "
+                    f"{len(data)}일치만 줬습니다 — 네이버로 대체합니다")
             data = _fetch_naver(spec, int(365.25 * years * 0.75) + 60)
             source = "naver"
         if len(data) < SMA_WINDOW + SLOPE_DAYS:
@@ -217,6 +278,12 @@ def analyse_ratio(kosdaq: dict, kospi: dict, as_of: str) -> dict | None:
             "disparity": round(disparity, 2), "leader": leader}
 
 
+def source_label(sources: dict) -> str:
+    """어디서 받은 값인지. 출처가 섞이면 둘 다 적는다."""
+    kinds = sorted(set((sources or {}).values()))
+    return "+".join(kinds) if kinds else ""
+
+
 def compute(payload: dict, as_of: str = None) -> dict:
     """수집본에서 as_of(기본: 가장 최근 영업일) 기준 계산값을 만든다."""
     series = payload["series"]
@@ -236,6 +303,7 @@ def compute(payload: dict, as_of: str = None) -> dict:
         "as_of": indices["코스피"]["date"],
         "indices": indices,
         "ratio": ratio,
+        "source": source_label(payload.get("sources")),
         "params": {"sma": SMA_WINDOW, "slope_days": SLOPE_DAYS,
                    "band_days": BAND_DAYS, "trend_flat_pct": TREND_FLAT_PCT,
                    "lead_flat_pct": LEAD_FLAT_PCT},
@@ -270,8 +338,10 @@ def fmt_signed(v, digits=2):
 
 
 def report(result: dict) -> None:
+    src = result.get("source")
     print(f"\n기준일 {result['as_of']}  "
-          f"(이동평균 {SMA_WINDOW}일 · 기울기 {SLOPE_DAYS}일 · 밴드 {BAND_DAYS}일)")
+          f"(이동평균 {SMA_WINDOW}일 · 기울기 {SLOPE_DAYS}일 · 밴드 {BAND_DAYS}일"
+          f"{' · 출처 ' + src if src else ''})")
     print("=" * 62)
     for name, d in result["indices"].items():
         print(f"\n[{name}]")
@@ -300,7 +370,12 @@ def main(argv=None) -> int:
     p.add_argument("--date", help="기준일 (YYYY-MM-DD). 비우면 최신 영업일")
     p.add_argument("--collect", action="store_true",
                    help="지수 시세를 새로 받아 store/ 에 저장")
+    p.add_argument("--check-krx", action="store_true",
+                   help="KRX 계정으로 실제 조회가 되는지 확인")
     args = p.parse_args(argv)
+
+    if args.check_krx:
+        return check_krx()
 
     if args.collect:
         payload = collect()

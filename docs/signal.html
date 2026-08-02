@@ -120,7 +120,8 @@ function render(p){
   }
   var d = r.as_of;
   $('foot').textContent = '기준일 ' + d.slice(0,4) + '-' + d.slice(4,6) + '-' +
-    d.slice(6,8) + ' · 종가 기준 · 이동평균 ' + (r.params ? r.params.sma : 20) + '일';
+    d.slice(6,8) + ' · 종가 기준 · 이동평균 ' + (r.params ? r.params.sma : 20) + '일' +
+    (r.source ? ' · ' + r.source : '');
 }
 
 // 저장소의 원본은 store/market_signal.json 이지만 Pages 는 docs/ 만 서빙하므로
