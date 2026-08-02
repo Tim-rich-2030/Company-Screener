@@ -213,7 +213,7 @@ function drawChart(el, labels, vals, kind, digits){
     timeScale: {borderColor: rule, fixLeftEdge: true, fixRightEdge: true},
     crosshair: {mode: 0, vertLine: {color: muted, width: 1, style: 2, labelBackgroundColor: ink},
                 horzLine: {color: muted, width: 1, style: 2, labelBackgroundColor: ink}},
-    handleScroll: false, handleScale: false,
+    handleScroll: true, handleScale: true,
   });
   var series;
   if (kind === 'bar'){
@@ -423,12 +423,12 @@ def build(out_dir: str = None) -> str:
 
     body = f"""<header>
 <div class="hrow"><h1>코스피 분기 실적 시계열</h1>
-<a class="navlink" href="signal.html">시장 신호 &rarr;</a></div>
+<a class="navlink" href="index.html">시장 신호 &rarr;</a></div>
 <div class="meta">{len(companies)}종목 · {html.escape(span)} ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
 <div class="meta">{progress}</div>
 <div class="meta" id="built"></div>
-<a class="mkt" id="mkt" href="signal.html" hidden></a>
+<a class="mkt" id="mkt" href="index.html" hidden></a>
 </header>
 <div class="layout">
   <aside class="side">
@@ -457,7 +457,7 @@ def build(out_dir: str = None) -> str:
            '</script>'
            f'<script>{script}</script>{SW_REGISTER}</body></html>')
 
-    path = os.path.join(out_dir, "index.html")
+    path = os.path.join(out_dir, "stocks.html")
     with open(path, "w", encoding="utf-8") as fp:
         fp.write(doc)
     # Pages가 _로 시작하는 경로를 Jekyll로 처리하지 않게 한다
@@ -495,30 +495,38 @@ MANIFEST = {
 # 먼저 쓰면 낡은 숫자를 보게 된다. 아이콘 같은 정적 파일은 캐시 우선.
 # 오프라인이면 마지막으로 받은 화면을 그대로 띄운다.
 SW_JS = """\
+// 캐시를 둘로 나눈다.
+//   ASSETS — 폰트·차트 라이브러리·아이콘. 내용이 바뀌지 않는다.
+//   PAGES  — html 과 지수 json. 데이터가 바뀌면 같이 바뀐다.
+// 하나로 두면 캐시 이름이 페이지 해시라 데이터가 바뀌는 날마다 캐시가 통째로
+// 갈리고, 폰트 700KB 를 매일 다시 받게 된다.
 const V = '__VERSION__';
-// 폰트와 차트 라이브러리도 미리 받아 둔다. 이게 없으면 오프라인에서 글자가
-// 시스템 폰트로 바뀌고 차트가 아예 안 그려진다.
-const SHELL = ['./', './index.html', './signal.html',
-               './icon-192.png', './icon-512.png',
-               './apple-touch-icon.png', './manifest.webmanifest',
-               './assets/vendor/lightweight-charts.standalone.production.js',
-               './assets/fonts/noto-serif-kr-korean-400.woff2',
-               './assets/fonts/noto-serif-kr-latin-400.woff2',
-               './assets/fonts/pretendard-400.woff2',
-               './assets/fonts/pretendard-600.woff2',
-               './assets/fonts/ibm-plex-mono-400.woff2',
-               './assets/fonts/ibm-plex-mono-500.woff2'];
+const PAGES = 'pages-' + V;
+const ASSETS = 'assets-__ASSETV__';
+const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
+                './assets/fonts/noto-serif-kr-korean-400.woff2',
+                './assets/fonts/noto-serif-kr-latin-400.woff2',
+                './assets/fonts/pretendard-400.woff2',
+                './assets/fonts/pretendard-600.woff2',
+                './assets/fonts/ibm-plex-mono-400.woff2',
+                './assets/fonts/ibm-plex-mono-500.woff2',
+                './icon-192.png', './icon-512.png', './apple-touch-icon.png',
+                './manifest.webmanifest'];
+const SHELL = ['./', './index.html', './stocks.html'];
 
 self.addEventListener('install', e => {
   // addAll 은 하나라도 실패하면 전부 취소된다 — 경로 오타 하나에 오프라인이
   // 통째로 죽는다는 뜻이다. 하나씩 담고 실패는 넘긴다.
-  e.waitUntil(caches.open(V)
-    .then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {}))))
+  const put = (name, urls) => caches.open(name)
+    .then(c => Promise.all(urls.map(u => c.add(u).catch(() => {}))));
+  e.waitUntil(Promise.all([put(ASSETS, STATIC), put(PAGES, SHELL)])
     .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
-    .then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k))))
+    .then(ks => Promise.all(ks
+      .filter(k => k !== PAGES && k !== ASSETS)
+      .map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
@@ -528,13 +536,12 @@ self.addEventListener('fetch', e => {
   // 지수 요약도 페이지와 같이 다룬다. 캐시 우선으로 두면 어제 숫자를 오늘 값처럼
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
-                 path.endsWith('index.html') || path.endsWith('signal.html') ||
+                 path.endsWith('index.html') || path.endsWith('stocks.html') ||
                  path.endsWith('market_signal.json');
   if (isPage) {
-    // 숫자는 늘 최신이어야 한다. 네트워크가 죽었을 때만 캐시로 떨어진다.
     e.respondWith(fetch(req)
       .then(r => { const copy = r.clone();
-                   caches.open(V).then(c => c.put(req, copy)); return r; })
+                   caches.open(PAGES).then(c => c.put(req, copy)); return r; })
       .catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));
   } else {
     e.respondWith(caches.match(req).then(r => r || fetch(req)));
@@ -578,7 +585,22 @@ def _write_pwa(out_dir: str, version: str) -> None:                      # noqa:
     """
     with open(os.path.join(out_dir, "manifest.webmanifest"), "w", encoding="utf-8") as fp:
         json.dump(MANIFEST, fp, ensure_ascii=False, indent=1)
-    # version 은 index.html 의 내용 해시다. 내용이 바뀔 때만 sw.js 가 바뀌므로
+    # version 은 페이지 내용의 해시다. 내용이 바뀔 때만 sw.js 가 바뀌므로
     # 갱신 알림이 '진짜 새 데이터일 때만' 뜬다.
+    # 정적 자산 캐시는 파일 목록이 바뀔 때만 갈리면 된다. 페이지 해시를 쓰면
+    # 데이터가 바뀌는 날마다 폰트 700KB 를 다시 받는다.
+    asset_v = hashlib.sha256(
+        "|".join(sorted(_asset_files(out_dir))).encode("utf-8")).hexdigest()[:8]
     with open(os.path.join(out_dir, "sw.js"), "w", encoding="utf-8") as fp:
-        fp.write(SW_JS.replace("__VERSION__", version or "dev"))
+        fp.write(SW_JS.replace("__VERSION__", version or "dev")
+                      .replace("__ASSETV__", asset_v))
+
+
+def _asset_files(out_dir: str) -> list:
+    """캐시 이름을 정하는 데 쓰는 정적 자산 목록 (이름+크기)."""
+    out = []
+    for root, _dirs, files in os.walk(os.path.join(out_dir, "assets")):
+        for f in files:
+            path = os.path.join(root, f)
+            out.append(f"{os.path.relpath(path, out_dir)}:{os.path.getsize(path)}")
+    return out
