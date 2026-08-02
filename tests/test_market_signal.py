@@ -159,6 +159,37 @@ def test_krx_outage_falls_back_instead_of_crashing():
     print("test_krx_outage_falls_back_instead_of_crashing: OK")
 
 
+def test_check_krx_reads_sources_instead_of_logging_in_again():
+    """
+    점검이 따로 로그인하면 한 실행에 로그인이 두 번 나간다. 답은 이미 수집
+    결과에 있다 — 네이버로 받았다면 그게 KRX 를 못 썼다는 뜻이다.
+    """
+    import json, tempfile
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "ms.json")
+    saved_store, saved_docs = ms.STORE_PATH, ms.DOCS_PATH
+    saved_env = {k: os.environ.get(k) for k in ("KRX_ID", "KRX_PW")}
+    os.environ["KRX_ID"] = "id"; os.environ["KRX_PW"] = "pw"
+    ms.STORE_PATH = ms.DOCS_PATH = path
+    try:
+        json.dump({"sources": {"코스피": "pykrx", "코스닥": "pykrx"}},
+                  open(path, "w", encoding="utf-8"))
+        assert ms.check_krx() == 0
+        # 하나라도 네이버로 넘어갔으면 계정이 안 먹혔다는 뜻이다
+        json.dump({"sources": {"코스피": "pykrx", "코스닥": "naver"}},
+                  open(path, "w", encoding="utf-8"))
+        assert ms.check_krx() == 1
+    finally:
+        ms.STORE_PATH, ms.DOCS_PATH = saved_store, saved_docs
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        import shutil; shutil.rmtree(tmp, ignore_errors=True)
+    print("test_check_krx_reads_sources_instead_of_logging_in_again: OK")
+
+
 def test_check_krx_without_credentials_is_not_an_error():
     """계정을 안 넣은 것은 선택이다 — 실행을 실패시키면 안 된다."""
     saved = {k: os.environ.pop(k, None) for k in ("KRX_ID", "KRX_PW")}
@@ -231,6 +262,7 @@ if __name__ == "__main__":
     test_insufficient_history_is_refused()
     test_krx_outage_falls_back_instead_of_crashing()
     test_check_krx_without_credentials_is_not_an_error()
+    test_check_krx_reads_sources_instead_of_logging_in_again()
     test_source_label()
     test_disparity_percentile_beats_minmax_in_a_wide_band()
     test_percentile_extremes_and_bounds()

@@ -72,45 +72,33 @@ def krx_credentials() -> bool:
 
 def check_krx() -> int:
     """
-    KRX 계정이 실제로 쓸 수 있는 상태인지 확인한다.
+    방금 끝난 수집이 실제로 KRX 에서 받아왔는지 확인한다.
 
-    로그인 성공과 데이터 수신은 별개라 조회까지 해본다. 자격 증명을 넣어 뒀는데
-    조용히 네이버로 넘어가 버리면, 계정이 만료돼도 몇 달 동안 모른다.
+    처음에는 여기서 따로 로그인해 조회까지 해봤다. 그런데 그러면 한 번 실행에
+    로그인을 두 번 하게 된다 — 수집 때 한 번, 점검 때 또 한 번. 로그인 빈도를
+    괜히 두 배로 올리는 데다, 답은 이미 수집 결과에 들어 있다. 네이버로
+    넘어갔다면 그게 곧 'KRX 에서 못 받았다'는 뜻이다.
+
+    그래서 새로 접속하지 않고 저장된 출처만 본다.
     """
     if not krx_credentials():
         log("::warning::KRX_ID / KRX_PW 가 없습니다 — 네이버 차트로 받습니다. "
             "pykrx 를 쓰려면 저장소 Secrets 에 두 값을 넣으세요.")
         return 0                      # 안 넣은 것은 선택이지 오류가 아니다
     try:
-        # pykrx 는 import 하는 순간 로그인을 시도한다. 그래서 ImportError 만
-        # 잡으면 KRX 가 죽었을 때 여기서 트레이스백째로 터진다.
-        from pykrx.website.comm.auth import build_krx_session
-    except ImportError:
-        log("::error::pykrx 가 설치되지 않았습니다")
+        payload = load()
+    except SystemExit:
+        log("::error::수집 결과가 없어 KRX 사용 여부를 확인할 수 없습니다")
         return 1
-    except Exception as exc:
-        log(f"::error::KRX 에 접속하지 못했습니다 ({type(exc).__name__}) — "
-            "KRX 장애이거나 네트워크가 막힌 경우입니다. 계정 문제와는 다릅니다")
+    sources = payload.get("sources") or {}
+    fell_back = sorted(k for k, v in sources.items() if v != "pykrx")
+    if fell_back:
+        log(f"::error::KRX 계정이 있는데 {', '.join(fell_back)} 를 "
+            f"{sources.get(fell_back[0])} 로 받았습니다 — KRX 로그인이 안 됐다는 뜻입니다. "
+            "KRX 장애면 잠시 뒤 정상으로 돌아옵니다. 계속 이러면 계정을 확인하세요 "
+            "(데이터 자체는 정상 수집됐습니다)")
         return 1
-    try:
-        session = build_krx_session()
-    except Exception as exc:
-        # 계정이 틀린 것과 KRX 에 닿지 못한 것은 다르다. 여기서 '비밀번호를
-        # 확인하라'고 하면 멀쩡한 계정을 몇 번씩 다시 넣게 만든다.
-        log(f"::error::KRX 에 접속하지 못했습니다 ({type(exc).__name__}) — "
-            "KRX 장애이거나 네트워크가 막힌 경우입니다. 계정 문제와는 다릅니다")
-        return 1
-    if session is None:
-        log("::error::KRX 로그인 실패 — 아이디·비밀번호를 확인하세요")
-        return 1
-
-    end = dt.date.today()
-    got = _fetch_pykrx(INDICES["코스피"], end - dt.timedelta(days=20), end)
-    if len(got) < 3:
-        log(f"::error::KRX 로그인은 됐지만 조회가 비었습니다 ({len(got)}일치). "
-            "계정 상태나 이용 약관 동의를 확인하세요")
-        return 1
-    log(f"KRX 정상 — 로그인 후 코스피 {len(got)}일치 조회 확인")
+    log(f"KRX 정상 — {', '.join(sources)} 모두 pykrx 로 받았습니다")
     return 0
 
 
