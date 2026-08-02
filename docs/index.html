@@ -30,28 +30,29 @@
 :root{
   --paper:#F5F2EC; --surface:#FFFDF8; --ink:#1C1A17; --ink-muted:#6B6558;
   --rule:#DED8CC; --accent:#2C4A45; --up:#C4443D; --down:#3D6099;
-  --ma20:#2C4A45; --ma60:#8A7A4E; --ma120:#9A9384;
+  /* 이동평균 — 20일 하늘색, 60일 파랑, 120일 갈색.
+     60일선 파랑은 하락봉(--down)과 헷갈리지 않게 한 단계 더 진하게 잡았다. */
+  --ma20:#63A6C8; --ma60:#1F4E9C; --ma120:#8B5E34;
 }
 /* 규칙에 다크는 네 가지만 정해져 있다. 나머지는 어두운 종이 위에서 읽히도록
    같은 계열에서 밝기만 올린 임시값이다. */
 @media (prefers-color-scheme:dark){:root{
   --paper:#14130F; --surface:#1C1A16; --ink:#E8E3D8; --rule:#2E2B24;
   --ink-muted:#9A9384; --accent:#7FA89F; --up:#D9645C; --down:#6E8FC4;
-  --ma20:#7FA89F; --ma60:#C0A868; --ma120:#8A8478;
+  --ma20:#8FC4E0; --ma60:#6C97D8; --ma120:#B08050;
 }}
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%}
 body{background:var(--paper);color:var(--ink);
   font:15px/1.6 'Pretendard',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 /* IBM Plex Mono 에는 한글이 없다. Pretendard 를 뒤에 둬야 한글만 시스템 모노로
    떨어지지 않는다. */
 .num{font-family:'IBM Plex Mono','Pretendard',ui-monospace,monospace;
   font-variant-numeric:tabular-nums}
-h1{font-family:'Noto Serif KR',serif;font-weight:400}
+h1,h2{font-family:'Noto Serif KR',serif;font-weight:400}
 
-#app{height:100dvh;display:flex;flex-direction:column;
+#app{max-width:760px;margin:0 auto;
   padding:calc(18px + env(safe-area-inset-top)) 18px
-          calc(12px + env(safe-area-inset-bottom))}
+          calc(28px + env(safe-area-inset-bottom))}
 
 .head{display:flex;align-items:baseline;gap:12px;
   padding-bottom:12px;border-bottom:1px solid var(--rule)}
@@ -59,16 +60,28 @@ h1{font-size:21px;letter-spacing:-.2px}
 .back{margin-left:auto;font-size:13px;text-decoration:none;color:var(--accent);
   border-bottom:1px solid var(--rule);padding-bottom:1px}
 
-/* 지수 전환. 탭도 박스가 아니라 밑줄로 표시한다. */
+/* 섹션 사이는 박스가 아니라 여백과 괘선으로 가른다. */
+section{margin-top:36px}
+h2{font-size:15px;letter-spacing:-.1px;
+  padding-bottom:8px;border-bottom:1px solid var(--rule)}
+h2 .note{float:right;font-family:'Pretendard',sans-serif;font-size:11.5px;
+  color:var(--ink-muted);font-weight:400;padding-top:4px}
+
+/* 첫 화면은 지수 하나로 완결된다. 나머지는 아래로 내려가며 읽는다. */
+#market{margin-top:0;height:calc(100dvh - 130px);min-height:400px;
+  display:flex;flex-direction:column}
+
+/* 전환은 박스가 아니라 밑줄로 표시한다. */
 .tabs{display:flex;gap:22px;padding:8px 0 0}
 .tab{background:none;border:0;padding:6px 0;font:inherit;font-size:15px;
   color:var(--ink-muted);cursor:pointer;border-bottom:2px solid transparent;
   font-family:'Noto Serif KR',serif}
 .tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tabs.sm .tab{font-size:13.5px}
 
 .legend{display:flex;gap:16px;font-size:11.5px;color:var(--ink-muted);
   padding:8px 0 2px}
-.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;
   margin-right:5px}
 #chart{flex:1 1 0;min-height:170px}
 
@@ -84,8 +97,40 @@ h1{font-size:21px;letter-spacing:-.2px}
 .rows span{color:var(--ink-muted)}
 .rows b{font-weight:400;color:var(--ink)}
 .u{color:var(--up)} .d{color:var(--down)}
-footer{font-size:11px;color:var(--ink-muted);padding-top:9px;
+
+/* 조건에 걸린 종목 — 표가 아니라 괘선으로 나눈 줄 */
+.rule-line{font-size:11.5px;color:var(--ink-muted);padding:8px 0 2px}
+.pick{display:flex;align-items:baseline;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--rule)}
+.pick .nm{font-family:'Noto Serif KR',serif;font-size:14.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick .cd{font-size:11px;color:var(--ink-muted)}
+.pick .vals{margin-left:auto;display:flex;gap:14px;font-size:12.5px;
+  white-space:nowrap}
+.pick .vals i{font-style:normal;color:var(--ink-muted);font-size:10.5px;
+  margin-right:3px}
+
+/* 시장 지도 */
+#map{position:relative;width:100%;height:360px;margin-top:10px}
+@media (min-width:520px){#map{height:480px}}
+.tile{position:absolute;overflow:hidden;border:1px solid var(--paper);
+  padding:3px 4px;line-height:1.15}
+.tile b{display:block;font-weight:400;font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile s{display:block;text-decoration:none;font-size:10.5px;opacity:.85;
+  font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.scale{display:flex;align-items:center;gap:8px;font-size:11px;
+  color:var(--ink-muted);padding-top:9px}
+.scale .bar{flex:1;height:6px;max-width:170px}
+
+/* 뉴스 */
+.news a{display:block;padding:9px 0;border-bottom:1px solid var(--rule);
+  color:var(--ink);text-decoration:none;font-size:13.5px;line-height:1.5}
+.news a:visited{color:var(--ink-muted)}
+
+footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   border-top:1px solid var(--rule);display:flex;gap:10px;flex-wrap:wrap}
+.miss{font-size:12.5px;color:var(--ink-muted);padding:14px 0;line-height:1.7}
 #err{padding:32px 0;font-size:13.5px;color:var(--ink-muted);line-height:1.9}
 </style>
 </head>
@@ -95,11 +140,34 @@ footer{font-size:11px;color:var(--ink-muted);padding-top:9px;
     <h1>시장 신호</h1>
     <a class="back" href="stocks.html">종목 실적</a>
   </div>
-  <div class="tabs" id="tabs"></div>
-  <div class="legend" id="legend"></div>
-  <div id="chart"></div>
-  <div class="figs" id="figs"></div>
-  <div class="rows" id="rows"></div>
+
+  <section id="market">
+    <div class="tabs" id="tabs"></div>
+    <div class="legend" id="legend"></div>
+    <div id="chart"></div>
+    <div class="figs" id="figs"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <section id="picks">
+    <h2>조건에 걸린 종목<span class="note" id="picks-note"></span></h2>
+    <div class="rule-line" id="picks-rule"></div>
+    <div id="picks-list"></div>
+  </section>
+
+  <section id="tree">
+    <h2>시장 지도<span class="note" id="tree-note"></span></h2>
+    <div class="tabs sm" id="tree-tabs"></div>
+    <div id="map"></div>
+    <div class="scale" id="tree-scale"></div>
+  </section>
+
+  <section id="news">
+    <h2>주요 뉴스<span class="note" id="news-note"></span></h2>
+    <div class="tabs sm" id="news-tabs"></div>
+    <div class="news" id="news-list"></div>
+  </section>
+
   <footer id="foot"></footer>
 </div>
 
@@ -120,6 +188,9 @@ var cssVar = function(n){ return getComputedStyle(document.documentElement)
   .getPropertyValue(n).trim(); };
 var MAS = [[20, '--ma20'], [60, '--ma60'], [120, '--ma120']];
 
+// =============================================================================
+// 지수 — 봉차트 + 이동평균
+// =============================================================================
 var DATA = null, NAMES = [], CUR = null, chart = null, ro = null;
 
 function toTime(s){
@@ -174,7 +245,7 @@ function draw(name){
   MAS.forEach(function(p){
     var data = sma(rows, p[0]);
     if (data.length < 2) return;
-    chart.addLineSeries({color: cssVar(p[1]), lineWidth:1,
+    chart.addLineSeries({color: cssVar(p[1]), lineWidth:2,
       priceLineVisible:false, lastValueVisible:false,
       crosshairMarkerVisible:false}).setData(data);
   });
@@ -241,19 +312,252 @@ $('tabs').addEventListener('click', function(e){
   if (b && b.dataset.n !== CUR) draw(b.dataset.n);
 });
 
-// 저장소의 원본은 store/market_signal.json 이지만 Pages 는 docs/ 만 서빙하므로
-// 같은 내용의 사본을 docs/ 에 두고 그것을 읽는다.
-fetch('market_signal.json', {cache:'no-store'})
-  .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-  .then(function(p){
-    DATA = p;
-    NAMES = Object.keys((p.computed || p).indices);
-    draw(NAMES[0]);
-  })
-  .catch(function(e){
-    $('app').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
-      esc(e.message) + '<br><br>수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.' +
-      '<br><br><a class="back" href="stocks.html">종목 실적 보기</a></div>';
+// =============================================================================
+// 조건에 걸린 종목
+// =============================================================================
+var PICKS_SHOWN = 8;
+
+function renderPicks(p){
+  var items = p.items || [];
+  $('picks-rule').textContent = '조건 — ' + (p.rule || '');
+  $('picks-note').textContent =
+    p.screened + '종목 중 ' + items.length + '개';
+  if (!items.length){
+    $('picks-list').innerHTML =
+      '<div class="miss">오늘 이 조건을 모두 만족하는 종목이 없습니다.</div>';
+    return;
+  }
+  var labels = p.labels || [];
+  $('picks-list').innerHTML = items.slice(0, PICKS_SHOWN).map(function(h){
+    var vals = (h.values || []).map(function(v, i){
+      return '<span class="num"><i>' + esc(labels[i]) + '</i>' +
+        (v === null || v === undefined ? '–' : v.toFixed(2)) + '</span>';
+    }).join('');
+    return '<div class="pick"><span class="nm">' + esc(h.name) + '</span>' +
+      '<span class="cd num">' + esc(h.code) + '</span>' +
+      '<span class="vals">' + vals + '</span></div>';
+  }).join('') + (items.length > PICKS_SHOWN
+    ? '<div class="rule-line">' + (items.length - PICKS_SHOWN) +
+      '개 더 — 종목 실적에서 전체를 볼 수 있습니다</div>' : '');
+}
+
+// =============================================================================
+// 시장 지도 (트리맵)
+// =============================================================================
+var TREE = null, TREE_VIEW = '상승순';
+
+// 시총이 넓이, 등락률이 색. 색은 종이색에서 상승/하락색 쪽으로 섞는다.
+var TINT_MAX = 3;      // 이 %에서 색이 가장 진해진다
+
+function hex(v){
+  var h = v.replace('#','');
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16),
+          parseInt(h.slice(4,6),16)];
+}
+function mix(a, b, t){
+  return [0,1,2].map(function(i){ return Math.round(a[i] + (b[i]-a[i])*t); });
+}
+function tint(chg, base, up, down){
+  if (!chg) return {bg: base, fg: null};
+  var t = Math.min(1, Math.abs(chg)/TINT_MAX) * 0.88 + 0.12;
+  var c = mix(base, chg > 0 ? up : down, t);
+  // 타일이 진해지면 검은 글씨가 안 읽힌다. 밝기로 글자색을 뒤집는다.
+  var lum = (c[0]*299 + c[1]*587 + c[2]*114) / 1000;
+  return {bg: c, fg: lum < 140 ? '#FFFDF8' : null};
+}
+function rgb(c){ return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }
+
+/*
+ * Squarified treemap (Bruls·Huizing·van Wijk).
+ * 남은 사각형의 짧은 변에 줄을 채우고, 타일이 정사각형에서 멀어지기 시작하면
+ * 줄을 끊는다. 단순히 순서대로 자르면(slice-and-dice) 실처럼 가늘고 긴 타일이
+ * 나와 글자가 안 들어간다.
+ */
+function squarify(items, X, Y, W, H){
+  var out = [], rest = items.slice();
+  var total = rest.reduce(function(s, i){ return s + i.v; }, 0);
+  if (!(total > 0) || W <= 0 || H <= 0) return out;
+  var scale = (W * H) / total;
+  var x = X, y = Y, w = W, h = H;
+
+  function worst(row, sum, side){
+    var mx = 0, mn = Infinity;
+    for (var i = 0; i < row.length; i++){
+      if (row[i] > mx) mx = row[i];
+      if (row[i] < mn) mn = row[i];
+    }
+    var s2 = sum * sum, d2 = side * side;
+    return Math.max(d2 * mx / s2, s2 / (d2 * mn));
+  }
+
+  while (rest.length){
+    var side = Math.min(w, h);
+    var row = [], areas = [], sum = 0, best = Infinity;
+    while (rest.length){
+      var a = rest[0].v * scale;
+      var w2 = worst(areas.concat([a]), sum + a, side);
+      if (areas.length && w2 > best) break;
+      best = w2; sum += a; areas.push(a); row.push(rest.shift());
+    }
+    var thick = sum / side;                 // 줄의 두께
+    var horizontal = (w >= h);              // 짧은 변이 세로면 세로로 쌓는다
+    var off = 0;
+    for (var i = 0; i < row.length; i++){
+      var len = areas[i] / thick;
+      out.push(horizontal
+        ? {it: row[i], x: x, y: y + off, w: thick, h: len}
+        : {it: row[i], x: x + off, y: y, w: len, h: thick});
+      off += len;
+    }
+    if (horizontal){ x += thick; w -= thick; }
+    else           { y += thick; h -= thick; }
+    if (w < 0.5 || h < 0.5) break;
+  }
+  return out;
+}
+
+function renderTree(){
+  if (!TREE) return;
+  var el = $('map');
+  var W = el.clientWidth, H = el.clientHeight;
+  if (!W || !H) return;
+
+  var src, shown;
+  if (TREE_VIEW === '섹터순'){
+    // 업종은 수가 적어 다 들어간다. 넓은 것부터 놓아야 타일이 반듯하다.
+    src = (TREE.sectors || []).filter(function(s){ return s.cap > 0; })
+            .map(function(s){ return {v:s.cap, chg:s.chg, name:s.name}; })
+            .sort(function(a, b){ return b.v - a.v; });
+    shown = src.length + '개 업종';
+  } else {
+    // 폰에서 200개를 깔면 색종이 조각이 된다. 화면 폭에 맞춰 개수를 줄이고,
+    // 몇 개를 그렸는지 위에 적는다 — 조용히 잘라내면 '전부'로 읽힌다.
+    var budget = W < 520 ? 40 : 64;
+    var top = (TREE.items || []).filter(function(i){ return i.cap > 0; })
+                .sort(function(a, b){ return b.cap - a.cap; }).slice(0, budget);
+    // 상승순이니 많이 오른 것부터 왼쪽 위에 놓는다. 넓이순으로 놓아야 타일이
+    // 반듯해지지만, 그러면 '상승순'이라는 이름이 거짓말이 된다.
+    src = top.map(function(i){ return {v:i.cap, chg:i.chg, name:i.name}; })
+             .sort(function(a, b){ return b.chg - a.chg; });
+    shown = '시가총액 상위 ' + src.length + '종목 · 많이 오른 것부터';
+  }
+  if (!src.length) return;
+
+  var base = hex(cssVar('--surface')), up = hex(cssVar('--up')),
+      down = hex(cssVar('--down'));
+  el.innerHTML = squarify(src, 0, 0, W, H).map(function(r){
+    var t = tint(r.it.chg, base, up, down);
+    var style = 'left:' + r.x.toFixed(1) + 'px;top:' + r.y.toFixed(1) +
+      'px;width:' + r.w.toFixed(1) + 'px;height:' + r.h.toFixed(1) +
+      'px;background:' + rgb(t.bg) + (t.fg ? ';color:' + t.fg : '');
+    // 글자가 안 들어갈 만큼 작으면 색만 남긴다. 잘린 글자는 없는 것만 못하다.
+    var label = (r.w > 42 && r.h > 24)
+      ? '<b>' + esc(r.it.name) + '</b><s>' + signed(r.it.chg, 1) + '%</s>' : '';
+    return '<div class="tile" style="' + style + '" title="' + esc(r.it.name) +
+      ' ' + signed(r.it.chg, 2) + '%">' + label + '</div>';
+  }).join('');
+
+  var b = TREE.breadth || {};
+  $('tree-note').textContent = shown;
+  $('tree-scale').innerHTML =
+    '<span>넓이 = 시가총액 · 색 = 등락률</span>' +
+    '<span class="bar" style="background:linear-gradient(90deg,' +
+      rgb(mix(base, down, 1)) + ',' + rgb(base) + ',' + rgb(mix(base, up, 1)) +
+      ')"></span>' +
+    '<span class="num">−' + TINT_MAX + '% ~ +' + TINT_MAX + '%</span>' +
+    (b.total ? '<span style="margin-left:auto">전체 ' + b.total +
+      '종목 중 <b class="u">↑' + b.up + '</b> <b class="d">↓' + b.down +
+      '</b></span>' : '');
+}
+
+function renderTreeTabs(){
+  $('tree-tabs').innerHTML = ['상승순','섹터순'].map(function(n){
+    return '<button class="tab' + (n === TREE_VIEW ? ' on' : '') +
+      '" data-v="' + n + '">' + n + '</button>'; }).join('');
+}
+$('tree-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== TREE_VIEW){
+    TREE_VIEW = b.dataset.v; renderTreeTabs(); renderTree();
+  }
+});
+
+// =============================================================================
+// 주요 뉴스
+// =============================================================================
+var NEWS = null, NEWS_VIEW = 0;
+
+function renderNews(){
+  if (!NEWS) return;
+  var groups = NEWS.groups || [];
+  $('news-tabs').innerHTML = groups.map(function(g, i){
+    return '<button class="tab' + (i === NEWS_VIEW ? ' on' : '') +
+      '" data-i="' + i + '">' + esc(g.name) + '</button>'; }).join('');
+  var g = groups[NEWS_VIEW];
+  if (!g || !g.items || !g.items.length){
+    $('news-list').innerHTML =
+      '<div class="miss">이 갈래의 기사를 받지 못했습니다.<br>' +
+      '네이버 금융 화면이 바뀌면 이렇게 비는데, 틀린 제목을 보여주는 것보다 ' +
+      '비워두는 쪽이 낫습니다.</div>';
+    return;
+  }
+  $('news-list').innerHTML = g.items.map(function(n){
+    return '<a href="' + esc(n.url) + '" target="_blank" rel="noopener">' +
+      esc(n.title) + '</a>'; }).join('');
+  var t = NEWS.fetched_at || '';
+  $('news-note').textContent = (NEWS.source || '') + (t ? ' · ' + t.slice(11,16) + ' UTC' : '');
+}
+$('news-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && +b.dataset.i !== NEWS_VIEW){ NEWS_VIEW = +b.dataset.i; renderNews(); }
+});
+
+// =============================================================================
+// 불러오기 — 칸마다 따로 실패한다. 하나가 없다고 화면 전체가 죽지 않는다.
+// =============================================================================
+function grab(file){
+  return fetch(file, {cache:'no-store'}).then(function(r){
+    if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}
+function drop(sectionId, msg){
+  var s = $(sectionId);
+  var box = s.querySelector('.news, #picks-list') ||
+            s.appendChild(document.createElement('div'));
+  box.className = 'miss';
+  box.innerHTML = esc(msg);
+}
+
+// 저장소의 원본은 store/ 에 있지만 Pages 는 docs/ 만 서빙하므로 사본을 읽는다.
+grab('market_signal.json').then(function(p){
+  DATA = p;
+  NAMES = Object.keys((p.computed || p).indices);
+  draw(NAMES[0]);
+}).catch(function(e){
+  $('market').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
+    esc(e.message) + '<br><br>수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.' +
+    '</div>';
+});
+
+grab('screen.json').then(renderPicks).catch(function(){
+  $('picks-rule').textContent = '';
+  $('picks-note').textContent = '';
+  drop('picks', '조건 목록을 불러오지 못했습니다 — 실적 갱신이 한 번 돌면 채워집니다.');
+});
+
+grab('market_tree.json').then(function(p){
+  TREE = p; renderTreeTabs(); renderTree();
+  if (window.ResizeObserver) new ResizeObserver(renderTree).observe($('map'));
+}).catch(function(){
+  $('map').style.height = 'auto';
+  $('map').innerHTML = '<div class="miss">시장 지도를 불러오지 못했습니다 — ' +
+    '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
+});
+
+grab('market_news.json').then(function(p){ NEWS = p; renderNews(); })
+  .catch(function(){
+    $('news-list').innerHTML =
+      '<div class="miss">뉴스를 불러오지 못했습니다.</div>';
   });
 
 if ('serviceWorker' in navigator){

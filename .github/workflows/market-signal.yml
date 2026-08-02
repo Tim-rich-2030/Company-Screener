@@ -42,12 +42,32 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_signal.py --collect
 
+      # 아래 둘은 실패해도 워크플로를 세우지 않는다. 지수는 이미 받아 뒀고,
+      # 시장 지도나 뉴스 하나 때문에 그것까지 못 배포하면 손해가 더 크다.
+      # 실패하면 화면의 그 칸만 빈다.
+      - name: 시장 지도 수집 (전 종목 등락·업종)
+        continue-on-error: true
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: python market_tree.py
+
+      - name: 뉴스 수집 (네이버 금융)
+        continue-on-error: true
+        run: python market_news.py
+
       - name: 변경분 커밋
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add store/market_signal.json docs/market_signal.json
+          # 하나씩 담는다. git add 는 원자적이라 경로 하나만 없어도 전부
+          # 스테이징되지 않는다 — 뉴스 수집이 실패한 날 지수까지 커밋을 놓친다.
+          for f in store/market_signal.json docs/market_signal.json \
+                   store/market_tree.json  docs/market_tree.json \
+                   store/market_news.json  docs/market_news.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
           if git diff --staged --quiet; then
             echo "변경 없음 — 같은 영업일을 다시 받았을 수 있습니다"
           else
