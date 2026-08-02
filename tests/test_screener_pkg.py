@@ -426,9 +426,10 @@ def test_site_build():
     # 자체 완결형이어야 GitHub Pages·로컬 어디서든 동일하게 뜬다.
     # PWA 때문에 <link>(manifest·아이콘)는 생겼지만 전부 같은 출처의 상대경로다.
     # 지켜야 할 건 '태그가 없을 것'이 아니라 '바깥으로 요청이 나가지 않을 것'이다.
+    # 폰트·차트 라이브러리는 저장소 안(assets/)에 두고 상대경로로 부른다.
+    # 금지해야 할 건 태그의 존재가 아니라 '바깥으로 나가는 요청'이다.
     assert "https://" not in doc and "http://" not in doc
-    assert "<script src" not in doc
-    for attr in re.findall(r'(?:href|src)="([^"]+)"', doc):
+    for attr in re.findall(r'(?:href|src|url\()["\']?([^"\')]+)', doc):
         assert not attr.startswith(("http://", "https://", "//")), f"외부 참조: {attr}"
     assert "prefers-color-scheme" in doc
     assert os.path.exists(os.path.join(cfg.SITE_DIR, ".nojekyll"))
