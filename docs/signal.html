@@ -30,6 +30,12 @@ body{
 }
 h1{font-size:17px;font-weight:800;letter-spacing:-.4px}
 .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.hrow{display:flex;align-items:center;gap:10px}
+.navlink{margin-left:auto;flex:none;font-size:13px;font-weight:700;
+  text-decoration:none;color:#1a56db;background:var(--card);
+  border:1px solid var(--line);border-radius:999px;padding:7px 13px;
+  white-space:nowrap}
+@media (prefers-color-scheme:dark){.navlink{color:#7aa2ff}}
 
 .card{
   flex:1 1 0;min-height:0;border:1px solid var(--line);border-radius:10px;
@@ -60,9 +66,13 @@ footer{font-size:11px;color:var(--muted);text-align:center;line-height:1.5}
 </head>
 <body>
 <div id="app">
-  <div>
-    <h1>시장 신호</h1>
-    <div class="sub">코스피 · 코스닥 — 일봉 종가 기준</div>
+  <div class="hrow">
+    <div>
+      <h1>시장 신호</h1>
+      <div class="sub">코스피 · 코스닥 — 일봉 종가 기준</div>
+    </div>
+    <!-- 대시보드에서 넘어온 사람이 돌아갈 길이 없으면 뒤로가기밖에 없다 -->
+    <a class="navlink" href="index.html">&larr; 종목</a>
   </div>
   <div id="cards" style="display:contents"></div>
   <div id="rs" hidden></div>

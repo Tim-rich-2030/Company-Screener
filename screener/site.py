@@ -34,6 +34,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,
 BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
 header{padding:14px 18px;border-bottom:1px solid var(--line)}
 h1{font-size:17px;margin:0}
+.hrow{display:flex;align-items:center;gap:10px}
+/* 지수 화면으로 건너가는 링크. 폰에서 눌러야 하므로 여백을 넉넉히 준다 */
+.navlink{margin-left:auto;flex:none;font-size:13px;font-weight:700;
+  text-decoration:none;color:var(--accent);background:var(--chip);
+  border-radius:999px;padding:7px 13px;white-space:nowrap}
 .meta{color:var(--muted);font-size:12px;margin-top:3px}
 .layout{display:grid;grid-template-columns:270px 1fr;min-height:calc(100vh - 62px)}
 @media (max-width:820px){.layout{grid-template-columns:1fr}
@@ -335,7 +340,8 @@ def build(out_dir: str = None) -> str:
     progress = " ".join(chips)
 
     body = f"""<header>
-<h1>코스피 분기 실적 시계열</h1>
+<div class="hrow"><h1>코스피 분기 실적 시계열</h1>
+<a class="navlink" href="signal.html">시장 신호 &rarr;</a></div>
 <div class="meta">{len(companies)}종목 · {html.escape(span)} ·
 공시가 뜨면 자동으로 수집·갱신됩니다</div>
 <div class="meta">{progress}</div>
