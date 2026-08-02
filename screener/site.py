@@ -16,6 +16,7 @@ import hashlib
 import quarterly_dashboard as qd
 
 from . import config
+from . import screen
 from .metrics import compute_timeseries
 from .store import load_all, load_state, sort_quarters, frozen_price_run
 
@@ -460,6 +461,9 @@ def build(out_dir: str = None) -> str:
     path = os.path.join(out_dir, "stocks.html")
     with open(path, "w", encoding="utf-8") as fp:
         fp.write(doc)
+    # 첫 화면이 읽어갈 "조건에 걸린 종목" 목록. 방금 계산한 지표를 다시 쓰므로
+    # 새로 수집하는 것은 없다.
+    screen.save(screen.build(data, all_q[0] if all_q else ""), out_dir)
     # Pages가 _로 시작하는 경로를 Jekyll로 처리하지 않게 한다
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
     # 서비스워커 캐시 이름은 페이지 내용의 해시로 짓는다. 시각을 쓰면 안 된다 —
@@ -512,7 +516,13 @@ const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
                 './assets/fonts/ibm-plex-mono-500.woff2',
                 './icon-192.png', './icon-512.png', './apple-touch-icon.png',
                 './manifest.webmanifest'];
-const SHELL = ['./', './index.html', './stocks.html'];
+// 첫 화면이 읽는 데이터 파일들. 숫자라서 페이지와 같이 다뤄야 한다 —
+// 캐시 우선으로 두면 어제 값을 오늘처럼 보여주고, 아예 안 담으면 오프라인에서
+// 화면이 통째로 빈다.
+const DATA_FILES = ['market_signal.json', 'screen.json',
+                    'market_tree.json', 'market_news.json'];
+const SHELL = ['./', './index.html', './stocks.html']
+                .concat(DATA_FILES.map(f => './' + f));
 
 self.addEventListener('install', e => {
   // addAll 은 하나라도 실패하면 전부 취소된다 — 경로 오타 하나에 오프라인이
@@ -537,7 +547,7 @@ self.addEventListener('fetch', e => {
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
                  path.endsWith('index.html') || path.endsWith('stocks.html') ||
-                 path.endsWith('market_signal.json');
+                 DATA_FILES.some(f => path.endsWith(f));
   if (isPage) {
     e.respondWith(fetch(req)
       .then(r => { const copy = r.clone();

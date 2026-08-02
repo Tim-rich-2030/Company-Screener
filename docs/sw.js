@@ -15,7 +15,13 @@ const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
                 './assets/fonts/ibm-plex-mono-500.woff2',
                 './icon-192.png', './icon-512.png', './apple-touch-icon.png',
                 './manifest.webmanifest'];
-const SHELL = ['./', './index.html', './stocks.html'];
+// 첫 화면이 읽는 데이터 파일들. 숫자라서 페이지와 같이 다뤄야 한다 —
+// 캐시 우선으로 두면 어제 값을 오늘처럼 보여주고, 아예 안 담으면 오프라인에서
+// 화면이 통째로 빈다.
+const DATA_FILES = ['market_signal.json', 'screen.json',
+                    'market_tree.json', 'market_news.json'];
+const SHELL = ['./', './index.html', './stocks.html']
+                .concat(DATA_FILES.map(f => './' + f));
 
 self.addEventListener('install', e => {
   // addAll 은 하나라도 실패하면 전부 취소된다 — 경로 오타 하나에 오프라인이
@@ -40,7 +46,7 @@ self.addEventListener('fetch', e => {
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
                  path.endsWith('index.html') || path.endsWith('stocks.html') ||
-                 path.endsWith('market_signal.json');
+                 DATA_FILES.some(f => path.endsWith(f));
   if (isPage) {
     e.respondWith(fetch(req)
       .then(r => { const copy = r.clone();
