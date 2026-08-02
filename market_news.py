@@ -43,8 +43,14 @@ ARTICLE_HREF = re.compile(
     r'(?:news_read\.naver\?[^"\']*article_id=|n\.news\.naver\.com/mnews/article/)',
     re.I)
 ANCHOR = re.compile(r'<a\b([^>]*)>(.*?)</a>', re.I | re.S)
-HREF = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
-TITLE_ATTR = re.compile(r'title\s*=\s*["\']([^"\']+)["\']', re.I)
+# 여는 따옴표를 붙잡아 같은 따옴표까지만 읽는다. ["\']([^"\']+)["\'] 로 두면
+# 제목에 든 작은따옴표에서 잘린다 — 실제로 "해외부동산 1호 리츠인데" 처럼
+# 문장 중간이 통째로 사라진 채 배포됐다.
+HREF = re.compile(r'href\s*=\s*(["\'])(.*?)\1', re.I | re.S)
+TITLE_ATTR = re.compile(r'title\s*=\s*(["\'])(.*?)\1', re.I | re.S)
+# 기사 링크가 어느 덩어리에 들어 있는지 보려고 쓰는 표지 (--dump 전용)
+MARKER = re.compile(r'<(?:h[2-5]|div|ul|dl|table|section)\b[^>]*?'
+                    r'(?:class|id)\s*=\s*(["\'])(.*?)\1', re.I)
 TAG = re.compile(r'<[^>]+>')
 WS = re.compile(r'\s+')
 
@@ -129,7 +135,7 @@ def article_id(url: str) -> str:
     return url
 
 
-def parse(doc: str, limit: int = LIMIT) -> list:
+def parse(doc: str, limit: int = LIMIT, exclude: set = None) -> list:
     """
     기사 링크를 순서대로 뽑는다.
 
@@ -141,18 +147,18 @@ def parse(doc: str, limit: int = LIMIT) -> list:
     """
     if not doc:
         return []
-    out, seen = [], set()
+    out, seen = [], set(exclude or ())
     for attrs, inner in ANCHOR.findall(doc):
         m = HREF.search(attrs)
-        if not m or not ARTICLE_HREF.search(m.group(1)):
+        if not m or not ARTICLE_HREF.search(m.group(2)):
             continue
         t = TITLE_ATTR.search(attrs)
-        title = clean(t.group(1)) if t else ""
+        title = clean(t.group(2)) if t else ""
         if len(title) < 8:
             title = clean(inner)
         if len(title) < 8:          # 썸네일·'더보기' 따위
             continue
-        url = absolute(html.unescape(m.group(1)))
+        url = absolute(html.unescape(m.group(2)))
         key = article_id(url)
         if key in seen:
             continue
@@ -164,35 +170,27 @@ def parse(doc: str, limit: int = LIMIT) -> list:
 
 
 def collect(limit: int = LIMIT) -> dict:
-    groups, failed = [], []
+    groups, failed, taken = [], [], set()
     for name, url in FEEDS:
         info = ""
         try:
             doc, info = fetch(url)
-            items = parse(doc, limit)
+            # 앞 갈래가 이미 가져간 기사는 건너뛴다. '많이 본 뉴스' 페이지에도
+            # 상단에 주요뉴스 블록이 통째로 들어 있어서, 앞에서부터 세면 두
+            # 갈래가 똑같은 목록이 된다. 그래도 비면 아래에서 비운다.
+            items = parse(doc, limit, exclude=taken)
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
             items, failed = [], failed + [name]
         else:
             if not items:
-                log(f"::warning::{name}: 기사를 하나도 못 찾았습니다 — "
-                    f"네이버 화면 구조가 바뀌었을 수 있습니다 "
+                log(f"::warning::{name}: 남는 기사가 없습니다 — 앞 갈래와 같은 "
+                    f"목록이거나 화면 구조가 바뀐 것입니다 "
                     f"(python market_news.py --dump 로 확인)")
                 failed.append(name)
+        taken |= {i["id"] for i in items}
         log(f"  {name}: {len(items)}건 ({info})")
         groups.append({"name": name, "url": url, "items": items})
-
-    # 두 갈래가 같은 기사면 한쪽 주소가 안 먹힌 것이다. 화면에는 서로 다른
-    # 이름표가 붙는데 내용이 같으면, 없는 것보다 나쁜 거짓말이 된다.
-    filled = [g for g in groups if g["items"]]
-    if len(filled) > 1:
-        ids = [tuple(i["id"] for i in g["items"]) for g in filled]
-        if len(set(ids)) == 1:
-            log("::warning::갈래들이 같은 기사를 돌려줬습니다 — "
-                "한쪽 주소가 무시된 것으로 보입니다. 중복된 갈래는 비웁니다")
-            for g in filled[1:]:
-                g["items"] = []
-                failed.append(g["name"])
 
     return {
         "fetched_at": dt.datetime.now(dt.timezone.utc)
@@ -226,17 +224,32 @@ def dump() -> int:
         log(f"  {info} · {len(doc)}자")
         t = re.search(r"<title[^>]*>(.*?)</title>", doc, re.I | re.S)
         log(f"  <title>: {clean(t.group(1)) if t else '없음'}")
-        hrefs = [HREF.search(a).group(1) for a, _ in ANCHOR.findall(doc)
-                 if HREF.search(a)]
-        arts = [h for h in hrefs if ARTICLE_HREF.search(h)]
-        log(f"  <a> {len(hrefs)}개 · 기사 링크 {len(arts)}개 · "
-            f"기사 번호 {len({article_id(h) for h in arts})}개")
-        log("  기사 링크 표본 10개:")
-        for h in arts[:10]:
-            log(f"    {h[:130]}")
+        arts = [(a.start(), HREF.search(a.group(1)).group(2))
+                for a in ANCHOR.finditer(doc) if HREF.search(a.group(1))]
+        arts = [(p, h) for p, h in arts if ARTICLE_HREF.search(h)]
+        log(f"  기사 링크 {len(arts)}개 · 기사 번호 "
+            f"{len({article_id(h) for h in arts})}개")
+
+        # 기사 링크가 어느 덩어리에 들어 있는지. '많이 본 뉴스' 페이지에도
+        # 상단에 주요뉴스 블록이 그대로 들어 있어서, 앞에서부터 세면 두 갈래가
+        # 같은 기사를 준다. 덩어리 이름을 알아야 옳은 쪽을 집을 수 있다.
+        marks = [(m.start(), m.group(2)) for m in MARKER.finditer(doc)]
+        log("  기사 링크를 담은 덩어리 (class/id → 기사 수):")
+        counts = {}
+        for pos, _ in arts:
+            owner = "?"
+            for mp, mv in marks:
+                if mp < pos:
+                    owner = mv
+                else:
+                    break
+            counts[owner] = counts.get(owner, 0) + 1
+        for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:12]:
+            log(f"    {v:3}개  {k[:70]}")
+
         log("  파싱 결과 5건:")
         for it in parse(doc, 5):
-            log(f"    {it['id']}  {it['title'][:60]}")
+            log(f"    {it['id']}  {it['title'][:70]}")
     return 0
 
 

@@ -105,13 +105,28 @@ def sector_map(stock, date: str, market: str) -> dict:
     return out
 
 
+def traded(df) -> bool:
+    """
+    이 표에 '실제 거래'가 들어 있는가.
+
+    휴장일에도 KRX 는 종목 목록을 돌려준다 — 코스피 943행, 코스닥 1820행이
+    그대로 온다. 다만 종가가 전부 0 이다. 그래서 "행이 있으면 거래일"로 보면
+    안 된다. 일요일 실행에서 이 가정 때문에 943종목을 받아 0건을 남겼다.
+    """
+    if df is None or df.empty or "종가" not in df:
+        return False
+    try:
+        return bool((df["종가"] > 0).any())
+    except Exception:                            # noqa: BLE001
+        return False
+
+
 def last_trading_day(stock, start: dt.date, back: int = BACKOFF_DAYS) -> str | None:
     """
-    실제로 시세가 있는 가장 가까운 과거 날짜를 찾는다.
+    실제로 거래가 있었던 가장 가까운 과거 날짜를 찾는다.
 
     지수 수집기는 기간을 통째로 요청하니 알아서 마지막 거래일로 떨어지지만,
-    여기는 하루만 묻는다. 그래서 주말·공휴일에 돌리면 빈 표를 받는다.
-    (실제로 일요일 실행에서 이걸로 통째로 실패했다.)
+    여기는 하루만 묻는다. 그래서 주말·공휴일에 돌리면 값이 0 인 표를 받는다.
     """
     for i in range(back):
         d = (start - dt.timedelta(days=i)).strftime("%Y%m%d")
@@ -120,11 +135,35 @@ def last_trading_day(stock, start: dt.date, back: int = BACKOFF_DAYS) -> str | N
         except Exception as e:                   # noqa: BLE001
             log(f"  {d}: 조회 실패 ({type(e).__name__}) — 하루 앞으로")
             continue
-        if df is not None and not df.empty:
+        if traded(df):
             if i:
-                log(f"  {start:%Y%m%d} 은 휴장 — {d} 로 물러섭니다")
+                log(f"  {start:%Y%m%d} 은 거래 없음 — {d} 로 물러섭니다")
             return d
+        log(f"  {d}: 거래 없음 (휴장)")
     return None
+
+
+def name_map(stock, date: str, market: str) -> dict:
+    """
+    {종목코드: 종목명} 을 **한 번에** 받는다.
+
+    처음엔 종목마다 get_market_ticker_name 을 불렀다. 코스피·코스닥 합쳐
+    2,700종목이 넘으니 요청이 그만큼 나간다 — 느린 것을 넘어 KRX 에 대고
+    두드리는 짓이다. 이름이 든 표를 통째로 받아서 한 번으로 끝낸다.
+
+    실패하면 빈 dict. 그때는 타일에 종목코드가 찍힌다. 이름은 있으면 좋은
+    것이지 없다고 지어낼 것은 아니다.
+    """
+    try:
+        df = stock.get_market_price_change_by_ticker(date, date, market=market)
+    except Exception as e:                       # noqa: BLE001
+        log(f"::warning::{market} 종목명 표 실패 ({type(e).__name__}: {e}) "
+            "— 타일에 종목코드가 찍힙니다")
+        return {}
+    if df is None or df.empty or "종목명" not in df:
+        log(f"::warning::{market} 종목명 열이 없습니다 — 타일에 종목코드가 찍힙니다")
+        return {}
+    return df["종목명"].to_dict()
 
 
 def collect(date: str = None) -> dict:
@@ -152,23 +191,25 @@ def collect(date: str = None) -> dict:
             log(f"::warning::{market} {date} 시세가 비었습니다 (휴장일일 수 있습니다)")
             continue
 
+        if not traded(ohlcv):
+            log(f"::warning::{market} {date} 는 거래가 없습니다 (종가가 전부 0)")
+            continue
+
         sectors = sector_map(stock, date, market)
+        names = name_map(stock, date, market)
         cap_col = caps["시가총액"].to_dict() if caps is not None and not caps.empty else {}
 
+        before = len(items)
         for code, row in ohlcv.iterrows():
             cap = cap_col.get(code)
             close = row.get("종가")
             chg = row.get("등락률")
             # 시총이 없거나 거래가 없던 종목은 타일로 그릴 수 없다. 넓이가 없다.
-            if not cap or cap <= 0 or close is None or chg is None:
+            if not cap or cap <= 0 or not close or close <= 0 or chg is None:
                 continue
-            try:
-                name = stock.get_market_ticker_name(code)
-            except Exception:                    # noqa: BLE001
-                name = code
             items.append({
                 "code": code,
-                "name": name,
+                "name": names.get(code) or code,
                 "market": market,
                 "sector": sectors.get(code, "기타"),
                 "chg": round(float(chg), 2),
@@ -176,7 +217,7 @@ def collect(date: str = None) -> dict:
                 "close": int(close),
             })
         used_date = date
-        log(f"  {market} {len(ohlcv)}종목 중 {len(items)}건 누적")
+        log(f"  {market} {len(ohlcv)}종목 중 {len(items) - before}건")
 
     if not items:
         raise SystemExit(f"{date} 시세를 받지 못했습니다 — 휴장일이거나 KRX 접속 실패")
