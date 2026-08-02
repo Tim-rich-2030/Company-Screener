@@ -20,87 +20,129 @@ from .metrics import compute_timeseries
 from .store import load_all, load_state, sort_quarters, frozen_price_run
 
 CSS = """
-:root{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;--head:#f7f8fa;
---pos:#0a7c3f;--neg:#c02626;--accent:#1a56db;--chip:#eef2ff;--sel:#dbe4ff}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8ec;--muted:#9aa1ac;
---line:#262a31;--head:#171a20;--pos:#3ddc84;--neg:#ff6b6b;--accent:#7aa2ff;
---chip:#1c2333;--sel:#233056}}
-:root[data-theme=dark]{--bg:#0f1115;--fg:#e6e8ec;--muted:#9aa1ac;--line:#262a31;
---head:#171a20;--pos:#3ddc84;--neg:#ff6b6b;--accent:#7aa2ff;--chip:#1c2333;--sel:#233056}
-:root[data-theme=light]{--bg:#fff;--fg:#16181d;--muted:#6b7280;--line:#e5e7eb;
---head:#f7f8fa;--pos:#0a7c3f;--neg:#c02626;--accent:#1a56db;--chip:#eef2ff;--sel:#dbe4ff}
+/* CLAUDE.md 디자인 규칙을 따른다. 오래된 회계장부·신문 금융면의 톤.
+   폰트·차트는 전부 저장소 안(assets/)에서 불러온다 — 바깥으로 요청이 나가면
+   오프라인에서 앱이 반쪽이 되고, 자체 완결 보장도 깨진다. */
+@font-face{font-family:'Noto Serif KR';src:url('assets/fonts/noto-serif-kr-korean-400.woff2')
+  format('woff2');font-weight:400;font-display:swap;unicode-range:U+1100-11FF,U+3130-318F,U+AC00-D7A3}
+@font-face{font-family:'Noto Serif KR';src:url('assets/fonts/noto-serif-kr-latin-400.woff2')
+  format('woff2');font-weight:400;font-display:swap;unicode-range:U+0000-00FF,U+2000-206F}
+@font-face{font-family:'Pretendard';src:url('assets/fonts/pretendard-400.woff2')
+  format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Pretendard';src:url('assets/fonts/pretendard-600.woff2')
+  format('woff2');font-weight:600;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('assets/fonts/ibm-plex-mono-400.woff2')
+  format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('assets/fonts/ibm-plex-mono-500.woff2')
+  format('woff2');font-weight:500;font-display:swap}
+
+:root{
+  --paper:#F5F2EC; --surface:#FFFDF8; --ink:#1C1A17; --ink-muted:#6B6558;
+  --rule:#DED8CC; --accent:#2C4A45; --up:#C4443D; --down:#3D6099;
+}
+/* 규칙에 다크는 네 가지(paper·surface·ink·rule)만 정해져 있다. 나머지 넷은
+   어두운 종이 위에서 읽히도록 같은 계열에서 밝기만 올린 임시값이다. */
+@media (prefers-color-scheme:dark){:root{
+  --paper:#14130F; --surface:#1C1A16; --ink:#E8E3D8; --rule:#2E2B24;
+  --ink-muted:#9A9384; --accent:#7FA89F; --up:#D9645C; --down:#6E8FC4;
+}}
+:root[data-theme=dark]{--paper:#14130F;--surface:#1C1A16;--ink:#E8E3D8;--rule:#2E2B24;
+  --ink-muted:#9A9384;--accent:#7FA89F;--up:#D9645C;--down:#6E8FC4}
+:root[data-theme=light]{--paper:#F5F2EC;--surface:#FFFDF8;--ink:#1C1A17;
+  --ink-muted:#6B6558;--rule:#DED8CC;--accent:#2C4A45;--up:#C4443D;--down:#3D6099}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,
-BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}
-header{padding:14px 18px;border-bottom:1px solid var(--line)}
-h1{font-size:17px;margin:0}
-.hrow{display:flex;align-items:center;gap:10px}
-/* 지수 요약 한 줄. 종목을 보기 전에 시장이 어느 쪽인지 먼저 눈에 들어와야 한다 */
-.mkt{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-top:10px;
-  padding:9px 12px;border:1px solid var(--line);border-radius:8px;
-  text-decoration:none;color:inherit;font-size:13px}
-.mkt i{font-style:normal;color:var(--muted);margin-right:5px}
-.mkt b{font-variant-numeric:tabular-nums}
-.mkt .more{margin-left:auto;color:var(--accent);font-weight:700}
-/* 표의 초록/빨강은 실적의 좋고 나쁨이지만, 여기 숫자는 주가다.
-   주가는 오르면 빨강 내리면 파랑이라는 국내 관례를 따른다. */
-.mkt .u{color:var(--neg)} .mkt .d{color:var(--accent)}
-/* 지수 화면으로 건너가는 링크. 폰에서 눌러야 하므로 여백을 넉넉히 준다 */
-.navlink{margin-left:auto;flex:none;font-size:13px;font-weight:700;
-  text-decoration:none;color:var(--accent);background:var(--chip);
-  border-radius:999px;padding:7px 13px;white-space:nowrap}
-.meta{color:var(--muted);font-size:12px;margin-top:3px}
-.layout{display:grid;grid-template-columns:270px 1fr;min-height:calc(100vh - 62px)}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:15px/1.65 'Pretendard',system-ui,sans-serif;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+/* 숫자는 예외 없이 등폭. 자릿수가 흔들리면 표가 아니라 낙서가 된다.
+   IBM Plex Mono 에는 한글이 없다. Pretendard 를 뒤에 둬야 '7. 31. 오전 08:27'
+   같은 문자열에서 한글만 시스템 모노로 떨어지지 않는다. */
+.num,.card .v,.mkt b,table td,table th,.item span,time{
+  font-family:'IBM Plex Mono','Pretendard',ui-monospace,monospace;
+  font-variant-numeric:tabular-nums}
+h1,h2,.item b,.title h2{font-family:'Noto Serif KR',serif;font-weight:400}
+
+header{padding:22px 20px 18px;border-bottom:1px solid var(--rule)}
+h1{font-size:22px;margin:0;letter-spacing:-.2px}
+.hrow{display:flex;align-items:baseline;gap:12px}
+.navlink{margin-left:auto;flex:none;font-size:13px;text-decoration:none;
+  color:var(--accent);border-bottom:1px solid var(--rule);padding-bottom:1px}
+.meta{color:var(--ink-muted);font-size:12.5px;margin-top:6px}
+.prog{display:inline-block;margin-right:14px;font-size:12.5px;color:var(--ink-muted)}
+.prog.done{color:var(--accent)}
+
+/* 지수 요약. 박스가 아니라 위아래 괘선으로만 구분한다. */
+.mkt{display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;
+  margin-top:16px;padding:12px 0 11px;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);text-decoration:none;color:inherit;font-size:13.5px}
+.mkt i{font-style:normal;color:var(--ink-muted);margin-right:6px;font-size:12.5px}
+.mkt .more{margin-left:auto;color:var(--accent)}
+/* 주가는 오르면 빨강 내리면 파랑 (실적 표와 방향이 반대다) */
+.mkt .u{color:var(--up)} .mkt .d{color:var(--down)}
+
+.layout{display:grid;grid-template-columns:264px 1fr;min-height:60vh}
 @media (max-width:820px){.layout{grid-template-columns:1fr}
-  .side{max-height:240px;border-right:0;border-bottom:1px solid var(--line)}}
-.side{border-right:1px solid var(--line);overflow-y:auto;padding:10px}
-.side input{width:100%;font:inherit;padding:7px 10px;border:1px solid var(--line);
-border-radius:6px;background:var(--bg);color:var(--fg);margin-bottom:8px}
-.item{padding:7px 9px;border-radius:6px;cursor:pointer;display:flex;
-justify-content:space-between;gap:8px;align-items:baseline}
-.item:hover{background:var(--head)}
-.item.on{background:var(--sel)}
-.item b{font-weight:600}
-.item span{color:var(--muted);font-size:11px;white-space:nowrap}
-main{padding:16px 18px 50px;overflow-x:auto}
-.title{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
-.title h2{margin:0;font-size:19px}
-.title .code{color:var(--muted);font-size:13px}
-.tag{background:var(--chip);color:var(--muted);border-radius:999px;
-padding:2px 9px;font-size:11px}
-.tag.warn{color:var(--neg)}
-/* 목록에서 거래정지 의심 종목을 한눈에. 값이 멈춰 있는 걸 모르고 PBR을 읽으면
-   "싸 보이는데 살 수가 없는" 종목을 고르게 된다. */
-.halt{font-style:normal;font-size:11px;font-weight:700;margin-left:6px;
-  padding:1px 5px;border-radius:4px;background:var(--neg);color:#fff;opacity:.85}
-/* 홈 화면에서 띄웠을 때 상태바 밑으로 내용이 들어가지 않게 */
-body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
-.newbuild{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));
-  z-index:50;padding:12px 16px;border-radius:10px;background:var(--pos);
-  color:#fff;font-weight:700;font-size:14px;text-align:center;cursor:pointer;
-  box-shadow:0 6px 20px rgba(0,0,0,.35)}
-.cards{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
-.card{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:104px}
-.card .k{color:var(--muted);font-size:11px}
-.card .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
-table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
-th,td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:right;white-space:nowrap}
-thead th{background:var(--head);position:sticky;top:0;font-size:12px}
-tbody th{text-align:left;background:var(--bg);position:sticky;left:0;font-weight:500;
-border-right:1px solid var(--line)}
-.pos{color:var(--pos)}.neg{color:var(--neg)}.na{color:var(--muted)}
-.chart{margin:6px 0 18px}
-.cscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.bval{font-size:9.5px;fill:var(--fg);font-variant-numeric:tabular-nums}
-.bqlab{font-size:9px;fill:var(--muted)}
-.chart h3{font-size:13px;margin:0 0 6px;color:var(--muted);font-weight:600}
-.legend{font-size:11px;color:var(--muted);margin-bottom:4px}
-.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
-.foot{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.7;max-width:70ch}
-.empty{color:var(--muted);padding:40px 0}
-.prog{display:inline-block;margin-top:4px;background:var(--chip);border-radius:999px;
-padding:2px 10px;font-size:12px}
-.prog.done{color:var(--pos)}
+  .side{max-height:232px;border-right:0;border-bottom:1px solid var(--rule)}}
+/* 목록은 292종목이라 그냥 두면 페이지가 1만 픽셀이 된다. 화면에 붙여두고
+   자기 안에서만 구르게 한다. */
+.side{border-right:1px solid var(--rule);padding:16px 0 16px 20px;
+  position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto}
+@media (max-width:820px){.side{position:static;max-height:232px}}
+.side input{width:calc(100% - 20px);font:inherit;font-size:14px;padding:8px 0;
+  border:0;border-bottom:1px solid var(--rule);background:transparent;
+  color:var(--ink);margin-bottom:6px;outline:none}
+.side input:focus{border-bottom-color:var(--accent)}
+/* 목록도 박스가 아니라 줄. 선택은 배경이 아니라 왼쪽 괘선으로 표시한다. */
+.item{padding:9px 20px 9px 0;cursor:pointer;display:flex;
+  justify-content:space-between;gap:10px;align-items:baseline;
+  border-bottom:1px solid var(--rule);border-left:2px solid transparent;
+  padding-left:10px;margin-left:-12px}
+.item:hover{background:var(--surface)}
+.item.on{border-left-color:var(--accent);background:var(--surface)}
+.item b{font-weight:400;font-size:15px}
+.item span{color:var(--ink-muted);font-size:11.5px;white-space:nowrap}
+.halt{font-style:normal;font-size:11px;margin-left:7px;color:var(--up)}
+
+main{padding:32px 20px 64px;overflow-x:auto}
+.title{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  padding-bottom:12px;border-bottom:1px solid var(--rule)}
+.title h2{margin:0;font-size:26px;letter-spacing:-.3px}
+.title .code{color:var(--ink-muted);font-size:13px;
+  font-family:'IBM Plex Mono',monospace}
+.tag{color:var(--ink-muted);font-size:11.5px}
+.tag.warn{color:var(--up)}
+
+/* 요약 숫자는 셋까지. 나머지는 아래 표에 있다. */
+.cards{display:flex;gap:40px;flex-wrap:wrap;margin:32px 0;
+  padding-bottom:20px;border-bottom:1px solid var(--rule)}
+.card .k{color:var(--ink-muted);font-size:11.5px;letter-spacing:.3px}
+.card .v{font-size:30px;font-weight:500;line-height:1.25;margin-top:2px}
+.card .v.na{color:var(--ink-muted)}
+
+table{border-collapse:collapse;font-size:13px;width:100%}
+th,td{border-bottom:1px solid var(--rule);padding:8px 12px;text-align:right;
+  white-space:nowrap}
+thead th{position:sticky;top:0;background:var(--paper);font-size:11.5px;
+  font-weight:400;color:var(--ink-muted);border-bottom:1px solid var(--ink-muted)}
+tbody th{text-align:left;background:var(--paper);position:sticky;left:0;
+  font-weight:400;font-family:'Pretendard',sans-serif;color:var(--ink-muted)}
+.pos{color:var(--up)}.neg{color:var(--down)}.na{color:var(--ink-muted)}
+
+.chart{margin:32px 0}
+.chart h3{font-size:12.5px;margin:0 0 10px;color:var(--ink-muted);font-weight:400;
+  letter-spacing:.3px}
+.chart .box{height:180px}
+.tv{font-size:10.5px;color:var(--ink-muted);margin-top:6px}
+.tv a{color:var(--ink-muted)}
+
+.foot{color:var(--ink-muted);font-size:12px;margin-top:32px;line-height:1.8;
+  max-width:70ch;padding-top:16px;border-top:1px solid var(--rule)}
+.empty{color:var(--ink-muted);padding:40px 0}
+.newbuild{position:fixed;left:0;right:0;bottom:0;z-index:50;
+  padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+  background:var(--surface);border-top:1px solid var(--accent);
+  color:var(--accent);font-size:13.5px;text-align:center;cursor:pointer}
 """
 
 JS = r"""
@@ -133,77 +175,68 @@ function renderList(){
   });
 }
 function compact(v){
-  // 막대 위에 얹는 짧은 숫자. 억 단위가 커지면 '조'로 접는다.
+  // 억 단위가 커지면 '조'로 접는다.
   var a = Math.abs(v);
   if (a >= 10000) return (v / 10000).toFixed(a >= 100000 ? 0 : 1) + '조';
   if (a >= 1000) return Math.round(v).toLocaleString('ko-KR');
   return (Math.round(v * 10) / 10).toLocaleString('ko-KR');
 }
-function bars(labels, vals, title){
-  // 분기 막대. 음수는 0선 아래로 내려 적자 분기가 한눈에 보이게 한다.
-  // 값은 막대 위(음수는 아래)에 직접 찍는다 — 눈금축을 읽는 것보다 빠르다.
-  var W = Math.max(340, labels.length * 52), H = 132, padT = 20, padB = 26;
-  var ok = vals.filter(function(v){return v !== null;});
-  if (!ok.length) return '';
-  var hi = Math.max.apply(null, ok), lo = Math.min.apply(null, ok);
-  if (hi < 0) hi = 0; if (lo > 0) lo = 0;
-  var span = (hi - lo) || 1, plot = H - padT - padB;
-  var zero = padT + (hi / span) * plot;
-  var step = (W - 8) / labels.length, bw = step * 0.6;
-  var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H +
-            '" role="img">';
-  svg += '<line x1="0" y1="' + zero.toFixed(1) + '" x2="' + W + '" y2="' + zero.toFixed(1) +
-         '" stroke="var(--line)"/>';
-  for (var i = 0; i < labels.length; i++){
-    var v = vals[i]; if (v === null) continue;
-    var x = 4 + i * step + (step - bw) / 2;
-    var h = Math.abs(v) / span * plot;
-    var y = v >= 0 ? zero - h : zero;
-    var cx = x + bw / 2;
-    svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
-      '" height="' + Math.max(1, h).toFixed(1) + '" rx="1.5" fill="' +
-      (v >= 0 ? 'var(--pos)' : 'var(--neg)') + '"><title>' + labels[i] + ': ' +
-      v.toLocaleString('ko-KR') + '</title></rect>';
-    // 값 라벨: 양수는 막대 위, 음수는 막대 아래
-    svg += '<text class="bval" x="' + cx.toFixed(1) + '" y="' +
-      (v >= 0 ? (y - 4).toFixed(1) : (y + h + 11).toFixed(1)) +
-      '" text-anchor="middle">' + esc(compact(v)) + '</text>';
-    // 분기 라벨은 2줄로 (2025Q3 -> 25 / Q3) 가로 공간을 아낀다
-    svg += '<text class="bqlab" x="' + cx.toFixed(1) + '" y="' + (H - 4).toFixed(1) +
-      '" text-anchor="middle">' + labels[i].slice(2) + '</text>';
-  }
-  svg += '</svg>';
-  return '<div class="chart"><h3>' + title + '</h3><div class="cscroll">' + svg + '</div></div>';
+// 분기 라벨(2025Q3)을 차트가 쓰는 날짜로. 분기말 달의 1일이면 순서만 맞으면 된다.
+function qDate(q){
+  var y = +q.slice(0, 4), n = +q.slice(5);
+  return {year: y, month: n * 3, day: 1};
 }
-function line(labels, vals, title, digits){
-  var W = Math.max(340, labels.length * 52), H = 124, padT = 20, padB = 26, padX = 16;
-  var ok = vals.filter(function(v){return v !== null;});
-  if (ok.length < 2) return '';
-  var hi = Math.max.apply(null, ok), lo = Math.min.apply(null, ok), span = (hi - lo) || 1;
-  var plot = H - padT - padB;
-  var step = (W - padX * 2) / Math.max(1, labels.length - 1);
-  var d = '', started = false, marks = '';
+function cssVar(n){
+  return getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+}
+var CHARTS = [];
+function disposeCharts(){
+  CHARTS.forEach(function(c){ try{ c.remove(); }catch(e){} });
+  CHARTS = [];
+}
+// TradingView Lightweight Charts. 격자선은 --rule 색으로 최소한만 남긴다.
+function drawChart(el, labels, vals, kind, digits){
+  if (!window.LightweightCharts) return;
+  var pts = [];
   for (var i = 0; i < labels.length; i++){
-    var v = vals[i];
-    var x = padX + i * step;
-    if (v === null){ started = false; }
-    else {
-      var y = padT + (hi - v) / span * plot;
-      d += (started ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-      marks += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
-        '" r="2.6" fill="var(--accent)"><title>' + labels[i] + ': ' +
-        v.toLocaleString('ko-KR') + '</title></circle>';
-      marks += '<text class="bval" x="' + x.toFixed(1) + '" y="' + (y - 6).toFixed(1) +
-        '" text-anchor="middle">' + v.toFixed(digits == null ? 2 : digits) + '</text>';
-      started = true;
-    }
-    marks += '<text class="bqlab" x="' + x.toFixed(1) + '" y="' + (H - 4).toFixed(1) +
-      '" text-anchor="middle">' + labels[i].slice(2) + '</text>';
+    if (vals[i] === null || vals[i] === undefined) continue;
+    pts.push({time: qDate(labels[i]), value: vals[i]});
   }
-  return '<div class="chart"><h3>' + title + '</h3><div class="cscroll"><svg width="' + W +
-    '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><path d="' + d +
-    '" fill="none" stroke="var(--accent)" stroke-width="1.8"/>' + marks +
-    '</svg></div></div>';
+  if (pts.length < 2) return;
+  var ink = cssVar('--ink'), muted = cssVar('--ink-muted'), rule = cssVar('--rule');
+  var chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth, height: 180,
+    layout: {background: {color: 'transparent'}, textColor: muted,
+             fontFamily: "'IBM Plex Mono', monospace", fontSize: 10},
+    grid: {vertLines: {visible: false}, horzLines: {color: rule}},
+    rightPriceScale: {borderColor: rule},
+    timeScale: {borderColor: rule, fixLeftEdge: true, fixRightEdge: true},
+    crosshair: {mode: 0, vertLine: {color: muted, width: 1, style: 2, labelBackgroundColor: ink},
+                horzLine: {color: muted, width: 1, style: 2, labelBackgroundColor: ink}},
+    handleScroll: false, handleScale: false,
+  });
+  var series;
+  if (kind === 'bar'){
+    series = chart.addHistogramSeries({
+      priceFormat: {type: 'volume'},
+      color: cssVar('--accent'),
+    });
+    // 적자 분기는 색을 바꿔 0선 아래가 바로 읽히게 한다
+    pts = pts.map(function(p){
+      return {time: p.time, value: p.value,
+              color: p.value >= 0 ? cssVar('--accent') : cssVar('--up')};
+    });
+  } else {
+    series = chart.addLineSeries({
+      color: cssVar('--accent'), lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: true,
+      priceFormat: {type: 'price', precision: digits == null ? 2 : digits,
+                    minMove: Math.pow(10, -(digits == null ? 2 : digits))},
+    });
+  }
+  series.setData(pts);
+  chart.timeScale().fitContent();
+  CHARTS.push(chart);
 }
 function select(code){
   current = code;
@@ -213,9 +246,9 @@ function select(code){
   var qs = c.quarters, oldFirst = qs.slice().reverse();
   var M = DB.metrics;
 
-  // 최신 분기 요약 카드
+  // 요약 숫자는 셋까지. 나머지는 아래 표에 다 있다 (디자인 규칙).
   var cards = '';
-  ['PBR','PER','ROE(%)','매출 YoY(%)','분기 영업이익률(%)'].forEach(function(k){
+  ['PBR','PER','ROE(%)'].forEach(function(k){
     if (!c.metrics[k]) return;
     var v = c.metrics[k][0], spec = (M.filter(function(m){return m.key===k;})[0]||{}).fmt || '{:.2f}';
     var s = fmt(v, spec);
@@ -241,10 +274,18 @@ function select(code){
   function seriesOld(key){
     var v = c.metrics[key]; return v ? v.slice().reverse() : [];
   }
-  var charts = bars(oldFirst, seriesOld('매출액(억)'), '분기 매출액 (억원)') +
-               bars(oldFirst, seriesOld('영업이익(억)'), '분기 영업이익 (억원)') +
-               line(oldFirst, seriesOld('PBR'), 'PBR 추이 (각 분기말 주가 기준)', 2) +
-               line(oldFirst, seriesOld('PER'), 'PER 추이 (각 분기말 주가 기준)', 1);
+  // 차트는 그릴 자리만 잡아두고, DOM 에 붙은 뒤 Lightweight Charts 로 그린다.
+  var SPECS = [
+    {id:'c-rev', title:'분기 매출액 (억원)',            key:'매출액(억)',   kind:'bar'},
+    {id:'c-op',  title:'분기 영업이익 (억원)',          key:'영업이익(억)', kind:'bar'},
+    {id:'c-pbr', title:'PBR — 각 분기말 주가 기준',     key:'PBR',          kind:'line', d:2},
+    {id:'c-per', title:'PER — 각 분기말 주가 기준',     key:'PER',          kind:'line', d:1},
+  ];
+  var charts = SPECS.map(function(sp){
+    return '<div class="chart"><h3>' + sp.title + '</h3>' +
+           '<div class="box" id="' + sp.id + '"></div></div>';
+  }).join('') +
+  '<div class="tv">차트: TradingView Lightweight Charts\u2122</div>';
 
   pane.innerHTML =
     '<div class="title"><h2>' + esc(c.name) + '</h2><span class="code">' + code + '</span>' +
@@ -272,6 +313,12 @@ function select(code){
         ' 이후). 거래정지 목록을 직접 조회한 것이 아니라 주가가 멈춘 것을 보고 ' +
         '추정한 것이므로, 매매 전에 반드시 확인하세요.' : '') +
     '</div>';
+
+  // DOM 에 붙은 뒤에 그려야 컨테이너 폭이 잡힌다
+  disposeCharts();
+  SPECS.forEach(function(sp){
+    drawChart(document.getElementById(sp.id), oldFirst, seriesOld(sp.key), sp.kind, sp.d);
+  });
 }
 // 마지막 실행 시각을 보는 사람의 시간대로, '몇 시간 전'까지 함께 보여준다
 // 지수 요약 — 시장 신호 파일이 있으면 헤더에 한 줄로 띄운다.
@@ -405,6 +452,9 @@ def build(out_dir: str = None) -> str:
            '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
            '<meta name="apple-mobile-web-app-title" content="코스피 실적">'
            f'<style>{CSS}</style></head><body>{body}'
+           # 차트 라이브러리는 저장소 안에 둔 것을 쓴다 (오프라인·자체완결)
+           '<script src="assets/vendor/lightweight-charts.standalone.production.js">'
+           '</script>'
            f'<script>{script}</script>{SW_REGISTER}</body></html>')
 
     path = os.path.join(out_dir, "index.html")
@@ -446,11 +496,25 @@ MANIFEST = {
 # 오프라인이면 마지막으로 받은 화면을 그대로 띄운다.
 SW_JS = """\
 const V = '__VERSION__';
-const SHELL = ['./', './index.html', './icon-192.png', './icon-512.png',
-               './apple-touch-icon.png', './manifest.webmanifest'];
+// 폰트와 차트 라이브러리도 미리 받아 둔다. 이게 없으면 오프라인에서 글자가
+// 시스템 폰트로 바뀌고 차트가 아예 안 그려진다.
+const SHELL = ['./', './index.html', './signal.html',
+               './icon-192.png', './icon-512.png',
+               './apple-touch-icon.png', './manifest.webmanifest',
+               './assets/vendor/lightweight-charts.standalone.production.js',
+               './assets/fonts/noto-serif-kr-korean-400.woff2',
+               './assets/fonts/noto-serif-kr-latin-400.woff2',
+               './assets/fonts/pretendard-400.woff2',
+               './assets/fonts/pretendard-600.woff2',
+               './assets/fonts/ibm-plex-mono-400.woff2',
+               './assets/fonts/ibm-plex-mono-500.woff2'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // addAll 은 하나라도 실패하면 전부 취소된다 — 경로 오타 하나에 오프라인이
+  // 통째로 죽는다는 뜻이다. 하나씩 담고 실패는 넘긴다.
+  e.waitUntil(caches.open(V)
+    .then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {}))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
@@ -460,8 +524,12 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  const isPage = req.mode === 'navigate' || new URL(req.url).pathname.endsWith('/') ||
-                 new URL(req.url).pathname.endsWith('index.html');
+  const path = new URL(req.url).pathname;
+  // 지수 요약도 페이지와 같이 다룬다. 캐시 우선으로 두면 어제 숫자를 오늘 값처럼
+  // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
+  const isPage = req.mode === 'navigate' || path.endsWith('/') ||
+                 path.endsWith('index.html') || path.endsWith('signal.html') ||
+                 path.endsWith('market_signal.json');
   if (isPage) {
     // 숫자는 늘 최신이어야 한다. 네트워크가 죽었을 때만 캐시로 떨어진다.
     e.respondWith(fetch(req)

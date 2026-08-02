@@ -5,147 +5,142 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>시장 신호</title>
 <style>
-/* 1차 버전 — 디자인은 나중에 잡는다. 지금은 한 화면에 숫자가 다 들어오는 것까지만. */
-*{margin:0;padding:0;box-sizing:border-box}
+/* CLAUDE.md 디자인 규칙. 오래된 회계장부·신문 금융면의 톤.
+   폰트는 저장소 안(assets/fonts)에서 불러온다 — 바깥으로 요청이 나가면
+   오프라인에서 글자가 바뀌고 자체 완결 보장도 깨진다. */
+@font-face{font-family:'Noto Serif KR';src:url('assets/fonts/noto-serif-kr-korean-400.woff2')
+  format('woff2');font-weight:400;font-display:swap;unicode-range:U+1100-11FF,U+3130-318F,U+AC00-D7A3}
+@font-face{font-family:'Noto Serif KR';src:url('assets/fonts/noto-serif-kr-latin-400.woff2')
+  format('woff2');font-weight:400;font-display:swap;unicode-range:U+0000-00FF,U+2000-206F}
+@font-face{font-family:'Pretendard';src:url('assets/fonts/pretendard-400.woff2')
+  format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Pretendard';src:url('assets/fonts/pretendard-600.woff2')
+  format('woff2');font-weight:600;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('assets/fonts/ibm-plex-mono-400.woff2')
+  format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('assets/fonts/ibm-plex-mono-500.woff2')
+  format('woff2');font-weight:500;font-display:swap}
+
 :root{
-  --bg:#fff; --fg:#16181d; --muted:#6b7280; --line:#e5e7eb; --card:#f7f8fa;
-  --up:#c02626; --down:#1a56db; --flat:#6b7280;
+  --paper:#F5F2EC; --surface:#FFFDF8; --ink:#1C1A17; --ink-muted:#6B6558;
+  --rule:#DED8CC; --accent:#2C4A45; --up:#C4443D; --down:#3D6099;
 }
+/* 규칙에 다크는 네 가지만 정해져 있다. 나머지 넷은 어두운 종이 위에서 읽히도록
+   같은 계열에서 밝기만 올린 임시값이다. */
 @media (prefers-color-scheme:dark){:root{
-  --bg:#0f1115; --fg:#e6e8ec; --muted:#9aa1ac; --line:#262a31; --card:#171a20;
-  --up:#ff6b6b; --down:#7aa2ff; --flat:#9aa1ac;
+  --paper:#14130F; --surface:#1C1A16; --ink:#E8E3D8; --rule:#2E2B24;
+  --ink-muted:#9A9384; --accent:#7FA89F; --up:#D9645C; --down:#6E8FC4;
 }}
+*{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%}
-body{
-  background:var(--bg);color:var(--fg);
-  font-family:-apple-system,BlinkMacSystemFont,system-ui,"Malgun Gothic",
-              "Apple SD Gothic Neo",sans-serif;
-  -webkit-font-smoothing:antialiased;
-}
-/* 스크롤 없이 한 화면. 100dvh 라야 모바일 주소창이 접혔다 펴져도 안 잘린다. */
-#app{
-  height:100dvh;display:flex;flex-direction:column;gap:10px;
-  padding:calc(14px + env(safe-area-inset-top)) 14px
-          calc(10px + env(safe-area-inset-bottom));
-}
-h1{font-size:17px;font-weight:800;letter-spacing:-.4px}
-.sub{font-size:12px;color:var(--muted);margin-top:2px}
-.hrow{display:flex;align-items:center;gap:10px}
-.navlink{margin-left:auto;flex:none;font-size:13px;font-weight:700;
-  text-decoration:none;color:#1a56db;background:var(--card);
-  border:1px solid var(--line);border-radius:999px;padding:7px 13px;
-  white-space:nowrap}
-@media (prefers-color-scheme:dark){.navlink{color:#7aa2ff}}
+body{background:var(--paper);color:var(--ink);
+  font:15px/1.6 'Pretendard',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+/* IBM Plex Mono 에는 한글이 없다. Pretendard 를 뒤에 둬야 '최근 250일' 같은
+   문자열에서 한글만 시스템 모노로 떨어지지 않는다. */
+.num{font-family:'IBM Plex Mono','Pretendard',ui-monospace,monospace;
+  font-variant-numeric:tabular-nums}
+h1,h2{font-family:'Noto Serif KR',serif;font-weight:400}
 
-.card{
-  flex:1 1 0;min-height:0;border:1px solid var(--line);border-radius:10px;
-  background:var(--card);padding:12px 14px;display:flex;flex-direction:column;
-}
-.card h2{font-size:14px;font-weight:800;display:flex;align-items:baseline;gap:8px}
-.close{margin-left:auto;font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-.grid{
-  margin-top:10px;flex:1;display:grid;grid-template-columns:1fr 1fr;
-  gap:8px 10px;align-content:center;
-}
-.cell .k{font-size:11px;color:var(--muted)}
-.cell .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;
-  line-height:1.25}
-.cell .n{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+/* 스크롤 없이 한 화면. 100dvh 라야 주소창이 접혔다 펴져도 안 잘린다. */
+#app{height:100dvh;display:flex;flex-direction:column;
+  padding:calc(20px + env(safe-area-inset-top)) 20px
+          calc(14px + env(safe-area-inset-bottom))}
 
-#rs{
-  border:1px solid var(--line);border-radius:10px;padding:10px 14px;
-  display:flex;align-items:baseline;gap:10px;font-size:13px;
-}
-#rs b{font-size:15px}
-#rs span{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.head{display:flex;align-items:baseline;gap:12px;
+  padding-bottom:14px;border-bottom:1px solid var(--rule)}
+h1{font-size:22px;letter-spacing:-.2px}
+.back{margin-left:auto;font-size:13px;text-decoration:none;color:var(--accent);
+  border-bottom:1px solid var(--rule);padding-bottom:1px}
 
-footer{font-size:11px;color:var(--muted);text-align:center;line-height:1.5}
-#err{padding:20px;font-size:13px;color:var(--muted);line-height:1.7}
+/* 지수 한 덩이 = 괘선으로 구분된 한 단락. 박스를 쓰지 않는다. */
+.idx{flex:1 1 0;min-height:0;display:flex;flex-direction:column;
+  justify-content:center;padding:24px 0;border-bottom:1px solid var(--rule)}
+.idx h2{font-size:17px;color:var(--ink-muted)}
+/* 화면에서 큰 숫자는 셋뿐이다 — 지수별 백분위 둘, 상대강도 하나. */
+.big{font-size:44px;line-height:1.15;margin-top:2px;letter-spacing:-1px}
+.big .unit{font-size:20px;color:var(--ink-muted);margin-left:4px}
+.sub{font-size:12.5px;color:var(--ink-muted);margin-top:4px}
+.rows{margin-top:14px;display:grid;grid-template-columns:auto 1fr;
+  gap:5px 16px;font-size:13px}
+.rows dt{color:var(--ink-muted)}
+.rows dd{text-align:right}
+.u{color:var(--up)} .d{color:var(--down)}
+
+.rs{display:flex;align-items:baseline;gap:12px;padding:18px 0 0}
+.rs .lab{font-size:13px;color:var(--ink-muted)}
+.rs .big{font-size:26px}
+foot,footer{font-size:11.5px;color:var(--ink-muted);padding-top:12px;
+  border-top:1px solid var(--rule);margin-top:auto}
+#err{padding:32px 0;font-size:13.5px;color:var(--ink-muted);line-height:1.9}
 </style>
 </head>
 <body>
 <div id="app">
-  <div class="hrow">
-    <div>
-      <h1>시장 신호</h1>
-      <div class="sub">코스피 · 코스닥 — 일봉 종가 기준</div>
-    </div>
+  <div class="head">
+    <h1>시장 신호</h1>
     <!-- 대시보드에서 넘어온 사람이 돌아갈 길이 없으면 뒤로가기밖에 없다 -->
-    <a class="navlink" href="index.html">&larr; 종목</a>
+    <a class="back" href="index.html">종목으로</a>
   </div>
-  <div id="cards" style="display:contents"></div>
-  <div id="rs" hidden></div>
+  <div id="body" style="display:contents"></div>
   <footer id="foot"></footer>
 </div>
 
 <script>
 "use strict";
 var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 var num = function(v, d){ return v === null || v === undefined ? '–'
   : v.toLocaleString('ko-KR', {minimumFractionDigits:d, maximumFractionDigits:d}); };
 var signed = function(v, d){ return v === null || v === undefined ? '–'
   : (v > 0 ? '+' : '') + v.toFixed(d); };
-// 오르면 빨강, 내리면 파랑 — 국내 관례
-var cls = function(v){ return v === null || v === undefined ? 'flat'
-  : v > 0 ? 'up' : v < 0 ? 'down' : 'flat'; };
-var trendCls = {'상승':'up', '하락':'down'};
+// 주가는 오르면 빨강 내리면 파랑 — 국내 관례
+var cls = function(v){ return v === null || v === undefined ? ''
+  : v > 0 ? 'u' : v < 0 ? 'd' : ''; };
 
 // 백분위는 '몇 %'보다 '하위/상위 몇 %'가 바로 읽힌다
-function stretch(d){
-  var v = d.stretch_pct;
-  if (v === null || v === undefined) return '–';
-  return v <= 50 ? '하위 ' + v.toFixed(0) + '%' : '상위 ' + (100 - v).toFixed(0) + '%';
-}
-// 눌려 있으면 파랑, 떠 있으면 빨강 — 이격도 색과 같은 방향
-function stretchCls(v){
-  if (v === null || v === undefined) return 'flat';
-  return v <= 20 ? 'down' : v >= 80 ? 'up' : 'flat';
+function stretch(v){
+  if (v === null || v === undefined) return {n:'–', u:''};
+  return v <= 50 ? {n:'하위 ' + v.toFixed(0), u:'%'}
+                 : {n:'상위 ' + (100 - v).toFixed(0), u:'%'};
 }
 
-function card(name, d){
+function block(name, d){
+  var s = stretch(d.stretch_pct);
   return '' +
-    '<section class="card">' +
-      '<h2>' + name + '<span class="close">' + num(d.close, 2) + '</span></h2>' +
-      '<div class="grid">' +
-        cell('20일선 이격도', signed(d.disparity, 2) + '%', cls(d.disparity),
-             '20일선 ' + num(d.sma20, 2)) +
-        cell('20일선 방향', d.trend, trendCls[d.trend] || 'flat',
-             signed(d.slope_pct, 2) + '% / ' + PARAMS.slope_days + '일') +
-        // 60일 밴드 안의 위치는 밴드가 넓어지면 뜻이 약해진다. 대신 '지금 이
-        // 시장 기준으로 얼마나 드문 상태인가'를 백분위로 보여준다.
-        cell('이격도 백분위', stretch(d), stretchCls(d.stretch_pct),
-             '최근 ' + (d.stretch_days || 250) + '일 · ' +
-             d.band_days + '일 범위 ' + num(d.band_low, 0) + '~' + num(d.band_high, 0)) +
-        cell('고점 대비',
-             ((d.close / d.band_high - 1) * 100).toFixed(2) + '%',
-             cls(d.close / d.band_high - 1),
-             '저점 대비 +' + ((d.close / d.band_low - 1) * 100).toFixed(2) + '%') +
-      '</div>' +
-    '</section>';
+  '<section class="idx">' +
+    '<h2>' + name + '</h2>' +
+    '<div class="big num ' + cls(d.stretch_pct === null ? null : d.stretch_pct - 50) + '">' +
+      s.n + '<span class="unit">' + s.u + '</span></div>' +
+    '<div class="sub">최근 ' + (d.stretch_days || 250) + '일 이격도 분포에서의 자리</div>' +
+    '<dl class="rows">' +
+      '<dt>종가</dt><dd class="num">' + num(d.close, 2) + '</dd>' +
+      '<dt>20일선 이격도</dt><dd class="num ' + cls(d.disparity) + '">' +
+        signed(d.disparity, 2) + '%</dd>' +
+      '<dt>20일선 방향</dt><dd>' + esc(d.trend) +
+        ' <span class="num">' + signed(d.slope_pct, 2) + '%</span></dd>' +
+      '<dt>' + d.band_days + '일 범위</dt><dd class="num">' +
+        num(d.band_low, 0) + ' ~ ' + num(d.band_high, 0) + '</dd>' +
+    '</dl>' +
+  '</section>';
 }
-function cell(k, v, c, n){
-  return '<div class="cell"><div class="k">' + k + '</div>' +
-         '<div class="v ' + c + '">' + v + '</div>' +
-         '<div class="n">' + (n || '') + '</div></div>';
-}
-
-var PARAMS = {slope_days: 5};
 
 function render(p){
   var r = p.computed || p;
-  PARAMS = r.params || PARAMS;
-  $('cards').innerHTML = card('코스피', r.indices['코스피']) +
-                         card('코스닥', r.indices['코스닥']);
+  var html = block('코스피', r.indices['코스피']) + block('코스닥', r.indices['코스닥']);
   if (r.ratio){
-    $('rs').hidden = false;
-    $('rs').innerHTML = '코스닥 ÷ 코스피 <b class="' + cls(r.ratio.disparity) + '">' +
-      r.ratio.leader + '</b><span>이격도 ' + signed(r.ratio.disparity, 2) + '%</span>';
+    html += '<div class="rs"><span class="lab">코스닥 ÷ 코스피</span>' +
+      '<span class="big num ' + cls(r.ratio.disparity) + '">' + esc(r.ratio.leader) +
+      '</span><span class="lab num" style="margin-left:auto">이격도 ' +
+      signed(r.ratio.disparity, 2) + '%</span></div>';
   }
+  $('body').innerHTML = html;
   var d = r.as_of;
-  $('foot').textContent = '기준일 ' + d.slice(0,4) + '-' + d.slice(4,6) + '-' +
-    d.slice(6,8) + ' · 종가 기준 · 이동평균 ' + (r.params ? r.params.sma : 20) + '일' +
-    (r.source ? ' · ' + r.source : '');
+  $('foot').innerHTML = '<span class="num">' + d.slice(0,4) + '-' + d.slice(4,6) + '-' +
+    d.slice(6,8) + '</span> 종가 기준 · 이동평균 ' +
+    '<span class="num">' + (r.params ? r.params.sma : 20) + '</span>일' +
+    (r.source ? ' · ' + esc(r.source) : '');
 }
 
 // 저장소의 원본은 store/market_signal.json 이지만 Pages 는 docs/ 만 서빙하므로
@@ -154,9 +149,8 @@ fetch('market_signal.json', {cache: 'no-store'})
   .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
   .then(render)
   .catch(function(e){
-    $('app').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
-      '(' + e.message + ')<br><br>' +
-      '수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.</div>';
+    $('body').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
+      esc(e.message) + '<br><br>수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.</div>';
   });
 </script>
 </body>
