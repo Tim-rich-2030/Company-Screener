@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>시장 신호</title>
+<style>
+/* 1차 버전 — 디자인은 나중에 잡는다. 지금은 한 화면에 숫자가 다 들어오는 것까지만. */
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#fff; --fg:#16181d; --muted:#6b7280; --line:#e5e7eb; --card:#f7f8fa;
+  --up:#c02626; --down:#1a56db; --flat:#6b7280;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1115; --fg:#e6e8ec; --muted:#9aa1ac; --line:#262a31; --card:#171a20;
+  --up:#ff6b6b; --down:#7aa2ff; --flat:#9aa1ac;
+}}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,system-ui,"Malgun Gothic",
+              "Apple SD Gothic Neo",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+/* 스크롤 없이 한 화면. 100dvh 라야 모바일 주소창이 접혔다 펴져도 안 잘린다. */
+#app{
+  height:100dvh;display:flex;flex-direction:column;gap:10px;
+  padding:calc(14px + env(safe-area-inset-top)) 14px
+          calc(10px + env(safe-area-inset-bottom));
+}
+h1{font-size:17px;font-weight:800;letter-spacing:-.4px}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+.card{
+  flex:1 1 0;min-height:0;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);padding:12px 14px;display:flex;flex-direction:column;
+}
+.card h2{font-size:14px;font-weight:800;display:flex;align-items:baseline;gap:8px}
+.close{margin-left:auto;font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.grid{
+  margin-top:10px;flex:1;display:grid;grid-template-columns:1fr 1fr;
+  gap:8px 10px;align-content:center;
+}
+.cell .k{font-size:11px;color:var(--muted)}
+.cell .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;
+  line-height:1.25}
+.cell .n{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+
+#rs{
+  border:1px solid var(--line);border-radius:10px;padding:10px 14px;
+  display:flex;align-items:baseline;gap:10px;font-size:13px;
+}
+#rs b{font-size:15px}
+#rs span{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+
+footer{font-size:11px;color:var(--muted);text-align:center;line-height:1.5}
+#err{padding:20px;font-size:13px;color:var(--muted);line-height:1.7}
+</style>
+</head>
+<body>
+<div id="app">
+  <div>
+    <h1>시장 신호</h1>
+    <div class="sub">코스피 · 코스닥 — 일봉 종가 기준</div>
+  </div>
+  <div id="cards" style="display:contents"></div>
+  <div id="rs" hidden></div>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+"use strict";
+var $ = function(id){ return document.getElementById(id); };
+var num = function(v, d){ return v === null || v === undefined ? '–'
+  : v.toLocaleString('ko-KR', {minimumFractionDigits:d, maximumFractionDigits:d}); };
+var signed = function(v, d){ return v === null || v === undefined ? '–'
+  : (v > 0 ? '+' : '') + v.toFixed(d); };
+// 오르면 빨강, 내리면 파랑 — 국내 관례
+var cls = function(v){ return v === null || v === undefined ? 'flat'
+  : v > 0 ? 'up' : v < 0 ? 'down' : 'flat'; };
+var trendCls = {'상승':'up', '하락':'down'};
+
+function card(name, d){
+  return '' +
+    '<section class="card">' +
+      '<h2>' + name + '<span class="close">' + num(d.close, 2) + '</span></h2>' +
+      '<div class="grid">' +
+        cell('20일선 이격도', signed(d.disparity, 2) + '%', cls(d.disparity),
+             '20일선 ' + num(d.sma20, 2)) +
+        cell('20일선 방향', d.trend, trendCls[d.trend] || 'flat',
+             signed(d.slope_pct, 2) + '% / ' + PARAMS.slope_days + '일') +
+        cell(d.band_days + '일 밴드 위치',
+             d.band_pos === null ? '–' : d.band_pos.toFixed(1) + '%', 'flat',
+             num(d.band_low, 2) + ' ~ ' + num(d.band_high, 2)) +
+        cell('고점 대비',
+             ((d.close / d.band_high - 1) * 100).toFixed(2) + '%',
+             cls(d.close / d.band_high - 1),
+             '저점 대비 +' + ((d.close / d.band_low - 1) * 100).toFixed(2) + '%') +
+      '</div>' +
+    '</section>';
+}
+function cell(k, v, c, n){
+  return '<div class="cell"><div class="k">' + k + '</div>' +
+         '<div class="v ' + c + '">' + v + '</div>' +
+         '<div class="n">' + (n || '') + '</div></div>';
+}
+
+var PARAMS = {slope_days: 5};
+
+function render(p){
+  var r = p.computed || p;
+  PARAMS = r.params || PARAMS;
+  $('cards').innerHTML = card('코스피', r.indices['코스피']) +
+                         card('코스닥', r.indices['코스닥']);
+  if (r.ratio){
+    $('rs').hidden = false;
+    $('rs').innerHTML = '코스닥 ÷ 코스피 <b class="' + cls(r.ratio.disparity) + '">' +
+      r.ratio.leader + '</b><span>이격도 ' + signed(r.ratio.disparity, 2) + '%</span>';
+  }
+  var d = r.as_of;
+  $('foot').textContent = '기준일 ' + d.slice(0,4) + '-' + d.slice(4,6) + '-' +
+    d.slice(6,8) + ' · 종가 기준 · 이동평균 ' + (r.params ? r.params.sma : 20) + '일' +
+    (r.source ? ' · ' + r.source : '');
+}
+
+// 저장소의 원본은 store/market_signal.json 이지만 Pages 는 docs/ 만 서빙하므로
+// 같은 내용의 사본을 docs/ 에 두고 그것을 읽는다.
+fetch('market_signal.json', {cache: 'no-store'})
+  .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(render)
+  .catch(function(e){
+    $('app').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
+      '(' + e.message + ')<br><br>' +
+      '수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.</div>';
+  });
+</script>
+</body>
+</html>

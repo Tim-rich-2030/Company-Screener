@@ -1,0 +1,78 @@
+name: 시장 신호 수집
+
+# 장 마감(KST 15:30) 이후 종가가 확정된 뒤에 받는다.
+# cron은 UTC 기준 — 한국시간(KST) = UTC + 9시간.
+on:
+  schedule:
+    - cron: '30 8 * * 1-5'   # KST 평일 17:30
+  workflow_dispatch:
+
+concurrency:
+  group: market-signal
+  cancel-in-progress: false
+
+permissions:
+  contents: write             # 수집 결과를 저장소에 커밋
+  pages: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -q -r requirements.txt
+
+      - name: 지수 수집 및 계산
+        env:
+          # 없어도 돌아간다 — 그때는 네이버 차트로 받는다.
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: python market_signal.py --collect
+
+      - name: 변경분 커밋
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add store/market_signal.json docs/market_signal.json
+          if git diff --staged --quiet; then
+            echo "변경 없음 — 같은 영업일을 다시 받았을 수 있습니다"
+          else
+            git commit -m "시장 신호 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      # docs/ 를 커밋만 하고 끝내면 저장소만 최신이고 실제 사이트는 옛 화면이 남는다.
+      # GITHUB_TOKEN 으로 만든 푸시는 다른 워크플로의 on:push 를 깨우지 않으므로
+      # 여기서 직접 배포해야 한다.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      # 마지막에 둔다 — 여기서 실패해도 위에서 데이터는 이미 저장·배포된 뒤다.
+      # 계정을 넣어 뒀는데 만료·비밀번호 변경으로 조용히 네이버로 넘어가면
+      # 몇 달이 지나도 모른다. 그래서 실행을 빨갛게 만들어 알린다.
+      - name: KRX 로그인 상태 확인 (데이터 수집과 무관)
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: python market_signal.py --check-krx
