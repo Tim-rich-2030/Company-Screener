@@ -119,9 +119,10 @@ h2 .note{float:right;font-family:'Pretendard',sans-serif;font-size:11.5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tile s{display:block;text-decoration:none;font-size:10.5px;opacity:.85;
   font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
-.scale{display:flex;align-items:center;gap:8px;font-size:11px;
+.scale{display:flex;align-items:center;gap:8px;font-size:11px;flex-wrap:wrap;
   color:var(--ink-muted);padding-top:9px}
-.scale .bar{flex:1;height:6px;max-width:170px}
+.scale .bar{flex:1;height:6px;min-width:44px;max-width:170px}
+.scale .num{white-space:nowrap}
 
 /* 뉴스 */
 .news a{display:block;padding:9px 0;border-bottom:1px solid var(--rule);
@@ -347,7 +348,21 @@ function renderPicks(p){
 var TREE = null, TREE_VIEW = '상승순';
 
 // 시총이 넓이, 등락률이 색. 색은 종이색에서 상승/하락색 쪽으로 섞는다.
-var TINT_MAX = 3;      // 이 %에서 색이 가장 진해진다
+//
+// 색이 가장 진해지는 지점은 **그날 분포에서** 정한다. 처음엔 ±3% 로 못박았는데,
+// 시장 전체가 20~30% 움직인 날 지도가 통째로 한 덩어리 빨강이 됐다. 눈금이
+// 고정이면 큰 장에서 아무것도 못 읽는다. 대신 눈금이 날마다 달라지므로
+// 실제 범위를 범례에 적는다.
+var TINT_PCTILE = 0.85;   // 이 백분위의 변동폭에서 색이 가장 진해진다
+var TINT_MIN = 1.5, TINT_CAP = 30;
+
+function tintSpan(rows){
+  var m = rows.map(function(r){ return Math.abs(r.chg) || 0; })
+              .sort(function(a, b){ return a - b; });
+  if (!m.length) return TINT_MIN;
+  var v = m[Math.min(m.length - 1, Math.floor(m.length * TINT_PCTILE))];
+  return Math.max(TINT_MIN, Math.min(TINT_CAP, v));
+}
 
 function hex(v){
   var h = v.replace('#','');
@@ -358,9 +373,9 @@ function hex(v){
 function mix(a, b, t){
   return [0,1,2].map(function(i){ return Math.round(a[i] + (b[i]-a[i])*t); });
 }
-function tint(chg, base, up, down){
+function tint(chg, base, up, down, span){
   if (!chg) return {bg: base, fg: null};
-  var t = Math.min(1, Math.abs(chg)/TINT_MAX) * 0.88 + 0.12;
+  var t = Math.min(1, Math.abs(chg)/span) * 0.88 + 0.12;
   var c = mix(base, chg > 0 ? up : down, t);
   // 타일이 진해지면 검은 글씨가 안 읽힌다. 밝기로 글자색을 뒤집는다.
   var lum = (c[0]*299 + c[1]*587 + c[2]*114) / 1000;
@@ -433,7 +448,9 @@ function renderTree(){
   } else {
     // 폰에서 200개를 깔면 색종이 조각이 된다. 화면 폭에 맞춰 개수를 줄이고,
     // 몇 개를 그렸는지 위에 적는다 — 조용히 잘라내면 '전부'로 읽힌다.
-    var budget = W < 520 ? 40 : 64;
+    // 실제 시가총액은 합성 데이터보다 훨씬 쏠려 있다 — SK하이닉스 한 종목이
+    // 지도 면적의 3분의 1을 먹는다. 그래서 개수를 더 줄여야 글자가 들어간다.
+    var budget = W < 520 ? 24 : 44;
     var top = (TREE.items || []).filter(function(i){ return i.cap > 0; })
                 .sort(function(a, b){ return b.cap - a.cap; }).slice(0, budget);
     // 상승순이니 많이 오른 것부터 왼쪽 위에 놓는다. 넓이순으로 놓아야 타일이
@@ -445,9 +462,9 @@ function renderTree(){
   if (!src.length) return;
 
   var base = hex(cssVar('--surface')), up = hex(cssVar('--up')),
-      down = hex(cssVar('--down'));
+      down = hex(cssVar('--down')), span = tintSpan(src);
   el.innerHTML = squarify(src, 0, 0, W, H).map(function(r){
-    var t = tint(r.it.chg, base, up, down);
+    var t = tint(r.it.chg, base, up, down, span);
     var style = 'left:' + r.x.toFixed(1) + 'px;top:' + r.y.toFixed(1) +
       'px;width:' + r.w.toFixed(1) + 'px;height:' + r.h.toFixed(1) +
       'px;background:' + rgb(t.bg) + (t.fg ? ';color:' + t.fg : '');
@@ -461,11 +478,14 @@ function renderTree(){
   var b = TREE.breadth || {};
   $('tree-note').textContent = shown;
   $('tree-scale').innerHTML =
-    '<span>넓이 = 시가총액 · 색 = 등락률</span>' +
+    '<span style="white-space:nowrap">넓이=시총 · 색=등락률</span>' +
     '<span class="bar" style="background:linear-gradient(90deg,' +
       rgb(mix(base, down, 1)) + ',' + rgb(base) + ',' + rgb(mix(base, up, 1)) +
       ')"></span>' +
-    '<span class="num">−' + TINT_MAX + '% ~ +' + TINT_MAX + '%</span>' +
+    // 눈금이 날마다 바뀌므로 그날 값을 그대로 적는다. 안 적으면 어제와 오늘의
+    // 같은 빨강이 같은 뜻인 줄 알게 된다.
+    '<span class="num">' + signed(-span, span < 10 ? 1 : 0) + '% ~ ' +
+      signed(span, span < 10 ? 1 : 0) + '%</span>' +
     (b.total ? '<span style="margin-left:auto">전체 ' + b.total +
       '종목 중 <b class="u">↑' + b.up + '</b> <b class="d">↓' + b.down +
       '</b></span>' : '');
