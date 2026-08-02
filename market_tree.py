@@ -30,6 +30,9 @@ TOP_N = 240
 
 MARKETS = ("KOSPI", "KOSDAQ")
 
+# 휴장일에 돌렸을 때 며칠까지 거슬러 올라가 볼지. 설·추석 연휴가 가장 길다.
+BACKOFF_DAYS = 10
+
 # 업종이 아닌 지수 — 크기·테마·전략으로 뽑은 것들. 이름으로 거른다.
 NOT_SECTOR = re.compile(
     r"코스피|코스닥|대형주|중형주|소형주|우량|프리미어|글로벌|배당|가치|성장|"
@@ -102,13 +105,39 @@ def sector_map(stock, date: str, market: str) -> dict:
     return out
 
 
+def last_trading_day(stock, start: dt.date, back: int = BACKOFF_DAYS) -> str | None:
+    """
+    실제로 시세가 있는 가장 가까운 과거 날짜를 찾는다.
+
+    지수 수집기는 기간을 통째로 요청하니 알아서 마지막 거래일로 떨어지지만,
+    여기는 하루만 묻는다. 그래서 주말·공휴일에 돌리면 빈 표를 받는다.
+    (실제로 일요일 실행에서 이걸로 통째로 실패했다.)
+    """
+    for i in range(back):
+        d = (start - dt.timedelta(days=i)).strftime("%Y%m%d")
+        try:
+            df = stock.get_market_ohlcv_by_ticker(d, market="KOSPI")
+        except Exception as e:                   # noqa: BLE001
+            log(f"  {d}: 조회 실패 ({type(e).__name__}) — 하루 앞으로")
+            continue
+        if df is not None and not df.empty:
+            if i:
+                log(f"  {start:%Y%m%d} 은 휴장 — {d} 로 물러섭니다")
+            return d
+    return None
+
+
 def collect(date: str = None) -> dict:
     """그날의 종목별 등락률·시가총액·업종."""
     stock = _stock()
     if stock is None:
         raise SystemExit("pykrx 없이는 시장 지도를 만들 수 없습니다")
 
-    date = date or dt.date.today().strftime("%Y%m%d")
+    if date is None:
+        date = last_trading_day(stock, dt.date.today())
+        if date is None:
+            raise SystemExit(f"최근 {BACKOFF_DAYS}일 안에 시세가 있는 날이 "
+                             "없습니다 — KRX 접속 문제로 보입니다")
     items, used_date = [], None
 
     for market in MARKETS:

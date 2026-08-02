@@ -52,9 +52,11 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_tree.py
 
+      # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
+      # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
       - name: 뉴스 수집 (네이버 금융)
         continue-on-error: true
-        run: python market_news.py
+        run: python market_news.py || python market_news.py --dump
 
       - name: 변경분 커밋
         run: |

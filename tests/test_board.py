@@ -235,6 +235,94 @@ def test_news_dedupes_the_same_article_across_sections():
     print("test_news_dedupes_the_same_article_across_sections: OK")
 
 
+def test_news_decoding_ignores_a_lying_charset():
+    """
+    페이지가 UTF-8 이라고 써 놓고 EUC-KR 을 보내는 경우.
+
+    실제로 이것 때문에 첫 수집의 제목이 전부 U+FFFD 로 깨져서 그대로 배포됐다.
+    errors='replace' 로 뭉개지 말고, 엄격하게 풀어 틀린 코덱은 넘어가야 한다.
+    """
+    title = "코스피 사흘 만에 반등, 외국인 순매수 전환"
+    raw = ('<meta charset="utf-8"><a href="/news/news_read.naver?article_id=1'
+           '&office_id=2">' + title + "</a>").encode("cp949")
+    got = mn.decode(raw, declared="utf-8")
+    assert got and "�" not in got, f"깨진 글자가 남았다: {got!r}"
+    eq(mn.parse(got)[0]["title"], title, "선언을 무시하고 실제 바이트로 풀었나")
+
+    # 반대 경우 — euc-kr 이라 써 놓고 UTF-8 을 보내도 한글이 나와야 한다.
+    raw2 = ('<meta charset="euc-kr"><a href="/news/news_read.naver?article_id=1'
+            '&office_id=2">' + title + "</a>").encode("utf-8")
+    got2 = mn.decode(raw2, declared="euc-kr")
+    eq(mn.parse(got2)[0]["title"], title, "반대 방향도")
+    print("test_news_decoding_ignores_a_lying_charset: OK")
+
+
+def test_news_prefers_the_title_attribute():
+    """목록에 보이는 글자는 네이버가 잘라 놨다. title 속성에 원문이 있다."""
+    doc = ('<a href="/news/news_read.naver?article_id=1&office_id=2" '
+           'title="반도체 슈퍼사이클 재점화, 메모리 3사 증설 경쟁">'
+           '반도체 슈퍼사이클 재점화, 메모...</a>')
+    eq(mn.parse(doc)[0]["title"], "반도체 슈퍼사이클 재점화, 메모리 3사 증설 경쟁",
+       "잘린 글자 대신 title 속성")
+    print("test_news_prefers_the_title_attribute: OK")
+
+
+def test_news_blanks_a_group_that_duplicates_another(monkey=None):
+    """
+    두 갈래가 똑같은 기사를 돌려주면 뒤쪽을 비운다.
+
+    '주요뉴스' 와 '많이 본 뉴스' 에 같은 목록이 붙어 있으면, 빈 칸보다 나쁘다 —
+    빈 칸은 고장으로 보이지만 같은 목록은 진짜 두 갈래로 읽힌다.
+    """
+    same = ('<a href="/news/news_read.naver?article_id=1&office_id=2">'
+            '똑같은 기사 제목입니다</a>')
+    orig_fetch, orig_feeds = mn.fetch, mn.FEEDS
+    mn.fetch = lambda url: (same, "테스트")
+    mn.FEEDS = [("주요뉴스", "a"), ("많이 본 뉴스", "b")]
+    try:
+        out = mn.collect()
+    finally:
+        mn.fetch, mn.FEEDS = orig_fetch, orig_feeds
+    eq(len(out["groups"][0]["items"]), 1, "앞쪽은 남는다")
+    eq(out["groups"][1]["items"], [], "뒤쪽은 비운다")
+    eq(out["failed"], ["많이 본 뉴스"], "비운 갈래를 기록한다")
+    print("test_news_blanks_a_group_that_duplicates_another: OK")
+
+
+def test_tree_backs_off_to_the_last_trading_day():
+    """
+    휴장일에 돌리면 하루씩 물러선다.
+
+    지수 수집기는 기간을 통째로 요청해서 알아서 마지막 거래일로 떨어지지만
+    시장 지도는 하루만 묻는다. 일요일 실행에서 이것 때문에 통째로 실패했다.
+    """
+    import datetime as dt
+
+    class Calendar:
+        """20260731(금)까지만 시세가 있다."""
+        def __init__(self):
+            self.asked = []
+
+        def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
+            self.asked.append(date)
+            class DF:
+                def __init__(self, empty): self.empty = empty
+            return DF(date > "20260731")
+
+    cal = Calendar()
+    got = mt.last_trading_day(cal, dt.date(2026, 8, 2))   # 일요일
+    eq(got, "20260731", "금요일로 물러선다")
+    eq(cal.asked, ["20260802", "20260801", "20260731"], "하루씩 거슬러 올라간다")
+
+    class Dead:
+        def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
+            raise RuntimeError("KRX 접속 실패")
+
+    eq(mt.last_trading_day(Dead(), dt.date(2026, 8, 2), back=3), None,
+       "끝까지 못 찾으면 None — 엉뚱한 날짜를 지어내지 않는다")
+    print("test_tree_backs_off_to_the_last_trading_day: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -247,4 +335,8 @@ if __name__ == "__main__":
     test_news_parses_by_link_shape_not_class_name()
     test_news_returns_nothing_rather_than_garbage()
     test_news_dedupes_the_same_article_across_sections()
+    test_news_decoding_ignores_a_lying_charset()
+    test_news_prefers_the_title_attribute()
+    test_news_blanks_a_group_that_duplicates_another()
+    test_tree_backs_off_to_the_last_trading_day()
     print("\nALL BOARD TESTS PASSED")
