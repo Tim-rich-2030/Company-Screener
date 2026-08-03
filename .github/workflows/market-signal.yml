@@ -42,6 +42,11 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_signal.py --collect
 
+      # 나스닥·S&P500·다우. FRED 라 키가 필요 없고 종가만 온다 (하루 늦다).
+      - name: 해외 지수 수집 (나스닥·S&P500·다우)
+        continue-on-error: true
+        run: python market_world.py
+
       # 아래 둘은 실패해도 워크플로를 세우지 않는다. 지수는 이미 받아 뒀고,
       # 시장 지도나 뉴스 하나 때문에 그것까지 못 배포하면 손해가 더 크다.
       # 실패하면 화면의 그 칸만 빈다.
@@ -85,6 +90,16 @@ jobs:
         continue-on-error: true
         run: python market_theme.py
 
+      # 지수 이격도(market_signal)와 테마(market_theme)를 읽으므로 그 뒤에 둔다.
+      # 20일선을 만들려고 전종목 일별 시세를 20번 받는다 — 종목마다 받으면
+      # 2,500종목 × 20일이 된다.
+      - name: 지수보다 강한 종목 (20일선 이격)
+        continue-on-error: true
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: python market_strong.py
+
       # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
       # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
       - name: 뉴스 수집 (네이버 금융)
@@ -118,7 +133,9 @@ jobs:
                    store/market_macro.json docs/market_macro.json \
                    store/market_etf.json   docs/market_etf.json \
                    store/market_news.json  docs/market_news.json \
-                   store/market_theme.json docs/market_theme.json; do
+                   store/market_theme.json docs/market_theme.json \
+                   store/market_strong.json docs/market_strong.json \
+                   store/market_world.json  docs/market_world.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --staged --quiet; then

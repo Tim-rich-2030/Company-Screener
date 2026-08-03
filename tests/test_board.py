@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import tempfile
+import datetime as dt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -21,6 +22,7 @@ import market_flags
 import market_calendar as mc
 import market_macro as mm
 import market_theme as mth
+import market_strong as mst
 
 
 def eq(got, want, what):
@@ -770,6 +772,146 @@ def test_kospi_is_fetched_year_by_year():
 
 
 # =============================================================================
+# 지수보다 강한 종목
+# =============================================================================
+
+class FakeRow(dict):
+    def get(self, k, d=None): return dict.get(self, k, d)
+
+
+class FakeDF:
+    """pykrx 가 돌려주는 표 흉내. traded() 가 보는 것까지 맞춘다."""
+    def __init__(self, rows): self.rows = rows; self.empty = not rows
+    def __contains__(self, k): return k == "종가"
+    def __len__(self): return len(self.rows)
+    def __getitem__(self, k):
+        class Col:
+            def __init__(s, v): s.v = v
+            def __gt__(s, n): return Col([x > n for x in s.v])
+            def any(s): return any(s.v)
+        return Col([r.get("종가", 0) for _, r in self.rows])
+    def iterrows(self): return iter([(c, FakeRow(r)) for c, r in self.rows])
+
+
+def _bar(close, vol=100, val=1000, chg=1.0):
+    return {"시가": close, "고가": close, "저가": close, "종가": close,
+            "거래량": vol, "거래대금": val, "등락률": chg}
+
+
+def test_strong_drops_stocks_without_a_full_window():
+    """
+    20일을 다 못 채운 종목은 뺀다.
+
+    중간에 거래정지된 날이 있으면 19개로 평균이 나는데, 그것을 20일선이라고
+    부르면 이격도가 조용히 틀린다. 모자란 종목은 아예 계산하지 않는다.
+    """
+    hist = []
+    for i in range(3):
+        rows = [("000001", _bar(100 + i))]
+        if i != 1:                                   # 000002 는 하루 빠진다
+            rows.append(("000002", _bar(200 + i)))
+        hist.append((f"2026080{i+1}", FakeDF(rows)))
+    closes, today = mst.series_of(hist, days=3)
+    eq(list(closes), ["000001"], "구멍 난 종목은 빠진다")
+    eq(closes["000001"], [100.0, 101.0, 102.0], "오래된 것부터")
+    eq(today["000001"]["close"], 102, "오늘 값은 마지막 날")
+    print("test_strong_drops_stocks_without_a_full_window: OK")
+
+
+def test_strong_skips_holidays_and_returns_oldest_first():
+    """휴장일은 행이 와도 종가가 0 이다. 날짜 수로 세면 안 된다."""
+    seen = []
+
+    class Stock:
+        def get_market_ohlcv_by_ticker(self, date, market):
+            seen.append(date)
+            if date in ("20260802", "20260801"):     # 주말
+                return FakeDF([("000001", _bar(0))])
+            return FakeDF([("000001", _bar(100))])
+
+    hist = mst.fetch_history(Stock(), dt.date(2026, 8, 3), days=2)
+    eq([d for d, _ in hist], ["20260731", "20260803"], "휴장일을 건너뛰고 오름차순")
+    eq(seen, ["20260803", "20260802", "20260801", "20260731"], "하루씩 뒤로")
+    print("test_strong_skips_holidays_and_returns_oldest_first: OK")
+
+
+def test_strong_is_measured_against_that_market_index():
+    """
+    '강하다'는 지수 이격도보다 위라는 뜻이다. 등락률이 아니라 이격도로 잰다.
+
+    정렬은 1차 이격도, 2차 거래대금. 이격이 같으면 거래가 실린 쪽이 앞이다.
+    """
+    def r(code, disp, val, market="코스피", chg=0.0):
+        return {"code": code, "name": code, "market": market,
+                "disparity": disp, "value": val, "chg": chg}
+
+    rows = [r("A", 5.0, 100), r("B", 5.0, 900), r("C", -1.0, 999),
+            r("D", 12.0, 1, "코스닥", 30.0), r("E", -9.0, 1, "코스닥", -30.0)]
+    out = mst.build(rows, {"코스피": 0.0, "코스닥": 20.0}, top=10)
+
+    k = out["markets"]["코스피"]
+    eq([x["code"] for x in k["strong"]], ["B", "A"],
+       "이격이 같으면 거래대금이 큰 쪽이 앞")
+    eq(k["strong_total"], 2, "지수(0.00%)보다 아래인 C 는 빠진다")
+    eq(out["markets"]["코스닥"]["strong"], [],
+       "지수가 +20% 인 날은 +12% 도 강한 게 아니다")
+    eq([x["code"] for x in out["급상승"]][0], "D", "급상승은 등락률순")
+    eq([x["code"] for x in out["급하락"]][0], "E", "급하락도 등락률순")
+    print("test_strong_is_measured_against_that_market_index: OK")
+
+
+def test_strong_leaves_the_list_empty_when_the_index_is_unknown():
+    """
+    지수 이격도를 못 읽으면 '강한 종목'을 만들지 않는다.
+
+    기준 없이 이격도 상위만 뽑으면 그건 '지수보다 강한 종목'이 아니라 그냥
+    많이 오른 종목이다. 이름과 다른 것을 보여주느니 비운다.
+    """
+    rows = [{"code": "A", "market": "코스피", "disparity": 9.0,
+             "value": 1, "chg": 1.0}]
+    out = mst.build(rows, {}, top=5)
+    eq(out["markets"]["코스피"]["strong"], [], "기준이 없으면 비운다")
+    eq(out["markets"]["코스피"]["index_disparity"], None, "기준이 없다고 적는다")
+    eq(len(out["급상승"]), 1, "급상승은 지수와 무관하니 그대로 나온다")
+    print("test_strong_leaves_the_list_empty_when_the_index_is_unknown: OK")
+
+
+def test_strong_tags_themes_but_only_two():
+    """
+    테마에 엮인 종목은 이격이 단기간에 벌어진다. 감추지 않고 어느 테마인지
+    적는다. 다만 한 종목이 대여섯 테마에 걸리는 일이 흔해 둘까지만 적는다.
+    """
+    d = os.path.join(tempfile.mkdtemp(), "t.json")
+    with open(d, "w", encoding="utf-8") as f:
+        json.dump({"groups": [
+            {"name": "반도체", "subs": [
+                {"name": "HBM·메모리", "codes": ["000660", "005930"]},
+                {"name": "파운드리", "codes": ["000660"]}]},
+            {"name": "로봇", "subs": [{"name": "협동로봇", "codes": ["000660"]}]},
+        ]}, f)
+    idx = mst.theme_index(d)
+    eq(len(idx["000660"]), 2, "뱃지는 두 개까지")
+    eq(idx["000660"][0]["sub"], "HBM·메모리", "먼저 나온 것부터")
+    eq([t["sub"] for t in idx["005930"]], ["HBM·메모리"], "한 테마면 하나")
+    eq(mst.theme_index(os.path.join(d, "없음")), {}, "파일이 없으면 빈 표")
+    print("test_strong_tags_themes_but_only_two: OK")
+
+
+def test_strong_reads_the_same_index_number_the_front_page_shows():
+    """
+    지수 이격도는 여기서 다시 계산하지 않고 market_signal 이 낸 값을 읽는다.
+    따로 계산하면 같은 화면에 '-7.00%' 와 '-6.93%' 가 같이 나온다.
+    """
+    d = os.path.join(tempfile.mkdtemp(), "s.json")
+    with open(d, "w", encoding="utf-8") as f:
+        json.dump({"computed": {"indices": {
+            "코스피": {"disparity": -7.0}, "코스닥": {"disparity": None}}}}, f)
+    eq(mst.index_disparity(d), {"코스피": -7.0}, "값이 없는 지수는 안 넣는다")
+    eq(mst.index_disparity(os.path.join(d, "없음")), {}, "파일이 없으면 빈 표")
+    print("test_strong_reads_the_same_index_number_the_front_page_shows: OK")
+
+
+# =============================================================================
 # 테마
 # =============================================================================
 
@@ -935,4 +1077,10 @@ if __name__ == "__main__":
     test_theme_match_prefers_the_longer_fragment()
     test_theme_group_change_is_weighted_by_stock_count()
     test_theme_unmatched_is_counted_not_hidden()
+    test_strong_drops_stocks_without_a_full_window()
+    test_strong_skips_holidays_and_returns_oldest_first()
+    test_strong_is_measured_against_that_market_index()
+    test_strong_leaves_the_list_empty_when_the_index_is_unknown()
+    test_strong_tags_themes_but_only_two()
+    test_strong_reads_the_same_index_number_the_front_page_shows()
     print("\nALL BOARD TESTS PASSED")

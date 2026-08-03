@@ -21,7 +21,8 @@ const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
 const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
                     'market_calendar.json', 'market_macro.json',
                     'market_etf.json', 'market_news.json',
-                    'market_theme.json'];
+                    'market_theme.json', 'market_strong.json',
+                    'market_world.json'];
 const SHELL = ['./', './index.html', './stocks.html']
                 .concat(DATA_FILES.map(f => './' + f));
 
