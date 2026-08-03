@@ -38,12 +38,16 @@ DOCS_PATH = os.path.join("docs", "market_calendar.json")
 FACTS_DIR = os.path.join("store", "facts")
 
 FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
-# 미국 지표 발표일.
+# 미국 지표 발표일 — FRED 릴리스 API.
 #
-#   처음엔 노동통계국(bls.gov)을 봤는데 403 이다. 브라우저 UA 를 붙여도
-#   막혔다 — 자료센터 IP 를 거르는 것으로 보인다 (깃허브 러너에서 두 해 모두
-#   403). FRED 는 같은 러너에서 CSV 를 잘 주므로 그쪽 발표일정을 본다.
-BLS_URL = "https://fred.stlouisfed.org/releases/calendar"
+#   두 번 헛돌았다.
+#     · 노동통계국(bls.gov) → 403. 브라우저 UA 를 붙여도 막힌다.
+#       자료센터 IP 를 거르는 것으로 보인다.
+#     · FRED 발표일정 **화면**(/releases/calendar) → 20초에도, 60초에도
+#       ReadTimeout. 무거운 페이지다.
+#   같은 FRED 라도 API 는 작은 JSON 이라 빠르다. 키가 필요하지만 무료다.
+#   키가 없으면 이 칸만 빈다 — 나머지 일정은 그대로 나간다.
+FRED_API = "https://api.stlouisfed.org/fred"
 
 # 이 넷만 가져온다. 노동통계국은 한 해 200건 넘게 내는데 대부분 지역·업종
 # 세부 통계라 캘린더가 그것으로 덮인다. 자주 회자되는 것만 남긴다.
@@ -300,71 +304,96 @@ def bok_dates(today: dt.date) -> list:
 
 
 # FRED 발표일정은 'Aug 11, 2026' 처럼 줄여 쓰기도 한다. 둘 다 받는다.
-US_DATE = re.compile(
+_UNUSED_US_DATE = re.compile(
     r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+"
     r"(\d{1,2}),?\s+(20\d{2})", re.I)
+
+
+def _fred(path: str, key: str, **params) -> dict:
+    """FRED API 한 번. 작은 JSON 이라 화면을 긁는 것보다 훨씬 빠르다."""
+    params.update({"api_key": key, "file_type": "json"})
+    r = requests.get(f"{FRED_API}/{path}", params=params,
+                     headers={"User-Agent": UA}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
 
 
 def bls_dates(today: dt.date, why: dict = None) -> list:
     """
     미국 지표 발표일 — 소비자물가·생산자물가·고용보고서·구인이직.
 
-    노동통계국이 한 해 일정을 한 장에 적어 둔다. 표 구조를 짐작하지 않고,
-    줄마다 글자를 이어 붙여 '월 일, 연도' 와 이름을 함께 찾는다. 이름이
-    우리가 고른 넷에 안 걸리면 버린다.
+    FRED 릴리스 API 를 두 번 부른다.
+      1) /releases        — 어떤 발표가 있는지 (이름 ↔ 번호)
+      2) /releases/dates  — 그 발표들의 날짜 (앞뒤 창을 잡아 한 번에)
 
-    발표 시각은 미국 동부시간이라 한국에서는 대개 그날 밤이다. 시각까지
-    옮기면 시차를 잘못 적을 수 있어 날짜만 쓴다.
+    FRED 는 한 해 수백 건을 낸다. 대부분 지역·업종 세부 통계라 그대로 넣으면
+    달력이 그것으로 덮인다. BLS_KEEP 에 적은 넷만 남긴다.
+
+    발표 시각은 미국 동부시간이라 한국에서는 대개 그날 밤이다. 시차를 잘못
+    적느니 날짜만 쓴다.
     """
-    out = []
-    for year in (today.year,):                   # 한 장에 앞뒤로 다 들어 있다
-        try:
-            # 발표일정 페이지는 무겁다. 20초로는 두 번 다 읽다 끊겼다.
-            doc = fetch(BLS_URL, ua=BROWSER_UA, timeout=60)
-        except Exception as e:                   # noqa: BLE001
-            log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
-            if why is not None:
-                why[f"BLS/{year}"] = f"{type(e).__name__}: {e}"[:180]
-            continue
-        if not doc:
-            if why is not None:
-                why[f"BLS/{year}"] = "글자로 풀지 못함"
-            continue
+    key = os.environ.get("FRED_API_KEY", "").strip()
+    if not key:
+        log("::warning::FRED_API_KEY 가 없습니다 — 미국 지표 일정은 비웁니다. "
+            "발급: https://fredaccount.stlouisfed.org/apikeys")
         if why is not None:
-            # 열리기는 했는데 0건이면 표 모양이 다른 것이다. 그 모양을 남긴다.
-            t = re.search(r"<title[^>]*>(.*?)</title>", doc, re.I | re.S)
-            why[f"BLS/{year}"] = (
-                f"{len(doc)}자 · <title>{strip_tags(t.group(1))[:60] if t else '없음'}"
-                f"</title> · <tr> {len(re.findall(r'<tr', doc, re.I))}개 · "
-                f"본문 앞 {strip_tags(doc)[:160]}")
-        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S) or [doc]
-        for row in rows:
-            text = strip_tags(row)
-            low = text.lower()
-            name = next((ko for key, ko in BLS_KEEP if key in low), None)
-            if not name:
-                continue
-            m = US_DATE.search(text)
-            if not m:
-                continue
-            try:
-                d = dt.date(int(m.group(3)), MONTHS3[m.group(1).lower()[:3]],
-                            int(m.group(2)))
-            except (ValueError, KeyError):
-                continue
-            out.append({"date": d.strftime("%Y%m%d"), "name": name,
-                        "dday": (d - today).days})
-    # 같은 발표가 여러 줄에 걸릴 수 있다. 날짜+이름으로 한 번만 남긴다.
-    seen, uniq = set(), []
-    for e in sorted(out, key=lambda e: e["date"]):
-        key = (e["date"], e["name"])
-        if key in seen:
+            why["FRED"] = "FRED_API_KEY 환경변수가 비어 있음 (Secrets 이름 확인)"
+        return []
+    if why is not None:
+        why["FRED"] = f"키 있음 (길이 {len(key)})"
+
+    try:
+        rel = _fred("releases", key, limit=1000)
+    except Exception as e:                       # noqa: BLE001
+        log(f"  미국 지표 목록 실패 ({type(e).__name__}: {e})")
+        if why is not None:
+            why["FRED/releases"] = f"{type(e).__name__}: {e}"[:180]
+        return []
+
+    # 이름 → 우리 이름. 번호는 해마다 바뀌지 않지만 박아 두지 않는다.
+    want = {}
+    for r in rel.get("releases") or []:
+        low = str(r.get("name") or "").lower()
+        for frag, ko in BLS_KEEP:
+            if frag in low:
+                want[r.get("id")] = ko
+                break
+    if why is not None:
+        why["FRED/고른 발표"] = f"{len(rel.get('releases') or [])}건 중 {len(want)}건"
+    if not want:
+        return []
+
+    try:
+        got = _fred("releases/dates", key,
+                    realtime_start=(today - dt.timedelta(days=30)).isoformat(),
+                    realtime_end=(today + dt.timedelta(days=400)).isoformat(),
+                    include_release_dates_with_no_data="true",
+                    sort_order="asc", limit=10000)
+    except Exception as e:                       # noqa: BLE001
+        log(f"  미국 지표 날짜 실패 ({type(e).__name__}: {e})")
+        if why is not None:
+            why["FRED/dates"] = f"{type(e).__name__}: {e}"[:180]
+        return []
+
+    out, seen = [], set()
+    for row in got.get("release_dates") or []:
+        ko = want.get(row.get("release_id"))
+        day = str(row.get("date") or "")
+        if not ko or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             continue
-        seen.add(key)
-        uniq.append(e)
-    if not uniq:
+        d = dt.date.fromisoformat(day)
+        key2 = (day, ko)
+        if key2 in seen:
+            continue
+        seen.add(key2)
+        out.append({"date": d.strftime("%Y%m%d"), "name": ko,
+                    "dday": (d - today).days})
+    out.sort(key=lambda e: e["date"])
+    if why is not None:
+        why["FRED/날짜"] = f"{len(got.get('release_dates') or [])}건 중 {len(out)}건"
+    if not out:
         log("::warning::미국 지표 일정을 하나도 읽지 못했습니다")
-    return uniq
+    return out
 
 
 def upcoming(events: list, today: dt.date, back: int = 1, ahead: int = 3) -> list:

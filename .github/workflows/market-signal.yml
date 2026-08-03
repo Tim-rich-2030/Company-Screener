@@ -57,9 +57,12 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_tree.py
 
-      # 실적 마감은 계산이라 늘 나온다. FOMC·금통위는 받아와야 한다.
-      - name: 캘린더 수집 (실적 마감 · FOMC · 금통위)
+      # 실적 마감은 계산이라 늘 나온다. FOMC·금통위·미국 지표는 받아와야 한다.
+      # FRED_API_KEY 는 없어도 돌아간다 — 그때는 미국 지표 칸만 빈다.
+      - name: 캘린더 수집 (실적 마감 · FOMC · 금통위 · 미국 지표)
         continue-on-error: true
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python market_calendar.py
 
       # ECOS_KEY 는 없어도 돌아간다 — 그때는 한국 기준금리만 빈다.
