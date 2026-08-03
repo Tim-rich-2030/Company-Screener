@@ -53,6 +53,11 @@ BOK_URL = ("https://www.bok.or.kr/portal/singl/crncyPolicyDrcMtg/listYear.do"
            "?mtgSe=A&menuNo=200755")
 
 TIMEOUT = 20
+# 노동통계국(bls.gov)은 사람이 쓰는 브라우저가 아닌 요청을 막는다. 우리 UA 를
+# 그대로 보내면 403 이 온다. 그 페이지에만 브라우저 UA 를 쓴다.
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
 UA = ("Mozilla/5.0 (compatible; kkujungbuja/1.0; "
       "+https://github.com/Tim-rich-2030/Company-Screener)")
 
@@ -153,7 +158,7 @@ def decode(raw: bytes, declared: str = "") -> str | None:
     return None
 
 
-def fetch(url: str, tries: int = 2) -> str | None:
+def fetch(url: str, tries: int = 2, ua: str = None) -> str | None:
     """
     한 번 더 두드린다.
 
@@ -164,7 +169,7 @@ def fetch(url: str, tries: int = 2) -> str | None:
     last = None
     for i in range(tries):
         try:
-            return _fetch_once(url)
+            return _fetch_once(url, ua)
         except Exception as e:                   # noqa: BLE001
             last = e
             if i + 1 < tries:
@@ -172,8 +177,8 @@ def fetch(url: str, tries: int = 2) -> str | None:
     raise last
 
 
-def _fetch_once(url: str) -> str | None:
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
+def _fetch_once(url: str, ua: str = None) -> str | None:
+    r = requests.get(url, headers={"User-Agent": ua or UA}, timeout=TIMEOUT)
     r.raise_for_status()
     m = re.search(r"charset=([\w.-]+)", r.headers.get("content-type", ""), re.I)
     return decode(r.content, m.group(1) if m else "")
@@ -249,9 +254,17 @@ def bok_dates(today: dt.date) -> list:
     cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", doc, re.I | re.S)
     text = " ".join(strip_tags(c) for c in cells) or strip_tags(doc)
 
-    # 표에 연도가 없고 'M월 D일' 만 있는 경우를 위해 제목·본문에서 연도를 찾는다.
-    ctx = re.search(r"(20\d{2})\s*년", strip_tags(doc))
-    ctx_year = int(ctx.group(1)) if ctx else today.year
+    # 표에 연도가 없고 'M월 D일' 만 있다. 연도는 옆 칸의 '(2026.01)' 에 들어
+    # 있으니 거기서 가장 많이 나온 해를 쓴다.
+    #
+    #   처음엔 페이지에서 처음 만나는 '20XX년' 하나를 썼는데, 공지나 각주의
+    #   다른 해가 먼저 걸리면 표의 날짜가 통째로 그 해로 찍힌다. 그러면
+    #   전부 창(-90~+400일) 밖으로 나가 0건이 되고, '표를 못 읽었다'로 보고된다.
+    years = re.findall(r"\(\s*(20\d{2})\s*[.\-]\s*\d{1,2}\s*\)", doc)
+    if not years:
+        years = re.findall(r"(20\d{2})\s*년", strip_tags(doc))
+    ctx_year = int(max(set(years), key=years.count)) if years else today.year
+    log(f"  금통위 기준 연도 {ctx_year} (근거 {len(years)}건)")
 
     out = set()
     for m in re.finditer(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})",
@@ -298,7 +311,7 @@ def bls_dates(today: dt.date) -> list:
     out = []
     for year in (today.year, today.year + 1):
         try:
-            doc = fetch(BLS_URL.format(year=year))
+            doc = fetch(BLS_URL.format(year=year), ua=BROWSER_UA)
         except Exception as e:                   # noqa: BLE001
             log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
             continue
