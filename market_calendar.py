@@ -229,14 +229,23 @@ def bok_dates(today: dt.date) -> list:
             out.add(dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
         except ValueError:
             continue
-    if not out:
-        for m in re.finditer(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", text):
-            try:
-                out.add(dt.date(ctx_year, int(m.group(1)), int(m.group(2))))
-            except ValueError:
-                continue
+    # 연도 없는 'M월 D일' 도 **함께** 모은다. 앞 형식이 하나라도 걸리면 건너뛰게
+    # 해 뒀더니, 페이지 구석의 '최종수정일' 하나만 잡고 정작 표는 못 읽었다.
+    for m in re.finditer(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", text):
+        try:
+            out.add(dt.date(ctx_year, int(m.group(1)), int(m.group(2))))
+        except ValueError:
+            continue
+
+    # 회의 일정이라면 최근·가까운 앞날에 모여 있어야 한다. 250일 지난 날짜
+    # 하나만 남는 것은 표를 못 읽었다는 뜻이지 '회의가 그것뿐'이라는 뜻이 아니다.
+    keep = sorted(d for d in out if -90 <= (d - today).days <= 400)
+    if not keep:
+        log(f"::warning::금통위 날짜를 {len(out)}개 찾았지만 쓸 만한 것이 "
+            "없습니다 — 표를 못 읽은 것으로 봅니다")
+        return []
     return [{"date": d.strftime("%Y%m%d"), "name": "한은 금통위",
-             "dday": (d - today).days} for d in sorted(out)]
+             "dday": (d - today).days} for d in keep]
 
 
 def upcoming(events: list, today: dt.date, back: int = 1, ahead: int = 3) -> list:

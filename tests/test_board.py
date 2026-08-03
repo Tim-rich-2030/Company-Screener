@@ -505,6 +505,57 @@ def test_fomc_takes_the_second_day_of_a_two_day_meeting():
     print("test_fomc_takes_the_second_day_of_a_two_day_meeting: OK")
 
 
+def test_bok_ignores_a_stray_date_and_reads_the_table():
+    """
+    실제로 있었던 일: 페이지 구석의 '최종수정일 2025.11.26' 하나만 잡고 정작
+    회의 표는 못 읽었는데, 값이 하나라도 있어서 성공으로 처리됐다.
+    화면에는 250일 지난 '금통위'가 다가올 일정처럼 붙었다.
+
+    표 칸 안만 보고, 연도 없는 'M월 D일' 도 함께 모으고, 최근·가까운 앞날에
+    있는 것만 남긴다.
+    """
+    import datetime as dt
+    today = dt.date(2026, 8, 3)
+    orig = mc.fetch
+    try:
+        mc.fetch = lambda url: (
+            '<div>최종수정일 2025.11.26</div><h3>2026년 통화정책방향</h3>'
+            '<table><tr><td>1월 15일</td></tr><tr><td>8월 27일</td></tr></table>')
+        eq([g["date"] for g in mc.bok_dates(today)], ["20260827"],
+           "표를 읽고, 200일 지난 1월 회의는 뺀다")
+
+        mc.fetch = lambda url: '<div>최종수정일 2025.11.26</div><table><tr><td>-</td></tr></table>'
+        eq(mc.bok_dates(today), [], "표를 못 읽으면 빈 목록 — 옛 날짜를 내보내지 않는다")
+    finally:
+        mc.fetch = orig
+    print("test_bok_ignores_a_stray_date_and_reads_the_table: OK")
+
+
+def test_alert_issues_tries_the_next_url_when_one_404s():
+    """
+    처음 쓴 KIND 주소는 404 였다. 주소 규칙을 모르는 채 하나만 찍는 대신
+    후보를 차례로 시도하고, 전부 실패하면 빈 집합을 돌려준다.
+    """
+    calls = []
+
+    def fake(url):
+        calls.append(url)
+        if "searchAlertIssueMain" in url:
+            raise RuntimeError("404")
+        return "<table><tr><td>123456</td><td>어떤회사</td></tr></table>"
+
+    orig = market_flags.fetch
+    market_flags.fetch = fake
+    try:
+        eq(market_flags.alert_issues(), {"123456"}, "두 번째 후보에서 성공")
+        eq(len(calls), 2, "첫 후보가 실패하면 다음으로 넘어간다")
+        market_flags.fetch = lambda url: (_ for _ in ()).throw(RuntimeError("404"))
+        eq(market_flags.alert_issues(), set(), "전부 실패하면 빈 집합")
+    finally:
+        market_flags.fetch = orig
+    print("test_alert_issues_tries_the_next_url_when_one_404s: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -528,4 +579,6 @@ if __name__ == "__main__":
     test_quarter_label_matches_the_store_keys()
     test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch()
     test_fomc_takes_the_second_day_of_a_two_day_meeting()
+    test_bok_ignores_a_stray_date_and_reads_the_table()
+    test_alert_issues_tries_the_next_url_when_one_404s()
     print("\nALL BOARD TESTS PASSED")
