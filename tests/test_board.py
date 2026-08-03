@@ -23,6 +23,8 @@ import market_calendar as mc
 import market_macro as mm
 import market_theme as mth
 import market_strong as mst
+import market_board as mb
+import market_headline as mh
 
 
 def eq(got, want, what):
@@ -929,6 +931,239 @@ def _gold(doc, why):
         mm.requests.get = orig
 
 
+# =============================================================================
+# 증시 현황판 — 간밤의 증시 · 주요 지표
+# =============================================================================
+
+def test_quote_is_found_wherever_the_wrapper_puts_it():
+    """
+    응답을 감싸는 모양이 주소마다 다르다. 시세가 들어 있는 dict 를 찾아내야지,
+    맨 위 열쇠 이름을 못박으면 주소 하나가 바뀔 때마다 칸이 빈다.
+    """
+    flat = {"closePrice": "21,344.50", "compareToPreviousClosePrice": "-102.30"}
+    wrapped = {"result": {"index": [flat]}}
+    for body in (flat, wrapped, [flat]):
+        q = mb.quote_of(body)
+        eq(q["last"], 21344.5, "종가")
+        eq(q["diff"], -102.3, "전일 대비")
+    print("test_quote_is_found_wherever_the_wrapper_puts_it: OK")
+
+
+def test_quote_fills_in_the_missing_half():
+    """포인트만 오면 %를, %만 오면 포인트를 만든다. 둘 다 화면에 적어야 한다."""
+    only_rate = mb.quote_of({"tradePrice": 110, "fluctuationsRatio": 10})
+    eq(only_rate["diff"], 10.0, "10% 올라 110 이면 오른 폭은 10")
+    only_diff = mb.quote_of({"tradePrice": 110, "changeValue": 10})
+    eq(only_diff["rate"], 10.0, "100 에서 110 이면 10%")
+    print("test_quote_fills_in_the_missing_half: OK")
+
+
+def test_quote_ignores_a_dict_without_a_price():
+    """값이 없는 dict 를 시세로 오해하면 0 이 지수로 나간다."""
+    eq(mb.quote_of({"message": "ok", "code": 200}), {}, "시세 아님")
+    eq(mb.quote_of({"closePrice": "0"}), {}, "0 은 시세가 아니다")
+    print("test_quote_ignores_a_dict_without_a_price: OK")
+
+
+def test_night_row_stays_empty_when_nothing_answers():
+    """
+    받을 곳을 못 찾으면 **비운다.** 코스피200 정규장 종가를 야간선물이라고
+    적으면 그건 다른 숫자다. 대신 무엇을 두드렸는지 진단에 남긴다.
+    """
+    class Dead:
+        status_code = 404
+        content = b""
+        def json(self): raise ValueError("no json")
+    orig = mb.requests.get
+    mb.requests.get = lambda *a, **k: Dead()
+    try:
+        why = {}
+        spec = {"key": "k200_night", "name": "코스피200 야간선물",
+                "syms": ["A"], "note": ""}
+        eq(mb.fetch_quote(spec, why), {}, "빈 시세")
+        assert "코스피200 야간선물" in why, why
+        assert "404" in why["코스피200 야간선물"], why
+    finally:
+        mb.requests.get = orig
+    print("test_night_row_stays_empty_when_nothing_answers: OK")
+
+
+def test_fx_reads_the_base_rate_column_by_name():
+    """
+    환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
+    매매기준율이라고 내보내게 된다 — 금에서 실제로 저질렀던 실수다.
+    """
+    doc = """
+    <table><tr><th>날짜</th><th>매매기준율</th><th>전일대비</th>
+      <th colspan="2">현찰</th></tr>
+      <tr><th>사실 때</th><th>파실 때</th></tr>
+      <tr><td>2026.08.03</td><td>1,460.70</td><td>3.20</td>
+        <td>1,486.24</td><td>1,435.16</td></tr>
+    </table>"""
+    class R:
+        status_code = 200
+        content = doc.encode("cp949")
+        def raise_for_status(self): pass
+    orig = mb.requests.get
+    mb.requests.get = lambda *a, **k: R()
+    try:
+        why = {}
+        got = mb.fetch_fx("FX_USDKRW", dt.date(2026, 1, 1), pages=1, why=why)
+        eq(got, {"20260803": 1460.70}, "매매기준율")
+    finally:
+        mb.requests.get = orig
+    print("test_fx_reads_the_base_rate_column_by_name: OK")
+
+
+def test_fx_stays_empty_when_the_column_is_gone():
+    """칸을 못 찾으면 값을 내보내지 않는다. 틀린 환율보다 빈 칸이 낫다."""
+    doc = "<table><tr><th>날짜</th><th>알 수 없는 칸</th></tr>" \
+          "<tr><td>2026.08.03</td><td>1,460.70</td></tr></table>"
+    class R:
+        status_code = 200
+        content = doc.encode("cp949")
+        def raise_for_status(self): pass
+    orig = mb.requests.get
+    mb.requests.get = lambda *a, **k: R()
+    try:
+        why = {}
+        eq(mb.fetch_fx("FX_USDKRW", dt.date(2026, 1, 1), pages=1, why=why),
+           {}, "빈 값")
+        assert "FX_USDKRW" in why, why
+    finally:
+        mb.requests.get = orig
+
+
+# =============================================================================
+# 헤드라인 뉴스 — 주제 묶기
+# =============================================================================
+    print("test_fx_stays_empty_when_the_column_is_gone: OK")
+
+
+def test_josa_is_stripped_but_short_words_are_left_alone():
+    """
+    '코스피가' 와 '코스피는' 은 같은 낱말이다. 그렇다고 세 글자를 깎으면
+    '순매도' 가 '순매' 가 되어 '순매수' 와 갈라지고, 엉뚱한 제목끼리 '순매'
+    로 묶인다.
+    """
+    eq(mh.norm("코스피가"), "코스피", "조사를 뗀다")
+    eq(mh.norm("삼성전자는"), "삼성전자", "조사를 뗀다")
+    eq(mh.norm("순매도"), "순매도", "세 글자는 그대로")
+    eq(mh.norm("금리"), "금리", "두 글자는 그대로")
+    print("test_josa_is_stripped_but_short_words_are_left_alone: OK")
+
+
+def test_same_event_written_by_two_papers_lands_in_one_topic():
+    a = mh.tokens("코스피가 3% 급락…외국인 순매도 확대")
+    b = mh.tokens("외국인 순매도에 코스피 급락 마감")
+    assert mh.same_topic(a, b), (sorted(a), sorted(b))
+    print("test_same_event_written_by_two_papers_lands_in_one_topic: OK")
+
+
+def test_unrelated_headlines_do_not_get_merged():
+    a = mh.tokens("코스피가 3% 급락…외국인 순매도 확대")
+    for other in ["삼성전자 신형 갤럭시 공개 행사 열려",
+                  "한국은행 기준금리 동결 결정",
+                  "서울 아파트 매매가 3주째 보합"]:
+        assert not mh.same_topic(a, mh.tokens(other)), other
+    print("test_unrelated_headlines_do_not_get_merged: OK")
+
+
+def test_one_shared_word_is_not_a_topic():
+    """
+    '코스피' 하나 겹친다고 같은 사건이 아니다. 낱말 하나로 묶으면 증시 기사가
+    전부 한 덩어리가 되고, 그 덩어리의 기사 수는 아무것도 뜻하지 않는다.
+    """
+    a = mh.tokens("코스피 외국인 순매도 확대")
+    b = mh.tokens("코스피 상장사 배당 확대 요구 커져")
+    assert not mh.same_topic(a, b), (sorted(a), sorted(b))
+    print("test_one_shared_word_is_not_a_topic: OK")
+
+
+def test_clusters_are_ranked_by_how_many_papers_wrote_it():
+    pool = [{"key": f"1/{i}", "title": t, "url": ""} for i, t in enumerate([
+        "한국은행 기준금리 동결",
+        "한국은행 기준금리 동결 결정",
+        "기준금리 동결한 한국은행",
+        "삼성전자 갤럭시 신제품 공개",
+        "삼성전자 갤럭시 공개 행사",
+    ])]
+    groups = mh.cluster(pool)
+    eq(len(groups[0]["items"]), 3, "가장 많이 쓰인 주제가 1위")
+    eq(len(groups[1]["items"]), 2, "그 다음")
+    print("test_clusters_are_ranked_by_how_many_papers_wrote_it: OK")
+
+
+def test_cluster_compares_against_the_seed_not_the_whole_group():
+    """
+    묶음 전체와 비교하면 낱말이 붙을수록 그물이 커져 나중엔 아무거나 걸린다.
+    씨앗과만 비교하므로, 씨앗과 안 겹치는 제목은 들어오지 못한다.
+    """
+    pool = [{"key": f"1/{i}", "title": t, "url": ""} for i, t in enumerate([
+        "한국은행 기준금리 동결",
+        "한국은행 기준금리 동결 발표",
+        "환율 급등에 수출기업 비상",
+    ])]
+    groups = mh.cluster(pool)
+    eq(len(groups[0]["items"]), 2, "씨앗과 겹치는 둘만")
+    eq(len(groups), 2, "나머지는 따로")
+    print("test_cluster_compares_against_the_seed_not_the_whole_group: OK")
+
+
+def test_longest_body_wins_inside_a_topic():
+    """같은 사건이라도 속보 한 줄과 해설 기사는 읽고 남는 것이 다르다."""
+    pool = [{"key": "1/1", "title": "한국은행 기준금리 동결", "url": "a"},
+            {"key": "1/2", "title": "한국은행 기준금리 동결 결정", "url": "b"}]
+    bodies = {"1/1": {"chars": 300, "office": "가", "at": ""},
+              "1/2": {"chars": 2400, "office": "나", "at": ""}}
+    orig = mh.read_article
+    mh.read_article = lambda key, why=None: bodies[key]
+    try:
+        rank = mh.build(pool, top=1)
+    finally:
+        mh.read_article = orig
+    eq(rank[0]["n"], 2, "두 곳이 썼다")
+    eq(rank[0]["url"], "b", "본문이 긴 쪽")
+    eq(rank[0]["chars"], 2400, "글자수")
+    print("test_longest_body_wins_inside_a_topic: OK")
+
+
+def test_rank_survives_when_no_body_can_be_read():
+    """
+    본문을 못 읽어도 순위는 제목만으로 셌으므로 여전히 사실이다.
+    빈 목록으로 만들면 헤드라인 칸이 통째로 사라진다.
+    """
+    pool = [{"key": "1/1", "title": "한국은행 기준금리 동결", "url": "a"},
+            {"key": "1/2", "title": "한국은행 기준금리 동결 결정", "url": "b"}]
+    orig = mh.read_article
+    mh.read_article = lambda key, why=None: {}
+    try:
+        rank = mh.build(pool, top=1)
+    finally:
+        mh.read_article = orig
+    eq(rank[0]["n"], 2, "순위는 남는다")
+    eq(rank[0]["chars"], 0, "글자수는 모른다고 적는다")
+    print("test_rank_survives_when_no_body_can_be_read: OK")
+
+
+def test_unchanged_rank_is_not_written_again():
+    """
+    5분마다 도는데 매번 파일을 새로 쓰면 시각 하나 때문에 하루 288번
+    커밋·배포가 된다. 순위가 그대로면 아무것도 쓰지 않는다.
+    """
+    rank = [{"n": 4, "title": "가", "url": "u"}]
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "market_headline.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"fetched_at": "옛날", "rank": rank}, f, ensure_ascii=False)
+        assert mh.unchanged(rank, path), "같으면 True"
+        assert not mh.unchanged([{"n": 5, "title": "가", "url": "u"}], path), \
+            "건수가 바뀌면 False"
+        assert not mh.unchanged(rank, os.path.join(d, "없는파일.json")), \
+            "처음이면 False"
+    print("test_unchanged_rank_is_not_written_again: OK")
+
+
 def test_gold_reads_the_international_column_not_the_first_number():
     """
     날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
@@ -1307,4 +1542,19 @@ if __name__ == "__main__":
     test_strong_leaves_the_list_empty_when_the_index_is_unknown()
     test_strong_tags_themes_but_only_two()
     test_strong_reads_the_same_index_number_the_front_page_shows()
+    test_quote_is_found_wherever_the_wrapper_puts_it()
+    test_quote_fills_in_the_missing_half()
+    test_quote_ignores_a_dict_without_a_price()
+    test_night_row_stays_empty_when_nothing_answers()
+    test_fx_reads_the_base_rate_column_by_name()
+    test_fx_stays_empty_when_the_column_is_gone()
+    test_josa_is_stripped_but_short_words_are_left_alone()
+    test_same_event_written_by_two_papers_lands_in_one_topic()
+    test_unrelated_headlines_do_not_get_merged()
+    test_one_shared_word_is_not_a_topic()
+    test_clusters_are_ranked_by_how_many_papers_wrote_it()
+    test_cluster_compares_against_the_seed_not_the_whole_group()
+    test_longest_body_wins_inside_a_topic()
+    test_rank_survives_when_no_body_can_be_read()
+    test_unchanged_rank_is_not_written_again()
     print("\nALL BOARD TESTS PASSED")

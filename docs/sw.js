@@ -3,7 +3,7 @@
 //   PAGES  — html 과 지수 json. 데이터가 바뀌면 같이 바뀐다.
 // 하나로 두면 캐시 이름이 페이지 해시라 데이터가 바뀌는 날마다 캐시가 통째로
 // 갈리고, 폰트 700KB 를 매일 다시 받게 된다.
-const V = 'ec2d7de24a5e';
+const V = 'a8623976c0a1';
 const PAGES = 'pages-' + V;
 const ASSETS = 'assets-282656e0';
 const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
@@ -22,7 +22,8 @@ const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
                     'market_calendar.json', 'market_macro.json',
                     'market_etf.json', 'market_news.json',
                     'market_theme.json', 'market_strong.json',
-                    'market_world.json', 'market_stocknews.json'];
+                    'market_world.json', 'market_stocknews.json',
+                    'market_board.json', 'market_headline.json'];
 // 종목 일봉(1MB)은 목록만 보는 사람에게는 필요 없다. 미리 받지 않되, 한 번
 // 받으면 캐시에 남겨 다음에 같은 종목을 열 때 다시 받지 않게 한다.
 const LAZY_FILES = ['market_px.json'];
