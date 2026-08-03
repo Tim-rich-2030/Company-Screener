@@ -77,6 +77,14 @@ jobs:
           python market_etf.py
           python market_etf.py --themes
 
+      # 테마는 네이버 금융에서 받는다. 인포스탁은 403 이고 유료 자료다
+      # (store/theme_probe.json 에 확인 기록이 있다).
+      # 우리 18개 분류에 안 걸린 테마 이름은 store/market_theme.json 의
+      # unmatched 에 그대로 남는다 — 그걸 보고 themes.json 의 조각을 고친다.
+      - name: 테마 수집 (네이버 금융) + 분류 매칭
+        continue-on-error: true
+        run: python market_theme.py
+
       # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
       # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
       - name: 뉴스 수집 (네이버 금융)
@@ -93,12 +101,9 @@ jobs:
           python market_calendar.py >/dev/null || python market_calendar.py --dump
           python market_macro.py    >/dev/null || python market_macro.py --dump
 
-      # 수집이 아니라 확인이다. 테마 자료를 어디서 받을 수 있는지 응답만 보고
-      # store/theme_probe.json 에 적어 둔다. 짐작으로 긁기 전에 무엇이 있는지
-      # 먼저 본다 — 이 저장소에서 짐작으로 긁다가 여러 번 헛돌았다.
-      - name: 테마 자료 출처 확인 (수집 아님)
-        continue-on-error: true
-        run: python theme_probe.py
+      # theme_probe.py 는 여기서 뺐다. 어디서 받을 수 있는지 확인하려던 것이고
+      # 답은 나왔다 (네이버 금융). 기록은 store/theme_probe.json 에 남아 있고,
+      # 파일도 남겨 둔다 — 나중에 다른 출처를 볼 때 다시 쓴다.
 
       - name: 변경분 커밋
         run: |
@@ -113,7 +118,7 @@ jobs:
                    store/market_macro.json docs/market_macro.json \
                    store/market_etf.json   docs/market_etf.json \
                    store/market_news.json  docs/market_news.json \
-                   store/theme_probe.json; do
+                   store/market_theme.json docs/market_theme.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --staged --quiet; then

@@ -521,7 +521,8 @@ const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
 // 화면이 통째로 빈다.
 const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
                     'market_calendar.json', 'market_macro.json',
-                    'market_etf.json', 'market_news.json'];
+                    'market_etf.json', 'market_news.json',
+                    'market_theme.json'];
 const SHELL = ['./', './index.html', './stocks.html']
                 .concat(DATA_FILES.map(f => './' + f));
 
