@@ -6,8 +6,8 @@
 같이 배포되어야 한다. 하나만 새것이면 화면 안에서 날짜가 어긋난다.
 
   · 간밤의 증시(night)
-        나스닥 · S&P 500 · 필라델피아 반도체 · 코스피200 야간선물 ·
-        코스닥150 야간선물. 값과 **전일 대비 포인트·%** 를 함께 낸다.
+        나스닥 · S&P 500 · 필라델피아 반도체 · 코스피200 선물.
+        값과 **전일 대비 포인트·%** 를 함께 낸다.
         장이 열려 있는지 닫혔는지는 여기서 정하지 않는다 — 화면이 시계를
         보고 판단한다. 하루 한 번 받은 파일에 '지금 장중'을 박아 두면
         그 문장은 받은 순간부터 거짓말이 된다.
@@ -60,9 +60,9 @@ PAUSE = 0.2
 # 거래소@종목 꼴이다 (NAS@IXIC). 다만 주소 모양이 몇 번 바뀌었으므로
 # 후보를 늘어놓고 먼저 답하는 것을 쓴다.
 #
-# 야간선물은 받을 곳이 분명하지 않다. 후보를 두드려 보고, 하나도 답하지
-# 않으면 **그 줄은 빈 채로 둔다** — 코스피200 정규장 종가를 야간선물이라고
-# 적으면 그건 다른 숫자다.
+# 국내 선물은 받을 곳이 분명하지 않았다. 후보를 두드리고 --probe 로 찾아
+# FUT 라는 것을 알아냈다. 그래도 원칙은 같다 — 하나도 답하지 않으면
+# **그 줄은 빈 채로 둔다.** 현물 종가를 선물이라고 적으면 다른 숫자다.
 IDX_URLS = [
     "https://api.stock.naver.com/index/{sym}/basic",
     "https://api.stock.naver.com/index/{sym}/price?pageSize=2&page=1",
@@ -212,13 +212,14 @@ def quote_of(body) -> dict:
         if rate is None and diff is not None and close != diff:
             rate = diff / (close - diff) * 100
         at = first(d, AT_KEYS)
-        return {"last": close,
+        return {"raw": {k: v for k, v in list(d.items())[:24]},
+                "last": close,
                 "diff": None if diff is None else round(diff, 2),
                 "rate": None if rate is None else round(rate, 2),
                 # 시각은 '2026-08-03T17:15:59-04:00' 로 온다. 24자에서 자르면
                 # 시간대가 '-04:0' 으로 잘려 못 읽는 값이 된다.
                 "at": None if at is None else str(at)[:32],
-                "keys": ",".join(list(d)[:10])}
+                "keys": ",".join(list(d)[:24])}
     return {}
 
 
@@ -259,6 +260,16 @@ def fetch_quote(spec: dict, why: dict) -> dict:
             if not q.get("at") and isinstance(body, dict) and body.get("time"):
                 q["at"] = str(body["time"])[:32]
             why[f"{spec['name']}/출처"] = f"{short} · 열쇠 {q.pop('keys', '')}"
+            raw = q.pop("raw", {})
+            # **등락이 0 이거나 없으면 원본을 통째로 남긴다.**
+            #
+            #   코스피200 선물이 992.35 인데 등락은 0.00 으로 왔다. 장 사이
+            #   시간이라 네이버가 보합으로 주는 것인지, 우리가 엉뚱한 열쇠를
+            #   읽은 것인지, 전일 종가가 다른 이름으로 따로 오는 것인지 —
+            #   응답을 봐야 안다. 짐작으로 고치면 없는 숫자를 만들게 된다.
+            if q.get("rate") in (None, 0, 0.0):
+                why[f"{spec['name']}/원본"] = json.dumps(
+                    raw, ensure_ascii=False)[:600]
             return q
     why[spec["name"]] = " | ".join(tried[:6])[:400]
     return {}

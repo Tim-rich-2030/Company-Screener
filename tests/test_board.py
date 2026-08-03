@@ -1047,6 +1047,36 @@ def test_polling_time_is_kept_when_the_quote_has_none():
 
 
 
+def test_a_zero_move_keeps_the_raw_answer_for_next_time():
+    """
+    코스피200 선물이 992.35 인데 등락은 0.00 으로 왔다. 장 사이 시간이라
+    네이버가 보합으로 주는 것인지, 우리가 엉뚱한 열쇠를 읽은 것인지, 전일
+    종가가 다른 이름으로 따로 오는 것인지 — 응답을 봐야 안다.
+
+    짐작으로 고치면 없는 숫자를 만들게 된다. 원본을 남기고 다음 판에 고친다.
+    """
+    class R:
+        status_code = 200
+        content = b"{}"
+        def json(self):
+            return {"datas": [{"itemCode": "FUT", "closePrice": "992.35",
+                               "fluctuationsRatio": "0.00",
+                               "openPrice": "992.35"}]}
+    orig = mb.requests.get
+    mb.requests.get = lambda *a, **k: R()
+    try:
+        why = {}
+        q = mb.fetch_quote({"name": "코스피200 선물", "syms": ["FUT"]}, why)
+    finally:
+        mb.requests.get = orig
+    eq(q["rate"], 0.0, "등락은 0")
+    assert "raw" not in q, "원본은 화면으로 새지 않는다"
+    assert "코스피200 선물/원본" in why, why
+    assert "itemCode" in why["코스피200 선물/원본"], why
+    print("test_a_zero_move_keeps_the_raw_answer_for_next_time: OK")
+
+
+
 def test_fx_reads_the_base_rate_column_by_name():
     """
     환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
@@ -1753,6 +1783,7 @@ if __name__ == "__main__":
     test_night_row_stays_empty_when_nothing_answers()
     test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so()
     test_polling_time_is_kept_when_the_quote_has_none()
+    test_a_zero_move_keeps_the_raw_answer_for_next_time()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()
