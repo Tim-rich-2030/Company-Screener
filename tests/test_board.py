@@ -17,6 +17,7 @@ import market_tree as mt
 import market_news as mn
 import market_flags
 import market_calendar as mc
+import market_macro as mm
 
 
 def eq(got, want, what):
@@ -556,6 +557,57 @@ def test_alert_issues_tries_the_next_url_when_one_404s():
     print("test_alert_issues_tries_the_next_url_when_one_404s: OK")
 
 
+# =============================================================================
+# 거시 지표
+# =============================================================================
+
+def test_rate_changes_are_the_events():
+    """
+    정책금리는 값이 바뀐 날이 곧 인상·인하일이다. 회의 일정표를 따로 긁어
+    맞추는 것보다 값에서 뽑는 편이 틀릴 여지가 없다.
+    """
+    pts = {"20240101": 3.5, "20240201": 3.5, "20240301": 3.25,
+           "20240401": 3.25, "20240501": 3.0}
+    ev = mm.changes(pts)
+    eq([(e["date"], e["dir"]) for e in ev],
+       [("20240301", "인하"), ("20240501", "인하")], "바뀐 날만")
+    eq(mm.changes({"a": 3.5, "b": 3.5000001}), [],
+       "소수점 오차는 변화가 아니다")
+    eq(mm.step_points(pts, ev),
+       [["20240101", 3.5], ["20240301", 3.25], ["20240501", 3.0]],
+       "계단은 시작·변화·끝만 있으면 된다")
+    print("test_rate_changes_are_the_events: OK")
+
+
+def test_after_returns_says_nothing_when_the_sample_is_tiny():
+    """
+    표본이 3회도 안 되면 통계를 내지 않는다.
+
+    '두 번 중 두 번 올랐다'는 아무것도 알려주지 않으면서 확신만 준다.
+    CLAUDE.md 의 문구 원칙이 표본을 요구하는 이유가 이것이다.
+    """
+    days = [f"2024{m:02d}{d:02d}" for m in range(1, 13) for d in (1, 15)]
+    kospi = {d: 100.0 + i for i, d in enumerate(days)}     # 계속 오르는 지수
+    two = [{"date": days[0], "dir": "인하", "from": 1, "to": 0},
+           {"date": days[1], "dir": "인하", "from": 1, "to": 0}]
+    eq(mm.after_returns(two, kospi, spans=(2,)), {}, "표본 2회면 말하지 않는다")
+
+    three = two + [{"date": days[2], "dir": "인하", "from": 1, "to": 0}]
+    got = mm.after_returns(three, kospi, spans=(2,))["인하"]["spans"]["2"]
+    eq((got["표본"], got["상승"]), (3, 3), "표본 3회부터 센다")
+    assert got["중앙값"] > 0, "오르는 지수인데 중앙값이 음수다"
+    print("test_after_returns_says_nothing_when_the_sample_is_tiny: OK")
+
+
+def test_after_returns_handles_a_holiday_decision_date():
+    """결정일이 휴장일일 수 있다. 그 다음 거래일을 기준으로 잡는다."""
+    kospi = {"20240102": 100.0, "20240103": 110.0, "20240104": 121.0}
+    ev = [{"date": "20240101", "dir": "인하", "from": 1, "to": 0}]   # 휴장
+    got = mm.after_returns(ev * 3, kospi, spans=(1,))["인하"]["spans"]["1"]
+    eq(got["중앙값"], 10.0, "1/2 → 1/3 은 +10%")
+    print("test_after_returns_handles_a_holiday_decision_date: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -581,4 +633,7 @@ if __name__ == "__main__":
     test_fomc_takes_the_second_day_of_a_two_day_meeting()
     test_bok_ignores_a_stray_date_and_reads_the_table()
     test_alert_issues_tries_the_next_url_when_one_404s()
+    test_rate_changes_are_the_events()
+    test_after_returns_says_nothing_when_the_sample_is_tiny()
+    test_after_returns_handles_a_holiday_decision_date()
     print("\nALL BOARD TESTS PASSED")

@@ -170,6 +170,15 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div class="rule-line" id="tree-why"></div>
   </section>
 
+  <section id="macro">
+    <h2>지표 기록<span class="note" id="macro-note"></span></h2>
+    <div class="tabs sm" id="macro-tabs"></div>
+    <div class="figs" id="macro-figs"></div>
+    <div id="macro-chart"></div>
+    <div id="macro-events"></div>
+    <div class="rule-line" id="macro-after"></div>
+  </section>
+
   <section id="etf">
     <h2>ETF<span class="note" id="etf-note"></span></h2>
     <div class="tabs sm" id="etf-tabs"></div>
@@ -626,6 +635,105 @@ $('tree-tabs').addEventListener('click', function(e){
 });
 
 // =============================================================================
+// 지표 기록 — 흐름 · 사건 · 이후
+//
+// 판단하지 않는다. "인하 9회 중 20거래일 뒤 상승 6회, 중앙값 +2.1%" 까지만
+// 적는다. 표본 수를 반드시 붙인다 — 표본 없는 확률은 확신만 준다.
+// =============================================================================
+var MACRO = null, MACRO_KEY = null, mchart = null, mro = null;
+
+function macroPick(){
+  var all = (MACRO && MACRO.series) || [];
+  for (var i = 0; i < all.length; i++){
+    if (all[i].key === MACRO_KEY) return all[i];
+  }
+  return all[0] || null;
+}
+
+function renderMacro(){
+  if (!MACRO) return;
+  var all = (MACRO.series || []).filter(function(s){ return s.points.length; });
+  if (!all.length){
+    $('macro-chart').innerHTML =
+      '<div class="miss">지표를 불러오지 못했습니다.</div>';
+    return;
+  }
+  if (!MACRO_KEY) MACRO_KEY = all[0].key;
+  $('macro-tabs').innerHTML = all.map(function(s){
+    return '<button class="tab' + (s.key === MACRO_KEY ? ' on' : '') +
+      '" data-v="' + esc(s.key) + '">' + esc(s.name) + '</button>'; }).join('');
+
+  var s = macroPick();
+  var last = s.events && s.events.length ? s.events[s.events.length - 1] : null;
+  $('macro-figs').innerHTML =
+    fig('현재', num(s.last, s.unit === '원' ? 0 : 2), '', s.unit) +
+    (last ? fig('마지막 ' + last.dir,
+                signed(last.to - last.from, 2) + 'p',
+                last.dir === '인상' ? 'u' : 'd')
+          : fig('기간', (s.span ? s.span[0].slice(0,4) + '~' : ''), '')) +
+    // 연도까지 넣으면 폰에서 줄이 넘어간다. 연도는 바로 아래 목록에 있다.
+    (last ? fig('그날', ymd(last.date).slice(5), '') : '');
+  $('macro-note').textContent = s.note || '';
+
+  // 차트 — 계단(금리)과 선(환율·유가)을 같은 방식으로 그린다.
+  if (mchart){ mchart.remove(); mchart = null; }
+  var el = $('macro-chart');
+  el.innerHTML = '';
+  el.style.height = '190px';
+  if (window.LightweightCharts && s.points.length > 1){
+    var muted = cssVar('--ink-muted'), rule = cssVar('--rule');
+    mchart = LightweightCharts.createChart(el, {
+      width: el.clientWidth, height: el.clientHeight,
+      layout: {background:{color:'transparent'}, textColor: muted,
+               fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
+      grid: {vertLines:{visible:false}, horzLines:{color: rule}},
+      rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
+      crosshair:{mode:1}, handleScroll:true, handleScale:true,
+    });
+    mchart.addLineSeries({
+      color: cssVar('--accent'), lineWidth: 2,
+      lineType: s.events && s.events.length ? 1 : 0,   // 1 = 계단
+      priceLineVisible:false, lastValueVisible:true,
+    }).setData(s.points.map(function(p){
+      return {time: toTime(p[0]), value: p[1]}; }));
+    if (mro) mro.disconnect();
+    mro = new ResizeObserver(function(){
+      if (mchart) mchart.applyOptions({width: el.clientWidth,
+                                       height: el.clientHeight}); });
+    mro.observe(el);
+  }
+
+  var evs = (s.events || []).slice().reverse().slice(0, 5);
+  $('macro-events').innerHTML = evs.length ? evs.map(function(e){
+    return '<div class="pick"><span class="nm">' + esc(e.dir) + '</span>' +
+      '<span class="cd num">' + ymd(e.date) + '</span>' +
+      '<span class="vals"><span class="num">' + e.from + ' → ' + e.to +
+      esc(s.unit) + '</span><span class="num ' +
+      (e.dir === '인상' ? 'u' : 'd') + '">' + signed(e.to - e.from, 2) +
+      'p</span></span></div>'; }).join('')
+    : '<div class="rule-line">이 지표는 값이 계속 움직여 ‘사건’을 따로 잡지 않습니다.</div>';
+
+  // 이후 기록 — 서술만. 표본 수를 반드시 붙인다.
+  var lines = [];
+  Object.keys(s.after || {}).forEach(function(dir){
+    var row = s.after[dir];
+    Object.keys(row.spans).forEach(function(n){
+      var v = row.spans[n];
+      lines.push(dir + ' 뒤 ' + n + '거래일 — 코스피 상승 ' + v['상승'] + '/' +
+                 v['표본'] + '회, 중앙값 ' + signed(v['중앙값'], 2) + '%');
+    });
+  });
+  $('macro-after').innerHTML = lines.length
+    ? esc('과거 기록 · ') + lines.map(esc).join('<br>')
+    : '표본이 3회도 안 돼 이후 기록은 적지 않습니다.';
+}
+
+$('macro-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== MACRO_KEY){ MACRO_KEY = b.dataset.v; renderMacro(); }
+});
+
+// =============================================================================
 // ETF — 거래대금순 / 거래량순
 //
 // '많이 사는 순'은 아직 못 만든다. 거래대금은 사고판 것을 합친 값이라
@@ -740,6 +848,15 @@ grab('market_tree.json').then(function(p){
 }).catch(function(){
   $('map').style.height = 'auto';
   $('map').innerHTML = '<div class="miss">시장 지도를 불러오지 못했습니다 — ' +
+    '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
+});
+
+grab('market_macro.json').then(function(p){
+  MACRO = p; renderMacro();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderMacro);
+}).catch(function(){
+  $('macro-chart').innerHTML =
+    '<div class="miss">지표 기록을 불러오지 못했습니다 — ' +
     '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
 });
 
