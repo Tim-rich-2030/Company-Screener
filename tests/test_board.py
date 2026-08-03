@@ -546,7 +546,8 @@ def test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch():
     finally:
         mc.fetch = orig
     eq(out["일정"], [], "받지 못하면 빈 목록")
-    eq(sorted(out["failed"]), ["FOMC", "금통위"], "무엇이 비었는지 남긴다")
+    eq(sorted(out["failed"]), ["FOMC", "금통위", "미국 지표"],
+       "무엇이 비었는지 남긴다")
     assert out["실적"], "실적 마감은 계산이라 항상 나온다"
     print("test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch: OK")
 
@@ -593,6 +594,62 @@ def test_bok_ignores_a_stray_date_and_reads_the_table():
     finally:
         mc.fetch = orig
     print("test_bok_ignores_a_stray_date_and_reads_the_table: OK")
+
+
+BLS_PAGE = """<table><tr><th>Release Date</th><th>Time</th><th>Release</th></tr>
+<tr><td>Tuesday, August 11, 2026</td><td>08:30 AM</td><td>Consumer Price Index for July 2026</td></tr>
+<tr><td>Thursday, August 13, 2026</td><td>08:30 AM</td><td>Producer Price Index for July 2026</td></tr>
+<tr><td>Friday, September 4, 2026</td><td>08:30 AM</td><td>Employment Situation for August 2026</td></tr>
+<tr><td>Wednesday, August 5, 2026</td><td>10:00 AM</td><td>County Employment and Wages</td></tr>
+</table>"""
+
+
+def test_us_indicator_dates_keep_only_the_ones_people_watch():
+    """
+    노동통계국은 한 해 200건 넘게 낸다. 대부분 지역·업종 세부 통계라 그대로
+    넣으면 달력이 그것으로 덮인다. 자주 회자되는 넷만 남긴다.
+
+    같은 발표가 여러 줄에 걸릴 수 있어 날짜+이름으로 한 번만 남긴다
+    (올해·내년 두 장을 받으므로 겹칠 수 있다).
+    """
+    orig = mc.fetch
+    mc.fetch = lambda url, tries=2: BLS_PAGE
+    try:
+        got = mc.bls_dates(dt.date(2026, 8, 3))
+    finally:
+        mc.fetch = orig
+    eq([e["name"] for e in got],
+       ["미국 소비자물가(CPI)", "미국 생산자물가(PPI)", "미국 고용보고서"],
+       "고른 것만, 날짜순으로")
+    eq(got[0]["date"], "20260811", "'August 11, 2026' 을 날짜로")
+    eq(got[0]["dday"], 8, "남은 날")
+    assert not any("County" in e["name"] for e in got), "세부 통계는 안 넣는다"
+    print("test_us_indicator_dates_keep_only_the_ones_people_watch: OK")
+
+
+def test_calendar_fetch_tries_again_before_giving_up():
+    """
+    금통위 페이지를 수집 단계에서는 못 받고 2분 뒤 진단 단계에서는 멀쩡히
+    받은 적이 있다. 코드가 아니라 그때 한 번 안 온 것이었다. 한 번의 실패로
+    그날 일정을 통째로 비우지 않는다.
+    """
+    calls = []
+
+    def flaky(url):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("일시 실패")
+        return "<td>08월 27일(목)</td>"
+
+    orig = mc._fetch_once
+    mc._fetch_once = flaky
+    try:
+        got = mc.fetch("http://x")
+    finally:
+        mc._fetch_once = orig
+    eq(len(calls), 2, "한 번 더 두드린다")
+    eq(got, "<td>08월 27일(목)</td>", "두 번째에 받은 것을 돌려준다")
+    print("test_calendar_fetch_tries_again_before_giving_up: OK")
 
 
 def test_alert_issues_tries_the_next_url_when_one_404s():
@@ -1096,6 +1153,8 @@ if __name__ == "__main__":
     test_fomc_takes_the_second_day_of_a_two_day_meeting()
     test_bok_ignores_a_stray_date_and_reads_the_table()
     test_alert_issues_tries_the_next_url_when_one_404s()
+    test_us_indicator_dates_keep_only_the_ones_people_watch()
+    test_calendar_fetch_tries_again_before_giving_up()
     test_rate_changes_are_the_events()
     test_after_returns_says_nothing_when_the_sample_is_tiny()
     test_after_returns_handles_a_holiday_decision_date()

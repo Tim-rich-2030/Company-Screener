@@ -54,13 +54,24 @@ h1,h2{font-family:'Noto Serif KR',serif;font-weight:400}
   padding:calc(18px + env(safe-area-inset-top)) 18px
           calc(28px + env(safe-area-inset-bottom))}
 
-/* 제호 — 신문 1면 맨 위. 겹괘선(굵은 선 + 가는 선)이 옛 금융면의 표식이다. */
+/* 제호 — 신문 1면 맨 위. 겹괘선(굵은 선 + 가는 선)이 옛 금융면의 표식이다.
+   날짜는 제호보다 한 줄 위, 제호 오른쪽에서는 지표가 돌아간다. */
+.date-line{padding-bottom:3px}
+.date{font-size:11.5px;color:var(--ink-muted);
+  font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
 .head{display:flex;align-items:baseline;gap:12px;padding-bottom:9px;
   border-bottom:3px solid var(--ink)}
 .head+.rule2{height:1px;background:var(--ink);opacity:.35;margin-bottom:0}
-h1{font-size:22px;letter-spacing:1px}
-.head .date{margin-left:auto;font-size:11.5px;color:var(--ink-muted);
-  font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+h1{font-size:20px;letter-spacing:.5px;white-space:nowrap}
+/* 돌아가는 지표. 다섯을 한 줄에 늘어놓으면 제호가 밀리고 어차피 한눈에 다
+   읽지 않는다. 하나씩 몇 초마다 바꾼다. */
+.tick{margin-left:auto;background:none;border:0;padding:0;font:inherit;
+  color:inherit;cursor:pointer;text-align:right;min-width:0;
+  display:flex;align-items:baseline;gap:6px;white-space:nowrap;
+  transition:opacity .35s}
+.tick.off{opacity:0}
+.tick .k{font-size:10.5px;color:var(--ink-muted)}
+.tick .v{font-size:13px}
 
 /* 머리 — 왼쪽에 오늘 이벤트, 오른쪽에 지수. 토스증권 '발견' 화면의 배치다.
    다만 칸을 나누는 것은 상자가 아니라 세로 괘선 하나다. */
@@ -298,9 +309,10 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
 </head>
 <body>
 <div id="app">
+  <div class="date-line"><span class="date" id="masthead-date"></span></div>
   <div class="head">
-    <h1>꾸중부자</h1>
-    <span class="date" id="masthead-date"></span>
+    <h1>꾸중부자 증시 시황</h1>
+    <button class="tick" id="tick"><span class="k"></span><span class="v num"></span></button>
   </div>
   <div class="rule2"></div>
 
@@ -312,9 +324,9 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </div>
 
   <nav class="toc" id="toc">
-    <a href="#today">오늘</a><a href="#strong">실시간</a><a href="#picks">조건</a>
-    <a href="#tree">지도</a><a href="#cal">일정</a><a href="#news">뉴스</a>
-    <a href="#macro">기록</a><a href="#etf">참고</a>
+    <a href="#today">오늘</a><a href="#strong">실시간</a><a href="#tree">지도</a>
+    <a href="#cal">일정</a><a href="#news">뉴스</a><a href="#macro">기록</a>
+    <a href="#etf">참고</a>
     <a class="last" href="stocks.html">종목 실적 ›</a>
   </nav>
 
@@ -332,14 +344,8 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div class="why" id="strong-why"></div>
   </section>
 
-  <section id="picks">
-    <h2><span class="no">三</span>조건에 걸린 종목<span class="note" id="picks-note"></span></h2>
-    <div id="picks-list"></div>
-    <div class="rule-line" id="picks-rule"></div>
-  </section>
-
   <section id="tree">
-    <h2><span class="no">四</span>시장 지도<span class="note" id="tree-note"></span></h2>
+    <h2><span class="no">三</span>시장 지도<span class="note" id="tree-note"></span></h2>
     <div class="tabs sm" id="tree-tabs"></div>
     <div id="map"></div>
     <div class="scale" id="tree-scale"></div>
@@ -347,19 +353,19 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </section>
 
   <section id="cal">
-    <h2><span class="no">五</span>일정<span class="note" id="cal-note"></span></h2>
+    <h2><span class="no">四</span>일정<span class="note" id="cal-note"></span></h2>
     <div class="cal" id="cal-list"></div>
     <div class="rule-line" id="cal-why"></div>
   </section>
 
   <section id="news">
-    <h2><span class="no">六</span>주요 뉴스<span class="note" id="news-note"></span></h2>
+    <h2><span class="no">五</span>주요 뉴스<span class="note" id="news-note"></span></h2>
     <div class="tabs sm" id="news-tabs"></div>
     <div class="news" id="news-list"></div>
   </section>
 
   <section id="macro">
-    <h2><span class="no">七</span>지표 기록<span class="note" id="macro-note"></span></h2>
+    <h2><span class="no">六</span>지표 기록<span class="note" id="macro-note"></span></h2>
     <div class="tabs sm" id="macro-tabs"></div>
     <div class="figs" id="macro-figs"></div>
     <div id="macro-chart"></div>
@@ -368,7 +374,7 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </section>
 
   <section id="etf">
-    <h2><span class="no">八</span>ETF<span class="note" id="etf-note"></span></h2>
+    <h2><span class="no">七</span>ETF<span class="note" id="etf-note"></span></h2>
     <div class="tabs sm" id="etf-tabs"></div>
     <div id="etf-list"></div>
   </section>
@@ -594,64 +600,6 @@ $('idx').addEventListener('click', function(e){
 // =============================================================================
 // 조건에 걸린 종목
 // =============================================================================
-var PICKS_SHOWN = 8, PICKS = null;
-
-/* 어제 목록과 견준 결과를 한 마디로. 첫 실행이면 '같음'이라고 하지 않는다 —
-   견줄 것이 없는 것과 안 바뀐 것은 다른 말이다. */
-function picksDelta(p){
-  var c = p && p.changed;
-  if (!c) return {txt: '견줄 이전 기록이 아직 없습니다', kept: true};
-  var n = (c['new'] || []).length, g = (c.gone || []).length;
-  if (!n && !g) return {txt: '직전 수집일과 같습니다', kept: true};
-  var parts = [];
-  if (n) parts.push('새로 ' + n + '종목');
-  if (g) parts.push('빠진 것 ' + g + '종목');
-  return {txt: parts.join(' · '), kept: false,
-          names: (c['new'] || []).map(function(x){ return x.name; })};
-}
-
-function renderPicks(p){
-  PICKS = p;
-  var items = p.items || [];
-  var d = picksDelta(p);
-  $('picks-note').innerHTML = p.screened + '종목 중 ' + items.length + '개<br>' +
-    (d.kept ? '' : '<em style="font-style:normal;color:var(--accent)">') +
-    esc(d.txt) + (d.kept ? '' : '</em>');
-  var rule = '조건 — ' + (p.rule || '');
-  var c = p.changed;
-  if (c && (c.gone || []).length){
-    rule += '<br>' + ymd(c.since) + ' 뒤 빠진 것 — ' +
-      c.gone.map(function(x){ return esc(x.name); }).join(', ');
-  }
-  $('picks-rule').innerHTML = rule;
-  if (!items.length){
-    $('picks-list').innerHTML =
-      '<div class="miss">오늘 이 조건을 모두 만족하는 종목이 없습니다.</div>';
-    return;
-  }
-  // 새로 들어온 종목에 표를 단다. 목록만 보면 무엇이 바뀌었는지 알 수 없다.
-  var fresh = {};
-  ((c && c['new']) || []).forEach(function(x){ fresh[x.code] = 1; });
-
-  var labels = p.labels || [];
-  var head = '<tr><th>종목</th>' + labels.map(function(l){
-    return '<th>' + esc(l) + '</th>'; }).join('') + '</tr>';
-  var body = items.slice(0, PICKS_SHOWN).map(function(h){
-    var tds = (h.values || []).map(function(v){
-      return '<td class="num">' +
-        (v === null || v === undefined ? '–' : v.toFixed(2)) + '</td>';
-    }).join('');
-    return '<tr><td>' + (fresh[h.code] ? '<span class="mark">신규</span>' : '') +
-      esc(h.name) + '</td>' + tds + '</tr>';
-  }).join('');
-  $('picks-list').innerHTML =
-    '<table class="tbl"><thead>' + head + '</thead><tbody>' + body +
-    '</tbody></table>' + (items.length > PICKS_SHOWN
-      ? '<div class="rule-line">' + (items.length - PICKS_SHOWN) +
-        '개 더 — <a href="stocks.html" style="color:var(--accent)">종목 실적</a>' +
-        '에서 전체를 볼 수 있습니다</div>' : '');
-}
-
 // =============================================================================
 // 캘린더 — 실적 마감과 통화정책 회의
 // =============================================================================
@@ -1042,6 +990,44 @@ $('macro-tabs').addEventListener('click', function(e){
 });
 
 // =============================================================================
+// 제호 옆에서 돌아가는 지표
+//
+// 미국 금리 · 국내 금리 · 원/달러 · WTI · 금. 하나씩 몇 초마다 바꾼다.
+// 눌러서 넘길 수도 있다 — 기다리기 싫을 때가 있다.
+// =============================================================================
+var TICK = 0, tickTimer = null;
+
+function tickItems(){
+  return ((MACRO && MACRO.series) || []).filter(function(s){
+    return s.last !== null && s.last !== undefined; });
+}
+
+function renderTick(){
+  var it = tickItems(), b = $('tick');
+  if (!b) return;
+  if (!it.length){ b.style.display = 'none'; return; }
+  b.style.display = '';
+  var s = it[TICK % it.length];
+  b.querySelector('.k').textContent = s.name;
+  b.querySelector('.v').textContent =
+    num(s.last, s.unit === '원' ? 0 : 2) + (s.unit === '%' ? '%' : '');
+  // 언제 값인지·무엇인지는 눌러서 볼 수 있게 title 로 붙인다.
+  b.title = (s.note || '') + (s.last_date ? ' · ' + ymd(s.last_date) : '');
+}
+
+function startTick(){
+  renderTick();
+  if (tickTimer) clearInterval(tickTimer);
+  if (tickItems().length < 2) return;
+  tickTimer = setInterval(function(){
+    var b = $('tick');
+    b.classList.add('off');
+    setTimeout(function(){ TICK++; renderTick(); b.classList.remove('off'); }, 350);
+  }, 4000);
+}
+$('tick').addEventListener('click', function(){ TICK++; renderTick(); });
+
+// =============================================================================
 // ETF — 거래대금순 / 거래량순
 //
 // '많이 사는 순'은 아직 못 만든다. 거래대금은 사고판 것을 합친 값이라
@@ -1118,6 +1104,9 @@ $('news-tabs').addEventListener('click', function(e){
 // 종목은 어느 테마인지 함께 적는다. 빼지 않는다 — 판단은 보는 사람 몫이다.
 // =============================================================================
 var STRONG = null, SV = null;
+// 한 번에 여섯 줄만. 더 보기를 누르면 열둘, 다시 누르면 전부(25).
+// 스물다섯 줄을 처음부터 펼치면 첫 화면 다음이 통째로 목록이 된다.
+var STEPS = [6, 12, 0], SHOW = 0;
 
 function money(v){
   if (v === null || v === undefined) return '–';
@@ -1155,7 +1144,8 @@ function renderStrong(){
     $('strong-list').innerHTML =
       '<div class="miss">이 갈래에 걸린 종목이 없습니다.</div>';
   } else {
-    $('strong-list').innerHTML = rows.map(function(r, i){
+    var cut = STEPS[SHOW] || rows.length;
+    $('strong-list').innerHTML = rows.slice(0, cut).map(function(r, i){
       var tags = (r.themes || []).map(function(t){
         return '<i class="tag">' + esc(t.sub) + '</i>'; }).join('');
       return '<button class="r" data-c="' + esc(r.code) + '">' +
@@ -1167,7 +1157,11 @@ function renderStrong(){
         '<span class="amt num">' + num(r.close, 0) + ' · ' +
         '<em style="font-style:normal" class="' + cls(r.chg) + '">' +
         signed(r.chg, 1) + '%</em> · ' + money(r.value) + '</span></span></button>';
-    }).join('');
+    }).join('') + (cut < rows.length
+      ? '<button class="more" id="strong-more">종목 더 보기 · 남은 ' +
+        (rows.length - cut) + '개</button>' : '');
+    var mb = $('strong-more');
+    if (mb) mb.addEventListener('click', function(){ SHOW++; renderStrong(); });
   }
   // 기준은 제목 옆이 아니라 목록 아래에 한 번만 적는다.
   // '실시간'이라는 이름과 달리 이 값은 **종가**다. 그 사실을 숨기지 않는다.
@@ -1195,7 +1189,8 @@ function renderStrong(){
 }
 $('strong-tabs').addEventListener('click', function(e){
   var b = e.target.closest('.tab');
-  if (b && b.dataset.v !== SV){ SV = b.dataset.v; renderStrong(); }
+  // 갈래를 바꾸면 다시 여섯 줄부터. 앞 갈래에서 펼친 것이 따라오면 안 된다.
+  if (b && b.dataset.v !== SV){ SV = b.dataset.v; SHOW = 0; renderStrong(); }
 });
 $('strong-list').addEventListener('click', function(e){
   var b = e.target.closest('.r');
@@ -1598,10 +1593,6 @@ grab('market_signal.json').then(function(p){
     '</div>';
 });
 
-grab('screen.json').then(renderPicks).catch(function(){
-  hide('picks', '조건에 걸린 종목');
-});
-
 grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');
 });
@@ -1630,7 +1621,7 @@ grab('market_tree.json').then(function(p){
 });
 
 grab('market_macro.json').then(function(p){
-  MACRO = p; renderMacro();
+  MACRO = p; startTick(); renderMacro();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderMacro);
 }).catch(function(){
   hide('macro', '지표 기록');

@@ -73,7 +73,38 @@ SERIES = [
      "fred": "DEXKOUS", "note": "매매기준율(FRED)"},
     {"key": "wti", "name": "WTI 유가", "unit": "달러", "step": False,
      "fred": "DCOILWTICO", "note": "서부텍사스산 현물"},
+    # 금은 FRED 의 런던금(GOLDPMGBD228NLBM)이 2023년에 끊겼다. 과거 값은 아직
+    # 주지만 최신값이 없어 머리에 띄우면 몇 년 전 값이 오늘 시세로 읽힌다.
+    # 그래서 stooq 의 XAU/USD 를 먼저 보고, 안 되면 FRED 로 물러선다.
+    {"key": "gold", "name": "금", "unit": "달러", "step": False,
+     "stooq": "xauusd", "note": "국제 금 현물 (트로이온스)",
+     "fallback": {"name": "금(옛 자료)", "step": False,
+                  "note": "stooq 를 못 받아 FRED 런던금으로 대신함 — "
+                          "2023년에 끊긴 계열이라 최신값이 아닐 수 있다",
+                  "fred": ["GOLDPMGBD228NLBM", "GOLDAMGBD228NLBM"]}},
 ]
+
+STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d"
+
+
+def fetch_stooq(sym: str, start: dt.date) -> dict:
+    """stooq 도 키 없이 CSV 를 준다. Date,Open,High,Low,Close 로 온다."""
+    r = requests.get(STOOQ_CSV.format(sym=sym),
+                     headers={"User-Agent": UA}, timeout=TIMEOUT)
+    r.raise_for_status()
+    out = {}
+    for row in csv.DictReader(io.StringIO(r.text)):
+        try:
+            d = dt.date.fromisoformat(str(row.get("Date", "")).strip())
+        except (ValueError, AttributeError):
+            continue
+        if d < start:
+            continue
+        try:
+            out[d.strftime("%Y%m%d")] = float(row["Close"])
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
 
 
 def log(msg: str) -> None:
@@ -293,7 +324,9 @@ def collect(years: int = YEARS) -> dict:
         spec = dict(spec)
         name = spec["name"]
         try:
-            if "fred" in spec:
+            if "stooq" in spec:
+                pts = fetch_stooq(spec["stooq"], start)
+            elif "fred" in spec:
                 pts = fetch_fred(spec["fred"], start)
             else:
                 pts = fetch_ecos(spec["ecos"], start, end)
@@ -359,7 +392,12 @@ def dump() -> int:
     for spec in SERIES:
         log(f"\n===== {spec['name']}")
         try:
-            if "fred" in spec:
+            if "stooq" in spec:
+                r = requests.get(STOOQ_CSV.format(sym=spec["stooq"]),
+                                 headers={"User-Agent": UA}, timeout=TIMEOUT)
+                log(f"  stooq {spec['stooq']} → {r.status_code}, {len(r.text)}자")
+                log("  앞 3줄: " + " | ".join(r.text.splitlines()[:3]))
+            elif "fred" in spec:
                 r = requests.get(FRED_CSV.format(id=spec["fred"]),
                                  headers={"User-Agent": UA}, timeout=TIMEOUT)
                 log(f"  FRED {spec['fred']} → {r.status_code}, {len(r.text)}자")
