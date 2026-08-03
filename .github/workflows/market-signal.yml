@@ -74,6 +74,21 @@ jobs:
           ECOS_KEY: ${{ secrets.ECOS_KEY }}
         run: python market_macro.py
 
+      # 1면 현황판. 간밤의 미국 지수·야간선물과, 원/달러·원/엔·WTI·금·비트코인
+      # 추세를 받는다. 해외 지수와 야간선물은 받을 곳이 확실하지 않아 후보를
+      # 차례로 두드리며, 무엇을 두드려 무슨 답이 왔는지는
+      # store/market_board.json 의 why 에 남는다 — 그걸 보고 다음 판을 고친다.
+      - name: 증시 현황판 (간밤의 증시 · 주요 지표 추세)
+        continue-on-error: true
+        run: python market_board.py
+
+      # 헤드라인은 5분마다 도는 별도 워크플로(headline.yml)가 갱신한다.
+      # 여기서도 한 번 돌려 두는 이유는, 그 워크플로가 아직 안 돌았거나
+      # 순위가 오래 안 바뀐 날에도 1면이 비어 있지 않게 하려는 것이다.
+      - name: 헤드라인 뉴스 (주제별 발행 수)
+        continue-on-error: true
+        run: python market_headline.py
+
       # --themes 는 테마 정의(themes.json)의 이름 조각이 실제 ETF 이름에
       # 걸리는지 보여준다. 비어 있는 소분류가 곧 고쳐야 할 곳이다.
       - name: ETF 수집 + 테마 매칭 점검
@@ -150,6 +165,8 @@ jobs:
                    store/market_strong.json docs/market_strong.json \
                    store/market_world.json  docs/market_world.json \
                    store/market_stocknews.json docs/market_stocknews.json \
+                   store/market_board.json docs/market_board.json \
+                   store/market_headline.json docs/market_headline.json \
                    docs/market_px.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done

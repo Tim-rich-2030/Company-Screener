@@ -22,7 +22,8 @@ const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
                     'market_calendar.json', 'market_macro.json',
                     'market_etf.json', 'market_news.json',
                     'market_theme.json', 'market_strong.json',
-                    'market_world.json', 'market_stocknews.json'];
+                    'market_world.json', 'market_stocknews.json',
+                    'market_board.json', 'market_headline.json'];
 // 종목 일봉(1MB)은 목록만 보는 사람에게는 필요 없다. 미리 받지 않되, 한 번
 // 받으면 캐시에 남겨 다음에 같은 종목을 열 때 다시 받지 않게 한다.
 const LAZY_FILES = ['market_px.json'];

@@ -33,6 +33,11 @@
   /* 이동평균 — 20일 하늘색, 60일 파랑, 120일 갈색.
      60일선 파랑은 하락봉(--down)과 헷갈리지 않게 한 단계 더 진하게 잡았다. */
   --ma20:#63A6C8; --ma60:#1F4E9C; --ma120:#8B5E34;
+  /* 주요 지표 다섯 선. 낡은 종이 위에서 서로 구분되는 만큼만 벌린다 —
+     형광색을 쓰면 이 화면 하나만 다른 앱이 된다. */
+  --t1:#2C4A45; --t2:#3D6099; --t3:#8B5E34; --t4:#A8842C; --t5:#C4443D;
+  /* 신호등 — 장중 초록, 마감 빨강. 지표색(--up)과 같은 빨강을 쓴다. */
+  --live:#2F7A5B;
 }
 /* 규칙에 다크는 네 가지만 정해져 있다. 나머지는 어두운 종이 위에서 읽히도록
    같은 계열에서 밝기만 올린 임시값이다. */
@@ -40,6 +45,8 @@
   --paper:#14130F; --surface:#1C1A16; --ink:#E8E3D8; --rule:#2E2B24;
   --ink-muted:#9A9384; --accent:#7FA89F; --up:#D9645C; --down:#6E8FC4;
   --ma20:#8FC4E0; --ma60:#6C97D8; --ma120:#B08050;
+  --t1:#7FA89F; --t2:#7C9CD4; --t3:#B08050; --t4:#C9A94A; --t5:#D9645C;
+  --live:#4E9E7A;
 }}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);
@@ -133,7 +140,58 @@ h2 .note{margin-left:auto;font-family:'Pretendard',sans-serif;font-size:11.5px;
   padding:8px 0 2px}
 .legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;
   margin-right:5px}
-#chart{flex:1 1 0;min-height:170px}
+/* 증시 현황판 — 1면. 탭을 누르거나 옆으로 밀면 장이 넘어간다.
+   가로 스크롤 스냅으로 만든다. 자바스크립트로 손짓을 흉내내면 관성·되돌림을
+   전부 다시 만들어야 하고, 그렇게 만든 것은 늘 진짜보다 뻑뻑하다. */
+.board{flex:1 1 0;display:flex;flex-direction:column;min-height:0}
+.pages{flex:1 1 0;display:flex;align-items:flex-start;
+  overflow-x:auto;overflow-y:hidden;
+  scroll-snap-type:x mandatory;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.pages::-webkit-scrollbar{display:none}
+.page{flex:0 0 100%;min-width:100%;scroll-snap-align:start;padding-top:2px}
+
+/* 간밤의 증시 — 신호등 · 지표명 · 값 · 등락(포인트/%) */
+.night .r{display:flex;align-items:center;gap:10px;padding:11px 0;
+  border-bottom:1px solid var(--rule)}
+.night .sig{flex:0 0 7px;width:7px;height:7px;border-radius:50%;
+  background:var(--rule)}
+.night .sig.on{background:var(--live)}
+.night .sig.off{background:var(--up)}
+.night .nm{flex:1;min-width:0;font-family:'Noto Serif KR',serif;font-size:14px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.night .v{flex:0 0 auto;font-size:14.5px}
+.night .c{flex:0 0 92px;text-align:right;font-size:11.5px;line-height:1.35}
+.night .c s{display:block;text-decoration:none;font-size:12.5px}
+
+/* 헤드라인 — 순위 · 제목 · (언론사 · 몇 곳이 썼는지) */
+.head5 a{display:flex;align-items:flex-start;gap:10px;padding:10px 0;
+  border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink)}
+.head5 a:visited .t{color:var(--ink-muted)}
+.head5 .no{flex:0 0 14px;font-size:11.5px;color:var(--ink-muted);padding-top:2px}
+.head5 .in{flex:1;min-width:0}
+.head5 .t{font-size:13.5px;line-height:1.45;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.head5 .m{display:block;font-size:11px;color:var(--ink-muted);margin-top:3px}
+
+/* 주요 지표 — 한 차트에 다섯 선. 자릿수가 달라 100 으로 맞추고, 값은 선 끝에 */
+#today h2{padding:14px 0 2px}
+#trend{position:relative;height:clamp(170px,34dvh,300px)}
+/* 선 끝의 값표. 눈금은 다섯 지표 공통으로 '창 시작 대비 %' 를 적고,
+   **진짜 값은 선 끝에** 붙인다. 상자를 두르지 않고 종이색 바탕에 글자만. */
+#trend-tags{position:absolute;top:0;bottom:0;right:56px;width:0;
+  pointer-events:none;z-index:2}
+.tend{position:absolute;right:0;transform:translateY(-50%);
+  font-family:'IBM Plex Mono','Pretendard',monospace;font-variant-numeric:tabular-nums;
+  font-weight:400;font-size:10.5px;line-height:1.4;padding:0 2px;
+  background:var(--paper);white-space:nowrap;pointer-events:none}
+.tlg{display:flex;flex-wrap:wrap;gap:4px 14px;padding:8px 0 0;font-size:11.5px}
+.tlg span{color:var(--ink-muted);white-space:nowrap}
+.tlg i{display:inline-block;width:13px;height:3px;vertical-align:middle;
+  margin-right:5px}
+.tlg b{font-weight:400;color:var(--ink);
+  font-family:'IBM Plex Mono','Pretendard',monospace;
+  font-variant-numeric:tabular-nums;margin-left:4px}
 
 /* 큰 숫자는 셋. 나머지는 아래 괘선 위 작은 글씨로. */
 .figs{display:flex;gap:24px;padding:14px 0 12px;border-top:1px solid var(--rule)}
@@ -335,11 +393,22 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <a class="last" href="stocks.html">종목 실적 ›</a>
   </nav>
 
-  <!-- 1면 — 고른 지수가 어디쯤인가. -->
+  <!-- 1면 — 증시 현황판. 세 장을 탭이나 손짓으로 넘긴다.
+       지수 차트는 머리의 지수를 누르면 아래에서 올라온다. -->
   <section id="today">
-    <div class="legend" id="legend"></div>
-    <div id="chart"></div>
-    <div class="figs" id="figs"></div>
+    <h2 class="board-h"><span class="no">一</span>증시 현황판<span class="note"
+      id="board-note"></span></h2>
+    <div class="board">
+      <div class="tabs sm" id="board-tabs"></div>
+      <div class="pages" id="board-pages">
+        <div class="page" id="bp-night"><div class="night" id="night"></div>
+          <div class="why" id="night-why"></div></div>
+        <div class="page" id="bp-head"><div class="head5" id="head5"></div>
+          <div class="why" id="head-why"></div></div>
+        <div class="page" id="bp-trend"><div id="trend"><div id="trend-tags"></div></div>
+          <div class="tlg" id="trend-legend"></div></div>
+      </div>
+    </div>
   </section>
 
   <section id="strong">
@@ -419,7 +488,7 @@ var MAS = [[20, '--ma20'], [60, '--ma60'], [120, '--ma120']];
 // =============================================================================
 // 지수 — 봉차트 + 이동평균
 // =============================================================================
-var DATA = null, NAMES = [], CUR = null, chart = null, ro = null;
+var DATA = null, NAMES = [];
 
 function toTime(s){
   return {year:+s.slice(0,4), month:+s.slice(4,6), day:+s.slice(6,8)};
@@ -439,96 +508,48 @@ function sma(rows, w){
   return out;
 }
 
-/* 해외 지수는 종가만 온다. 봉을 그릴 수 없으니 선으로 그리고 그렇다고 적는다. */
-function drawWorld(s){
-  var el = $('chart');
-  if (chart){ chart.remove(); chart = null; }
-  el.innerHTML = '';
-  $('figs').innerHTML =
-    fig('종가', num(s.last, 2), '') +
-    fig('전일 대비', s.chg === null ? '–' : signed(s.chg, 2) + '%', cls(s.chg));
-  if (!window.LightweightCharts || (s.points || []).length < 2) return;
+/* 지수 차트를 세 군데(1면 장 · 종목 장 · 지수 장)에서 같은 모양으로 만든다.
+   설정을 복사해 두면 한 곳만 고치고 나머지는 옛 설정으로 남는다 — 실제로
+   세로 손짓 잠금을 넣을 때 한 군데를 빠뜨렸다. */
+function mkChart(el){
   var muted = cssVar('--ink-muted'), rule = cssVar('--rule');
-  chart = LightweightCharts.createChart(el, {
+  return LightweightCharts.createChart(el, {
     width: el.clientWidth, height: el.clientHeight,
     layout: {background:{color:'transparent'}, textColor: muted,
              fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
     grid: {vertLines:{visible:false}, horzLines:{color: rule}},
     rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
     crosshair:{mode:1},
-  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
-  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
-  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
-                 pressedMouseMove: true, mouseWheel: true},
-  handleScale: {pinch: true, mouseWheel: true,
-                axisPressedMouseMove: {time: true, price: false},
-                axisDoubleClickReset: true},
+    // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
+    // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
+    handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
+                   pressedMouseMove: true, mouseWheel: true},
+    handleScale: {pinch: true, mouseWheel: true,
+                  axisPressedMouseMove: {time: true, price: false},
+                  axisDoubleClickReset: true},
   });
-  chart.addLineSeries({color: cssVar('--accent'), lineWidth:2,
-    priceLineVisible:false}).setData(s.points.map(function(p){
-      return {time: toTime(p[0]), value: p[1]}; }));
-  if (ro) ro.disconnect();
-  ro = new ResizeObserver(function(){
-    if (chart) chart.applyOptions({width: el.clientWidth, height: el.clientHeight});
-  });
-  ro.observe(el);
 }
 
-function draw(name){
-  CUR = name;
-  renderTabs();
-  var w = worldOf(name);
-  if (w) return drawWorld(w);
-  var series = (DATA.series || {})[name] || {};
-  var rows = Object.keys(series).sort().map(function(d){
-    var b = bar(series[d]);
-    return {time: toTime(d), open:b.o, high:b.h, low:b.l, close:b.c};
+/* 지수의 봉을 [날짜,시,고,저,종] 배열로. 종목 일봉과 같은 모양이라
+   주봉·월봉 묶기(group)를 그대로 쓸 수 있다. */
+function idxBars(name){
+  var s = (DATA && DATA.series || {})[name] || {};
+  return Object.keys(s).sort().map(function(d){
+    var b = bar(s[d]);
+    return [d, b.o, b.h, b.l, b.c];
   });
-  if (chart){ chart.remove(); chart = null; }
-  var el = $('chart'); el.innerHTML = '';
-  renderNumbers(name);
-  if (!window.LightweightCharts || rows.length < 2) return;
+}
 
-  var muted = cssVar('--ink-muted'), rule = cssVar('--rule');
-  chart = LightweightCharts.createChart(el, {
-    width: el.clientWidth, height: el.clientHeight,
-    layout: {background:{color:'transparent'}, textColor: muted,
-             fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
-    grid: {vertLines:{visible:false}, horzLines:{color: rule}},
-    rightPriceScale: {borderColor: rule},
-    timeScale: {borderColor: rule},
-    crosshair: {mode: 1},
-    // 손으로 밀고 확대할 수 있어야 한다. 잠가두면 차트가 그림이 된다.
-  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
-  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
-  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
-                 pressedMouseMove: true, mouseWheel: true},
-  handleScale: {pinch: true, mouseWheel: true,
-                axisPressedMouseMove: {time: true, price: false},
-                axisDoubleClickReset: true},
-  });
-  var cs = chart.addCandlestickSeries({
-    upColor: cssVar('--up'), downColor: cssVar('--down'),
-    borderUpColor: cssVar('--up'), borderDownColor: cssVar('--down'),
-    wickUpColor: cssVar('--up'), wickDownColor: cssVar('--down'),
-  });
-  cs.setData(rows);
-  MAS.forEach(function(p){
-    var data = sma(rows, p[0]);
-    if (data.length < 2) return;
-    chart.addLineSeries({color: cssVar(p[1]), lineWidth:2,
-      priceLineVisible:false, lastValueVisible:false,
-      crosshairMarkerVisible:false}).setData(data);
-  });
-  // 최근 120거래일만 먼저 보여준다. 3년을 다 펼치면 봉이 실선으로 뭉갠다.
-  chart.timeScale().setVisibleLogicalRange(
-    {from: Math.max(0, rows.length - 120), to: rows.length + 2});
-
-  if (ro) ro.disconnect();
-  ro = new ResizeObserver(function(){
-    if (chart) chart.applyOptions({width: el.clientWidth, height: el.clientHeight});
-  });
-  ro.observe(el);
+/* 날짜와 출처만 적는다. 예전에는 여기서 차트도 그렸는데, 1면이 현황판이 되면서
+   차트는 지수를 눌렀을 때 올라오는 장으로 옮겼다. */
+function renderMeta(){
+  var r = (DATA && (DATA.computed || DATA)) || {};
+  if (!r.as_of) return;
+  $('masthead-date').textContent = ymd(r.as_of);
+  $('foot').innerHTML =
+    '<span class="num">' + ymd(r.as_of) + '</span> 종가 기준' +
+    (r.source ? ' · ' + esc(r.source) : '') +
+    '<span style="margin-left:auto">차트: TradingView Lightweight Charts\u2122</span>';
 }
 
 // =============================================================================
@@ -569,22 +590,11 @@ function strip(){
 
 function renderStrip(){
   $('idx').innerHTML = strip().map(function(s){
-    return '<button data-k="' + esc(s.key) + '"' +
-      (s.key === CUR ? ' class="on"' : '') + '><div class="k">' + esc(s.name) +
+    return '<button data-k="' + esc(s.key) + '"><div class="k">' + esc(s.name) +
       '</div><div class="v num">' + num(s.last, 2) + '</div>' +
       '<div class="c num ' + cls(s.chg) + '">' +
       (s.chg === null ? '–' : signed(s.chg, 2) + '%') + '</div></button>';
   }).join('');
-}
-
-function renderTabs(){
-  renderStrip();
-  $('legend').innerHTML = worldOf(CUR)
-    ? '<span>' + esc(worldOf(CUR).note || '') + ' · ' +
-      ymd(worldOf(CUR).date) + ' 기준 — 우리 장보다 하루 늦게 옵니다</span>'
-    : MAS.map(function(p){
-        return '<span><i style="background:var(' + p[1] + ')"></i>' + p[0] +
-               '일선</span>'; }).join('');
 }
 
 function fig(k, v, c, unit){
@@ -593,31 +603,228 @@ function fig(k, v, c, unit){
     '</div></div>';
 }
 
-function renderNumbers(name){
-  var r = DATA.computed || DATA;
-  var d = r.indices[name];
-  // 차트 아래에는 둘만 둔다. 백분위·밴드·추세를 같이 늘어놓으면 눈이 어디로
-  // 갈지 정해지지 않는다.
-  $('figs').innerHTML =
-    fig('종가', num(d.close, 2), '') +
-    fig('20일선 이격도', signed(d.disparity, 2) + '%', cls(d.disparity));
-
-  var a = r.as_of;
-  $('masthead-date').textContent = ymd(a);
-  $('foot').innerHTML =
-    '<span class="num">' + ymd(a) + '</span> 종가 기준' +
-    (r.source ? ' · ' + esc(r.source) : '') +
-    '<span style="margin-left:auto">차트: TradingView Lightweight Charts™</span>';
-}
-
+/* 지수를 누르면 그 지수의 차트가 아래에서 올라온다. 1면에 붙박이로 두면
+   현황판 자리가 없고, 아주 없애면 이 앱에서 제일 오래 보던 그림이 사라진다. */
 $('idx').addEventListener('click', function(e){
   var b = e.target.closest('button');
-  if (b && b.dataset.k !== CUR) draw(b.dataset.k);
+  if (b) openIdxSheet(b.dataset.k);
 });
 
 // =============================================================================
-// 조건에 걸린 종목
+// 증시 현황판 — 1면. 세 장을 탭이나 손짓으로 넘긴다.
+//
+//   간밤의 증시 · 헤드라인 뉴스 · 주요 지표
+//
+// 넘기기는 가로 스크롤 스냅으로 만든다. 손짓을 자바스크립트로 흉내내면
+// 관성·되돌림·경계 처리를 전부 다시 만들어야 하고, 그렇게 만든 것은 늘
+// 브라우저가 해 주는 것보다 뻑뻑하다.
 // =============================================================================
+var BOARD = null, HEAD = null, BPAGE = 0;
+var BTABS = ['간밤의 증시', '헤드라인 뉴스', '주요 지표'];
+var tchart = null, tro = null;
+var TCOLORS = ['--t1', '--t2', '--t3', '--t4', '--t5'];
+
+function renderBoardTabs(){
+  $('board-tabs').innerHTML = BTABS.map(function(n, i){
+    return '<button class="tab' + (i === BPAGE ? ' on' : '') + '" data-i="' +
+      i + '">' + n + '</button>'; }).join('');
+}
+$('board-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (!b) return;
+  var box = $('board-pages');
+  box.scrollTo({left: box.clientWidth * (+b.dataset.i), behavior: 'smooth'});
+});
+$('board-pages').addEventListener('scroll', function(){
+  var box = $('board-pages');
+  var i = Math.round(box.scrollLeft / Math.max(1, box.clientWidth));
+  if (i === BPAGE) return;
+  BPAGE = i;
+  renderBoardTabs();
+  // 숨어 있는 동안 차트의 폭이 0 이라 눈금이 뭉개진다. 그 장에 닿으면 다시 그린다.
+  if (i === 2) drawTrend();
+});
+renderBoardTabs();
+
+/* 장이 열려 있는지는 **파일이 아니라 시계로** 정한다. 하루 한 번 받은 파일에
+   '지금 장중'을 적어 두면 그 문장은 받은 순간부터 거짓말이 된다.
+   다만 휴장일(추수감사절·성탄절·임시휴장)까지는 알지 못한다. 그래서 아래에
+   '정규장 시간으로만 본다'고 적어 둔다. */
+function tzNow(tz){
+  var p = {};
+  new Intl.DateTimeFormat('en-US', {timeZone: tz, hour12: false,
+    weekday: 'short', hour: '2-digit', minute: '2-digit'})
+    .formatToParts(new Date()).forEach(function(x){ p[x.type] = x.value; });
+  return {wd: p.weekday, min: (+p.hour % 24) * 60 + (+p.minute)};
+}
+function isOpen(market){
+  try {
+    if (market === 'US'){
+      var t = tzNow('America/New_York');           // 서머타임은 시간대가 처리한다
+      if (t.wd === 'Sat' || t.wd === 'Sun') return false;
+      return t.min >= 570 && t.min < 960;          // 09:30 ~ 16:00
+    }
+    if (market === 'KR_NIGHT'){
+      var k = tzNow('Asia/Seoul');
+      if (k.wd === 'Sun') return false;
+      if (k.wd === 'Sat') return k.min < 300;      // 금요일 밤의 꼬리
+      if (k.wd === 'Mon') return k.min >= 1080;    // 월요일 새벽은 없다
+      return k.min >= 1080 || k.min < 300;         // 18:00 ~ 이튿날 05:00
+    }
+  } catch (e){ return null; }
+  return null;
+}
+
+/* UTC 로 적힌 시각을 한국 시각 HH:MM 으로. */
+function hhmm(iso){
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('ko-KR', {timeZone:'Asia/Seoul',
+    hour:'2-digit', minute:'2-digit', hour12:false}).format(d);
+}
+
+function renderNight(){
+  var rows = (BOARD && BOARD.night) || [];
+  if (!rows.length){
+    $('night').innerHTML = '<div class="miss">간밤의 증시를 받지 못했습니다.</div>';
+    return;
+  }
+  $('night').innerHTML = rows.map(function(s){
+    var op = isOpen(s.market);
+    return '<div class="r"><span class="sig' +
+      (op === null ? '' : op ? ' on' : ' off') + '"></span>' +
+      '<span class="nm">' + esc(s.name) + '</span>' +
+      '<span class="v num">' + (s.last == null ? '–' : num(s.last, 2)) + '</span>' +
+      '<span class="c num ' + cls(s.rate) + '">' +
+      '<s>' + (s.diff == null ? '–' : signed(s.diff, 2)) + '</s>' +
+      (s.rate == null ? '–' : signed(s.rate, 2) + '%') + '</span></div>';
+  }).join('');
+  var miss = rows.filter(function(s){ return s.last == null; })
+                 .map(function(s){ return s.name; });
+  $('night-why').textContent =
+    '왼쪽 점은 정규장 시간으로만 본 것입니다 — 휴장일은 가려내지 못합니다.' +
+    (miss.length ? ' 비워 둔 칸: ' + miss.join(', ') +
+      ' — 받을 곳을 아직 찾지 못했습니다.' : '');
+}
+
+function renderHead(){
+  if (!HEAD){
+    $('head5').innerHTML = '<div class="miss">헤드라인을 불러오는 중입니다…</div>';
+    return;
+  }
+  var rank = HEAD.rank || [];
+  if (!rank.length){
+    $('head5').innerHTML = '<div class="miss">헤드라인을 받지 못했습니다.</div>';
+    $('head-why').textContent = '';
+    return;
+  }
+  $('head5').innerHTML = rank.map(function(r, i){
+    var meta = [r.office, r.at ? r.at.slice(5, 16) : '',
+                r.n + '곳이 같은 주제로 씀'].filter(Boolean).join(' · ');
+    return '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">' +
+      '<span class="no num">' + (i + 1) + '</span><span class="in">' +
+      '<span class="t">' + esc(r.title) + '</span>' +
+      '<span class="m">' + esc(meta) + '</span></span></a>';
+  }).join('');
+  $('head-why').textContent = '같은 주제로 나온 기사 수 순입니다 (표본 ' +
+    (HEAD.pool || 0) + '건). 보여 주는 기사는 그 주제에서 본문이 가장 긴 것입니다.' +
+    (HEAD.fetched_at ? ' ' + hhmm(HEAD.fetched_at) + ' 집계.' : '');
+}
+
+/* 다섯 지표를 한 차트에. 1,460원과 84달러와 1억 원을 같은 눈금에 올릴 수는
+   없으니 각자 창 첫날을 100 으로 맞춘다.
+
+   그러면 **눈금에 뭐라고 적을지**가 문제가 된다. 계열마다 제 단위로 적게 하면
+   그리는 눈금선은 하나뿐이라 첫 계열의 자로 전부 읽히고, 실제로 '1,805.8' 같은
+   아무 뜻 없는 숫자가 눈금에 찍혔다. 다섯이 함께 뜻을 갖는 자는 하나뿐이다 —
+   **창 시작 대비 몇 %.** 눈금은 그렇게 적고, 진짜 값은 선 끝에 붙인다. */
+var TSER = [];
+
+function tagFmt(s){
+  return num(s.points[s.points.length - 1][1], s.digits == null ? 2 : s.digits);
+}
+
+/* 선 끝의 값표. 선이 겹치면 글자도 겹치므로 아래로 밀어 떼어 놓는다. */
+function placeTrendTags(){
+  var box = $('trend-tags'), el = $('trend');
+  if (!box || !tchart || !TSER.length) return;
+  // 값표는 **그림 영역 안**의 오른쪽 끝에 붙인다. 컨테이너 오른쪽에 붙이면
+  // 눈금(%)이 적히는 자리를 덮어써서 두 숫자가 겹쳐 읽힌다.
+  var pw = 56;
+  try { pw = tchart.priceScale('right').width() || pw; } catch (e){}
+  box.style.right = (pw + 3) + 'px';
+  var h = el.clientHeight, GAP = 14;
+  var items = [];
+  TSER.forEach(function(t){
+    var y = t.series.priceToCoordinate(t.value);
+    if (y === null || y === undefined) return;
+    items.push({y: y, txt: tagFmt(t.spec), c: t.color});
+  });
+  if (!items.length){ box.innerHTML = ''; return; }
+  items.sort(function(a, b){ return a.y - b.y; });
+  var prev = -1e6;
+  items.forEach(function(x){
+    if (x.y < prev + GAP) x.y = prev + GAP;
+    prev = x.y;
+  });
+  var over = items[items.length - 1].y - (h - 7);
+  if (over > 0) items.forEach(function(x){ x.y -= over; });
+  box.innerHTML = items.map(function(x){
+    return '<b class="tend" style="top:' + Math.max(7, x.y).toFixed(0) +
+      'px;color:' + x.c + '">' + esc(x.txt) + '</b>'; }).join('');
+}
+
+function drawTrend(){
+  var el = $('trend');
+  if (!el || !BOARD) return;
+  if (tchart){ tchart.remove(); tchart = null; }
+  TSER = [];
+  el.innerHTML = '<div id="trend-tags"></div>';
+  var ser = (BOARD.trend || []).filter(function(s){
+    return (s.points || []).length > 1 && s.points[0][1]; });
+  if (!ser.length){
+    el.innerHTML = '<div class="miss">주요 지표를 받지 못했습니다.</div>';
+    $('trend-legend').innerHTML = '';
+    return;
+  }
+  if (!window.LightweightCharts || !el.clientWidth) return;
+  tchart = mkChart(el);
+  tchart.applyOptions({
+    localization: {priceFormatter: function(v){ return signed(v - 100, 1) + '%'; }},
+  });
+  ser.forEach(function(s, i){
+    var base = s.points[0][1];
+    var color = cssVar(TCOLORS[i % TCOLORS.length]);
+    var line = tchart.addLineSeries({color: color, lineWidth: 2,
+      priceLineVisible: false, lastValueVisible: false});
+    line.setData(s.points.map(function(p){
+      return {time: toTime(p[0]), value: p[1] / base * 100}; }));
+    TSER.push({spec: s, series: line, color: color,
+               value: s.points[s.points.length - 1][1] / base * 100});
+  });
+  tchart.timeScale().subscribeVisibleLogicalRangeChange(placeTrendTags);
+  requestAnimationFrame(placeTrendTags);
+
+  $('trend-legend').innerHTML = ser.map(function(s, i){
+    return '<span><i style="background:var(' + TCOLORS[i % TCOLORS.length] +
+      ')"></i>' + esc(s.name) + '<b>' + tagFmt(s) + esc(s.unit || '') +
+      '</b></span>'; }).join('');
+  if (tro) tro.disconnect();
+  tro = new ResizeObserver(function(){
+    if (!tchart) return;
+    tchart.applyOptions({width: el.clientWidth, height: el.clientHeight});
+    placeTrendTags();
+  });
+  tro.observe(el);
+}
+
+function renderBoard(){
+  renderNight();
+  drawTrend();
+  $('board-note').textContent = BOARD && BOARD.fetched_at
+    ? hhmm(BOARD.fetched_at) + ' 기준' : '';
+}
+
 // =============================================================================
 // 캘린더 — 실적 마감과 통화정책 회의
 // =============================================================================
@@ -1222,6 +1429,8 @@ $('strong-list').addEventListener('click', function(e){
 // =============================================================================
 var schart = null, sro = null, PX = null, SNEWS = null;
 var SCODE = null, SFREQ = '일';
+// 이 장이 종목인지 지수인지. 봉 주기 탭이 어느 쪽을 다시 그릴지 여기서 갈린다.
+var SKIND = 'stock', SIDX = null;
 
 function kv(k, v){
   return '<div><span>' + k + '</span><b class="num" style="font-weight:400">' +
@@ -1263,6 +1472,48 @@ function group(bars, mode){
   return out;
 }
 
+/* 봉과 이동평균 세 개. 종목 장과 지수 장이 같은 그림이어야 하므로 한 곳에 둔다. */
+function drawCandles(el, bars, freq, shortNote){
+  schart = mkChart(el);
+  schart.addCandlestickSeries({
+    upColor: cssVar('--up'), downColor: cssVar('--down'),
+    borderUpColor: cssVar('--up'), borderDownColor: cssVar('--down'),
+    wickUpColor: cssVar('--up'), wickDownColor: cssVar('--down'),
+  }).setData(bars);
+
+  // 안 그려진 선을 범례에 남겨두면 없는 것을 있다고 적는 셈이라 뺀다.
+  var drawn = [];
+  MAS.forEach(function(pair){
+    var data = sma(bars, pair[0]);
+    if (data.length < 2) return;
+    schart.addLineSeries({color: cssVar(pair[1]), lineWidth:2,
+      priceLineVisible:false, lastValueVisible:false,
+      crosshairMarkerVisible:false}).setData(data);
+    drawn.push(pair);
+  });
+  $('sheet-legend').innerHTML = drawn.map(function(pair){
+    return '<span><i style="background:var(' + pair[1] + ')"></i>' + pair[0] +
+      freq + '선</span>'; }).join('') +
+    (drawn.length < MAS.length && shortNote
+      ? '<span>' + shortNote + '</span>' : '');
+
+  schart.timeScale().setVisibleLogicalRange(
+    {from: Math.max(0, bars.length - 120), to: bars.length + 2});
+}
+
+function watchSheet(el){
+  if (sro) sro.disconnect();
+  sro = new ResizeObserver(function(){
+    if (schart) schart.applyOptions({width: el.clientWidth,
+                                     height: el.clientHeight}); });
+  sro.observe(el);
+}
+
+/* 지금 열려 있는 장이 종목인지 지수인지. 봉 주기 탭이 어느 쪽을 다시 그릴지 정한다. */
+function drawSheet(){
+  return SKIND === 'index' ? drawIdxChart() : drawSheetChart();
+}
+
 function drawSheetChart(){
   var el = $('sheet-chart');
   if (!el) return;
@@ -1280,53 +1531,37 @@ function drawSheetChart(){
     return {time: toTime(b[0]), open: b[1], high: b[2], low: b[3], close: b[4]};
   });
   if (!window.LightweightCharts || bars.length < 2) return;
+  drawCandles(el, bars, SFREQ, '자료가 1년치라 긴 선은 안 그려집니다');
+  watchSheet(el);
+}
 
-  var muted = cssVar('--ink-muted'), rule = cssVar('--rule');
-  schart = LightweightCharts.createChart(el, {
-    width: el.clientWidth, height: el.clientHeight,
-    layout: {background:{color:'transparent'}, textColor: muted,
-             fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
-    grid: {vertLines:{visible:false}, horzLines:{color: rule}},
-    rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
-    crosshair:{mode:1},
-  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
-  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
-  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
-                 pressedMouseMove: true, mouseWheel: true},
-  handleScale: {pinch: true, mouseWheel: true,
-                axisPressedMouseMove: {time: true, price: false},
-                axisDoubleClickReset: true},
-  });
-  schart.addCandlestickSeries({
-    upColor: cssVar('--up'), downColor: cssVar('--down'),
-    borderUpColor: cssVar('--up'), borderDownColor: cssVar('--down'),
-    wickUpColor: cssVar('--up'), wickDownColor: cssVar('--down'),
-  }).setData(bars);
-
-  // 지수 차트와 같은 세 선. 자료가 1년치라 주봉·월봉에서는 긴 선이 안 그려진다.
-  // 안 그려진 선을 범례에 남겨두면 없는 것을 있다고 적는 셈이라 뺀다.
-  var drawn = [];
-  MAS.forEach(function(pair){
-    var data = sma(bars, pair[0]);
-    if (data.length < 2) return;
-    schart.addLineSeries({color: cssVar(pair[1]), lineWidth:2,
-      priceLineVisible:false, lastValueVisible:false,
-      crosshairMarkerVisible:false}).setData(data);
-    drawn.push(pair);
-  });
-  $('sheet-legend').innerHTML = drawn.map(function(pair){
-    return '<span><i style="background:var(' + pair[1] + ')"></i>' + pair[0] +
-      SFREQ + '선</span>'; }).join('') +
-    (drawn.length < MAS.length
-      ? '<span>자료가 1년치라 긴 선은 안 그려집니다</span>' : '');
-
-  schart.timeScale().setVisibleLogicalRange(
-    {from: Math.max(0, bars.length - 120), to: bars.length + 2});
-  if (sro) sro.disconnect();
-  sro = new ResizeObserver(function(){
-    if (schart) schart.applyOptions({width: el.clientWidth, height: el.clientHeight});
-  });
-  sro.observe(el);
+/* 지수 장 — 1면에서 걷어낸 봉차트가 여기로 왔다. 머리의 지수를 누르면 열린다.
+   해외 지수는 종가만 오므로 선으로 그리고 그렇다고 적는다. */
+function drawIdxChart(){
+  var el = $('sheet-chart');
+  if (!el || !window.LightweightCharts) return;
+  if (schart){ schart.remove(); schart = null; }
+  el.innerHTML = '';
+  var w = worldOf(SIDX);
+  if (w){
+    var pts = w.points || [];
+    if (pts.length < 2){
+      el.innerHTML = '<div class="miss">그릴 자료가 없습니다.</div>';
+      return;
+    }
+    schart = mkChart(el);
+    schart.addLineSeries({color: cssVar('--accent'), lineWidth:2,
+      priceLineVisible:false}).setData(pts.map(function(p){
+        return {time: toTime(p[0]), value: p[1]}; }));
+    $('sheet-legend').innerHTML = '<span>종가</span>';
+  } else {
+    var bars = group(idxBars(SIDX), SFREQ).map(function(b){
+      return {time: toTime(b[0]), open:b[1], high:b[2], low:b[3], close:b[4]};
+    });
+    if (bars.length < 2) return;
+    drawCandles(el, bars, SFREQ, '자료가 3년치라 긴 선은 안 그려집니다');
+  }
+  watchSheet(el);
 }
 
 function sheetNews(){
@@ -1398,21 +1633,12 @@ function openSheet(code){
     'ROE 와 분기별 실적은 <a href="stocks.html" style="color:var(--accent)">' +
     '종목 실적</a>에 있습니다 (DART 공시로 만든 292종목).</div>';
 
-  $('sheet-freq').innerHTML = ['일', '주', '월'].map(function(v){
-    return '<button class="tab' + (v === SFREQ ? ' on' : '') + '" data-f="' +
-      v + '">' + v + '봉</button>'; }).join('');
-  $('sheet-freq').addEventListener('click', function(e){
-    var b = e.target.closest('.tab');
-    if (!b || b.dataset.f === SFREQ) return;
-    SFREQ = b.dataset.f;
-    $('sheet-freq').querySelectorAll('.tab').forEach(function(x){
-      x.classList.toggle('on', x.dataset.f === SFREQ); });
-    drawSheetChart();
-  });
+  SKIND = 'stock';
+  bindFreq();
 
   $('sheet').classList.add('on');
   document.body.style.overflow = 'hidden';
-  drawSheetChart();
+  drawSheet();
 
   // 일봉과 종목 뉴스는 여기서 처음 받는다. 목록만 보려고 1MB 를 먼저 받을
   // 이유가 없다. 한 번 받으면 그대로 들고 있는다.
@@ -1427,6 +1653,52 @@ function openSheet(code){
       .then(function(){
         if ($('sheet-news')) $('sheet-news').innerHTML = sheetNews(); });
   }
+}
+
+/* 일·주·월봉 탭. 종목 장과 지수 장이 같은 걸 쓴다. */
+function bindFreq(){
+  var box = $('sheet-freq');
+  if (!box) return;
+  box.innerHTML = ['일', '주', '월'].map(function(v){
+    return '<button class="tab' + (v === SFREQ ? ' on' : '') + '" data-f="' +
+      v + '">' + v + '봉</button>'; }).join('');
+  box.addEventListener('click', function(e){
+    var b = e.target.closest('.tab');
+    if (!b || b.dataset.f === SFREQ) return;
+    SFREQ = b.dataset.f;
+    box.querySelectorAll('.tab').forEach(function(x){
+      x.classList.toggle('on', x.dataset.f === SFREQ); });
+    drawSheet();
+  });
+}
+
+/* 지수 장 — 머리의 지수를 누르면 열린다. 1면에서 걷어낸 차트가 여기로 왔다. */
+function openIdxSheet(key){
+  var w = worldOf(key);
+  if (!w && idxBars(key).length < 2) return;
+  SKIND = 'index'; SIDX = key;
+  var last = w ? w.last : ((DATA.computed || DATA).indices[key] || {}).close;
+  var chg = w ? w.chg : idxChange(key);
+
+  $('sheet-card').innerHTML =
+    '<div class="top"><b>' + esc(w ? w.name : key) + '</b>' +
+    '<span class="num">' + num(last, 2) + '</span>' +
+    '<span class="num ' + cls(chg) + '">' +
+    (chg == null ? '–' : signed(chg, 2) + '%') + '</span>' +
+    '<button class="x" data-close="1">✕</button></div>' +
+    // 해외 지수는 종가만 오므로 주봉·월봉을 만들 수 없다. 탭 자체를 안 붙인다.
+    (w ? '' : '<div class="tabs sm" id="sheet-freq"></div>') +
+    '<div class="legend" id="sheet-legend"></div>' +
+    '<div class="line" id="sheet-chart"></div>' +
+    '<div class="why">' + (w
+      ? esc(w.note || '') + (w.date ? ' · ' + ymd(w.date) + ' 종가' : '') +
+        ' — 종가만 받으므로 선으로 그립니다. 우리 장보다 하루 늦게 옵니다.'
+      : '20·60·120 이동평균을 함께 그립니다.') + '</div>';
+
+  if (!w) bindFreq();
+  $('sheet').classList.add('on');
+  document.body.style.overflow = 'hidden';
+  drawSheet();
 }
 
 function closeSheet(){
@@ -1610,12 +1882,25 @@ spy();
 grab('market_signal.json').then(function(p){
   DATA = p;
   NAMES = Object.keys((p.computed || p).indices);
-  draw(NAMES[0]);
+  renderStrip();
+  renderMeta();
 }).catch(function(e){
-  $('today').innerHTML = '<div id="err">시장 신호 데이터를 불러오지 못했습니다.<br>' +
-    esc(e.message) + '<br><br>수집 워크플로가 아직 한 번도 돌지 않았을 수 있습니다.' +
-    '</div>';
+  $('idx').innerHTML = '<div id="err" style="padding:0;font-size:12px">' +
+    '지수를 불러오지 못했습니다 (' + esc(e.message) + ')</div>';
 });
+
+// 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 5분마다 따로 갱신되므로
+// 파일도 따로 받는다. 한쪽이 늦어도 다른 쪽은 그대로 나온다.
+grab('market_board.json').then(function(p){
+  BOARD = p; renderBoard();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawTrend);
+}).catch(function(){
+  $('night').innerHTML = '<div class="miss">간밤의 증시를 아직 받지 못했습니다.</div>';
+  $('trend').innerHTML = '<div class="miss">주요 지표를 아직 받지 못했습니다.</div>';
+});
+
+grab('market_headline.json').then(function(p){ HEAD = p; renderHead(); })
+  .catch(function(){ HEAD = {rank: []}; renderHead(); });
 
 grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');
