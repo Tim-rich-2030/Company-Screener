@@ -23,6 +23,9 @@ const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
                     'market_etf.json', 'market_news.json',
                     'market_theme.json', 'market_strong.json',
                     'market_world.json', 'market_stocknews.json'];
+// 종목 일봉(1MB)은 목록만 보는 사람에게는 필요 없다. 미리 받지 않되, 한 번
+// 받으면 캐시에 남겨 다음에 같은 종목을 열 때 다시 받지 않게 한다.
+const LAZY_FILES = ['market_px.json'];
 const SHELL = ['./', './index.html', './stocks.html']
                 .concat(DATA_FILES.map(f => './' + f));
 
@@ -49,7 +52,8 @@ self.addEventListener('fetch', e => {
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
                  path.endsWith('index.html') || path.endsWith('stocks.html') ||
-                 DATA_FILES.some(f => path.endsWith(f));
+                 DATA_FILES.some(f => path.endsWith(f)) ||
+                 LAZY_FILES.some(f => path.endsWith(f));
   if (isPage) {
     e.respondWith(fetch(req)
       .then(r => { const copy = r.clone();

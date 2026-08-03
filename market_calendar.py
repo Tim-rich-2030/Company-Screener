@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import sys
 import html
 import json
@@ -37,6 +38,17 @@ DOCS_PATH = os.path.join("docs", "market_calendar.json")
 FACTS_DIR = os.path.join("store", "facts")
 
 FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+# 미국 지표 발표일. 노동통계국이 한 해 일정을 한 장에 다 적어 둔다.
+BLS_URL = "https://www.bls.gov/schedule/news_release/{year}_sched.htm"
+
+# 이 넷만 가져온다. 노동통계국은 한 해 200건 넘게 내는데 대부분 지역·업종
+# 세부 통계라 캘린더가 그것으로 덮인다. 자주 회자되는 것만 남긴다.
+BLS_KEEP = [
+    ("consumer price index", "미국 소비자물가(CPI)"),
+    ("producer price index", "미국 생산자물가(PPI)"),
+    ("employment situation", "미국 고용보고서"),
+    ("job openings", "미국 구인·이직(JOLTS)"),
+]
 BOK_URL = ("https://www.bok.or.kr/portal/singl/crncyPolicyDrcMtg/listYear.do"
            "?mtgSe=A&menuNo=200755")
 
@@ -141,7 +153,26 @@ def decode(raw: bytes, declared: str = "") -> str | None:
     return None
 
 
-def fetch(url: str) -> str | None:
+def fetch(url: str, tries: int = 2) -> str | None:
+    """
+    한 번 더 두드린다.
+
+    금통위 페이지를 수집 단계에서는 못 받고, 2분 뒤 진단 단계에서는 멀쩡히
+    받은 적이 있다. 코드가 아니라 그때 한 번 안 온 것이었다. 한 번의 실패로
+    그날 일정을 통째로 비우지 않는다.
+    """
+    last = None
+    for i in range(tries):
+        try:
+            return _fetch_once(url)
+        except Exception as e:                   # noqa: BLE001
+            last = e
+            if i + 1 < tries:
+                time.sleep(1.5)
+    raise last
+
+
+def _fetch_once(url: str) -> str | None:
     r = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
     r.raise_for_status()
     m = re.search(r"charset=([\w.-]+)", r.headers.get("content-type", ""), re.I)
@@ -248,6 +279,61 @@ def bok_dates(today: dt.date) -> list:
              "dday": (d - today).days} for d in keep]
 
 
+US_DATE = re.compile(
+    r"(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{1,2}),?\s+(20\d{2})", re.I)
+
+
+def bls_dates(today: dt.date) -> list:
+    """
+    미국 지표 발표일 — 소비자물가·생산자물가·고용보고서·구인이직.
+
+    노동통계국이 한 해 일정을 한 장에 적어 둔다. 표 구조를 짐작하지 않고,
+    줄마다 글자를 이어 붙여 '월 일, 연도' 와 이름을 함께 찾는다. 이름이
+    우리가 고른 넷에 안 걸리면 버린다.
+
+    발표 시각은 미국 동부시간이라 한국에서는 대개 그날 밤이다. 시각까지
+    옮기면 시차를 잘못 적을 수 있어 날짜만 쓴다.
+    """
+    out = []
+    for year in (today.year, today.year + 1):
+        try:
+            doc = fetch(BLS_URL.format(year=year))
+        except Exception as e:                   # noqa: BLE001
+            log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
+            continue
+        if not doc:
+            continue
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S) or [doc]
+        for row in rows:
+            text = strip_tags(row)
+            low = text.lower()
+            name = next((ko for key, ko in BLS_KEEP if key in low), None)
+            if not name:
+                continue
+            m = US_DATE.search(text)
+            if not m:
+                continue
+            try:
+                d = dt.date(int(m.group(3)), MONTHS[m.group(1).capitalize()],
+                            int(m.group(2)))
+            except (ValueError, KeyError):
+                continue
+            out.append({"date": d.strftime("%Y%m%d"), "name": name,
+                        "dday": (d - today).days})
+    # 같은 발표가 여러 줄에 걸릴 수 있다. 날짜+이름으로 한 번만 남긴다.
+    seen, uniq = set(), []
+    for e in sorted(out, key=lambda e: e["date"]):
+        key = (e["date"], e["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(e)
+    if not uniq:
+        log("::warning::미국 지표 일정을 하나도 읽지 못했습니다")
+    return uniq
+
+
 def upcoming(events: list, today: dt.date, back: int = 1, ahead: int = 3) -> list:
     """지난 것 하나와 다가올 것 몇 개만. 연간 일정을 다 보여줄 이유가 없다."""
     past = [e for e in events if e["dday"] < 0][-back:]
@@ -263,14 +349,20 @@ def collect(today: dt.date = None) -> dict:
 
     fomc = fomc_dates(today)
     bok = bok_dates(today)
+    bls = bls_dates(today)
     failed = []
     if not fomc:
         failed.append("FOMC")
     if not bok:
         failed.append("금통위")
-    log(f"  FOMC {len(fomc)}건 · 금통위 {len(bok)}건")
+    if not bls:
+        failed.append("미국 지표")
+    log(f"  FOMC {len(fomc)}건 · 금통위 {len(bok)}건 · 미국 지표 {len(bls)}건")
 
-    events = sorted(upcoming(fomc, today) + upcoming(bok, today),
+    # 미국 지표는 종류마다 매달 한 번씩이라 앞뒤로 넉넉히 담는다. 화면이
+    # 월별로 펼쳐 보는 용도라 서너 건만 남기면 달력이 텅 빈다.
+    events = sorted(upcoming(fomc, today) + upcoming(bok, today) +
+                    upcoming(bls, today, back=2, ahead=14),
                     key=lambda e: e["date"])
     return {
         "as_of": today.strftime("%Y%m%d"),
@@ -290,7 +382,8 @@ def save(payload: dict) -> None:
 
 
 def dump() -> int:
-    for name, url in (("FOMC", FOMC_URL), ("금통위", BOK_URL)):
+    for name, url in (("FOMC", FOMC_URL), ("금통위", BOK_URL),
+                      ("미국 지표", BLS_URL.format(year=dt.date.today().year))):
         log(f"\n===== {name} {url} =====")
         try:
             doc = fetch(url)
