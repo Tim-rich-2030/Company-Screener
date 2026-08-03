@@ -9,6 +9,8 @@
 """
 import os
 import sys
+import json
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -98,6 +100,62 @@ def test_screen_ranks_by_pbr_over_roe_and_states_the_rule():
     for key, _, _ in screen.RULES:
         assert key in out["rule"], f"조건 문구에 {key} 가 빠졌다: {out['rule']}"
     print("test_screen_ranks_by_pbr_over_roe_and_states_the_rule: OK")
+
+
+def _hist(tmp, day, *codes):
+    """그날 걸린 종목을 기록하고 changed 를 돌려준다."""
+    p = {"items": [{"code": c, "name": "이름" + c} for c in codes]}
+    return screen.record(p, day, tmp)["changed"]
+
+
+def test_picks_first_run_says_it_has_nothing_to_compare():
+    """
+    견줄 기록이 없는 것과 '안 바뀐 것'은 다른 말이다.
+
+    첫 실행에서 '어제와 같습니다'라고 적으면 거짓말이 된다. 그래서 None 을
+    돌려주고, 화면은 그 경우 비교 문구 대신 없다고 적는다.
+    """
+    d = tempfile.mkdtemp()
+    eq(_hist(os.path.join(d, "h.json"), "20260801", "1", "2"), None,
+       "첫 실행은 견줄 것이 없다")
+    print("test_picks_first_run_says_it_has_nothing_to_compare: OK")
+
+
+def test_picks_diff_against_the_previous_collection_day():
+    d = os.path.join(tempfile.mkdtemp(), "h.json")
+    _hist(d, "20260801", "1", "2")
+    c = _hist(d, "20260802", "2", "3")
+    eq(c["since"], "20260801", "견준 날")
+    eq([x["code"] for x in c["new"]], ["3"], "새로 들어온 것")
+    eq([x["code"] for x in c["gone"]], ["1"], "빠진 것")
+    eq(_hist(d, "20260803", "2", "3")["new"], [], "그대로면 빈 목록")
+    print("test_picks_diff_against_the_previous_collection_day: OK")
+
+
+def test_picks_rerun_on_the_same_day_compares_with_the_day_before():
+    """
+    하루에 두 번 돌 수 있다. 그때 오늘 것끼리 견주면 아침에 들어온 종목이
+    오후 실행에서 조용히 사라진다. 같은 날이면 그 **전날**과 견딘다.
+    """
+    d = os.path.join(tempfile.mkdtemp(), "h.json")
+    _hist(d, "20260801", "1", "2")
+    _hist(d, "20260802", "2", "3")
+    c = _hist(d, "20260802", "2", "3", "4")       # 같은 날 두 번째
+    eq(c["since"], "20260801", "전날과 견준다")
+    eq(sorted(x["code"] for x in c["new"]), ["3", "4"], "아침 것도 남아 있다")
+    print("test_picks_rerun_on_the_same_day_compares_with_the_day_before: OK")
+
+
+def test_picks_history_survives_a_broken_file_and_stays_bounded():
+    d = os.path.join(tempfile.mkdtemp(), "h.json")
+    with open(d, "w", encoding="utf-8") as f:
+        f.write("{망가진 파일")
+    eq(_hist(d, "20260801", "1"), None, "깨진 기록은 없는 것과 같이 다룬다")
+    for i in range(screen.KEEP_DAYS + 5):
+        _hist(d, "2026%04d" % (1000 + i), "1")
+    with open(d, encoding="utf-8") as f:
+        eq(len(json.load(f)["days"]), screen.KEEP_DAYS, "기록이 무한정 늘지 않는다")
+    print("test_picks_history_survives_a_broken_file_and_stays_bounded: OK")
 
 
 # =============================================================================
@@ -842,6 +900,10 @@ if __name__ == "__main__":
     test_screen_drops_unknown_values()
     test_screen_excludes_foreign_currency_and_halted()
     test_screen_ranks_by_pbr_over_roe_and_states_the_rule()
+    test_picks_first_run_says_it_has_nothing_to_compare()
+    test_picks_diff_against_the_previous_collection_day()
+    test_picks_rerun_on_the_same_day_compares_with_the_day_before()
+    test_picks_history_survives_a_broken_file_and_stays_bounded()
     test_sector_change_is_cap_weighted()
     test_tiles_are_cut_per_market_but_aggregates_are_not()
     test_collect_excludes_and_counts_why()

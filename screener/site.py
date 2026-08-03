@@ -463,7 +463,10 @@ def build(out_dir: str = None) -> str:
         fp.write(doc)
     # 첫 화면이 읽어갈 "조건에 걸린 종목" 목록. 방금 계산한 지표를 다시 쓰므로
     # 새로 수집하는 것은 없다.
-    screen.save(screen.build(data, all_q[0] if all_q else ""), out_dir)
+    # record 는 직전 수집일 목록과 견줘 신규·이탈을 적고 오늘 목록을 store/ 에
+    # 남긴다. 첫 화면의 '어제와 같은가'가 여기서 나온다.
+    screen.save(screen.record(screen.build(data, all_q[0] if all_q else "")),
+                out_dir)
     # Pages가 _로 시작하는 경로를 Jekyll로 처리하지 않게 한다
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
     # 서비스워커 캐시 이름은 페이지 내용의 해시로 짓는다. 시각을 쓰면 안 된다 —
@@ -474,16 +477,19 @@ def build(out_dir: str = None) -> str:
     return path
 
 
+# 홈 화면에 뜨는 이름과 첫 배경색. 첫 화면이 시장 쪽으로 옮겨 간 뒤에도
+# 이름이 '코스피 분기 실적 시계열' 로 남아 있었고, 색은 옛 어두운 화면의
+# #0f1115 였다. 지금 종이색과 달라 앱을 열 때 검은 판이 한 번 깜빡인다.
 MANIFEST = {
-    "name": "코스피 분기 실적 시계열",
-    "short_name": "코스피 실적",
-    "description": "DART 공시로 만든 분기별 실적·PBR·PER 시계열",
+    "name": "꾸중부자",
+    "short_name": "꾸중부자",
+    "description": "지수·업종·종목을 하루 한 장으로 보는 시장 기록",
     "start_url": ".",
     "scope": ".",
     "display": "standalone",
     "orientation": "portrait",
-    "background_color": "#0f1115",
-    "theme_color": "#0f1115",
+    "background_color": "#F5F2EC",
+    "theme_color": "#F5F2EC",
     "lang": "ko",
     "icons": [
         {"src": "icon-192.png", "sizes": "192x192", "type": "image/png",
