@@ -16,6 +16,7 @@ from screener import screen
 import market_tree as mt
 import market_news as mn
 import market_flags
+import market_calendar as mc
 
 
 def eq(got, want, what):
@@ -440,6 +441,70 @@ def test_tree_backs_off_to_the_last_trading_day():
     print("test_tree_backs_off_to_the_last_trading_day: OK")
 
 
+# =============================================================================
+# 캘린더
+# =============================================================================
+
+def test_report_deadlines_follow_the_law():
+    """
+    분기·반기보고서는 기간 종료 후 45일, 사업보고서는 90일 (자본시장법 제160조).
+    받아오는 것이 아니라 계산이므로 손으로 검산할 수 있다.
+    """
+    import datetime as dt
+    rows = {r["period"]: r for r in mc.periods(dt.date(2026, 8, 3))}
+    eq(rows["2026년 반기"]["deadline"], "20260814", "6/30 + 45일")
+    eq(rows["2026년 반기"]["dday"], 11, "8/3 기준 11일 남음")
+    eq(rows["2026년 3분기"]["deadline"], "20261114", "9/30 + 45일")
+    eq(rows["2025년 사업보고서"]["deadline"], "20260331", "12/31 + 90일")
+    eq(rows["2026년 1분기"]["dday"], -80, "이미 지난 마감은 음수")
+    print("test_report_deadlines_follow_the_law: OK")
+
+
+def test_quarter_label_matches_the_store_keys():
+    """마감일 표를 store/facts 의 분기 키와 이어붙이려면 라벨이 같아야 한다."""
+    eq(mc.quarter_label("20260331"), "2026Q1", "1분기")
+    eq(mc.quarter_label("20260630"), "2026Q2", "반기 = 2분기")
+    eq(mc.quarter_label("20260930"), "2026Q3", "3분기")
+    eq(mc.quarter_label("20251231"), "2025Q4", "사업보고서 = 4분기")
+    print("test_quarter_label_matches_the_store_keys: OK")
+
+
+def test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch():
+    """
+    FOMC·금통위 날짜는 **지어낼 수 없는 값**이다. 못 받으면 빈 목록이고,
+    무엇을 못 받았는지 결과에 적힌다. 지어내면 없는 회의를 기다리게 된다.
+    """
+    import datetime as dt
+    orig = mc.fetch
+    mc.fetch = lambda url: (_ for _ in ()).throw(RuntimeError("접속 실패"))
+    try:
+        out = mc.collect(dt.date(2026, 8, 3))
+    finally:
+        mc.fetch = orig
+    eq(out["일정"], [], "받지 못하면 빈 목록")
+    eq(sorted(out["failed"]), ["FOMC", "금통위"], "무엇이 비었는지 남긴다")
+    assert out["실적"], "실적 마감은 계산이라 항상 나온다"
+    print("test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch: OK")
+
+
+def test_fomc_takes_the_second_day_of_a_two_day_meeting():
+    """
+    FOMC 는 이틀 회의고 금리 결정은 둘째 날 나온다. '27-28' 이면 28일이다.
+    """
+    import datetime as dt
+    orig = mc.fetch
+    mc.fetch = lambda url: (
+        '<h4>2026 FOMC Meetings</h4>'
+        '<div class="panel">January 27-28</div>'
+        '<div class="panel">March 17-18</div>')
+    try:
+        got = mc.fomc_dates(dt.date(2026, 1, 1))
+    finally:
+        mc.fetch = orig
+    eq([g["date"] for g in got], ["20260128", "20260318"], "둘째 날")
+    print("test_fomc_takes_the_second_day_of_a_two_day_meeting: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -459,4 +524,8 @@ if __name__ == "__main__":
     test_news_second_group_skips_what_the_first_took()
     test_news_blanks_a_group_that_is_purely_a_duplicate()
     test_tree_backs_off_to_the_last_trading_day()
+    test_report_deadlines_follow_the_law()
+    test_quarter_label_matches_the_store_keys()
+    test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch()
+    test_fomc_takes_the_second_day_of_a_two_day_meeting()
     print("\nALL BOARD TESTS PASSED")
