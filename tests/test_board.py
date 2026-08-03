@@ -540,7 +540,8 @@ def test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch():
     """
     import datetime as dt
     orig = mc.fetch
-    mc.fetch = lambda url: (_ for _ in ()).throw(RuntimeError("접속 실패"))
+    mc.fetch = lambda url, tries=2, ua=None: (_ for _ in ()).throw(
+        RuntimeError("접속 실패"))
     try:
         out = mc.collect(dt.date(2026, 8, 3))
     finally:
@@ -558,7 +559,7 @@ def test_fomc_takes_the_second_day_of_a_two_day_meeting():
     """
     import datetime as dt
     orig = mc.fetch
-    mc.fetch = lambda url: (
+    mc.fetch = lambda url, tries=2, ua=None: (
         '<h4>2026 FOMC Meetings</h4>'
         '<div class="panel">January 27-28</div>'
         '<div class="panel">March 17-18</div>')
@@ -583,13 +584,13 @@ def test_bok_ignores_a_stray_date_and_reads_the_table():
     today = dt.date(2026, 8, 3)
     orig = mc.fetch
     try:
-        mc.fetch = lambda url: (
+        mc.fetch = lambda url, tries=2, ua=None: (
             '<div>최종수정일 2025.11.26</div><h3>2026년 통화정책방향</h3>'
             '<table><tr><td>1월 15일</td></tr><tr><td>8월 27일</td></tr></table>')
         eq([g["date"] for g in mc.bok_dates(today)], ["20260827"],
            "표를 읽고, 200일 지난 1월 회의는 뺀다")
 
-        mc.fetch = lambda url: '<div>최종수정일 2025.11.26</div><table><tr><td>-</td></tr></table>'
+        mc.fetch = lambda url, tries=2, ua=None: '<div>최종수정일 2025.11.26</div><table><tr><td>-</td></tr></table>'
         eq(mc.bok_dates(today), [], "표를 못 읽으면 빈 목록 — 옛 날짜를 내보내지 않는다")
     finally:
         mc.fetch = orig
@@ -613,7 +614,7 @@ def test_us_indicator_dates_keep_only_the_ones_people_watch():
     (올해·내년 두 장을 받으므로 겹칠 수 있다).
     """
     orig = mc.fetch
-    mc.fetch = lambda url, tries=2: BLS_PAGE
+    mc.fetch = lambda url, tries=2, ua=None: BLS_PAGE
     try:
         got = mc.bls_dates(dt.date(2026, 8, 3))
     finally:
@@ -635,7 +636,7 @@ def test_calendar_fetch_tries_again_before_giving_up():
     """
     calls = []
 
-    def flaky(url):
+    def flaky(url, ua=None):
         calls.append(url)
         if len(calls) == 1:
             raise RuntimeError("일시 실패")
@@ -744,7 +745,7 @@ def test_fallback_series_is_relabelled_not_disguised():
             if fid == "IR3TIB01KRM156N" else {}
 
     o_fred, o_ecos, o_kospi = mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi
-    mm.fetch_fred, mm.fetch_kospi = fake_fred, (lambda years=10: {})
+    mm.fetch_fred, mm.fetch_kospi = fake_fred, (lambda *a, **k: {})
     try:
         mm.fetch_ecos = lambda spec, s, e: {}          # ECOS 안 됨
         kr = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
@@ -775,7 +776,7 @@ def test_fallback_is_not_treated_as_a_step_function():
         {"20260301": 2.541, "20260401": 2.527, "20260501": 2.537}
         if fid == "IRSTCI01KRM156N" else {})
     mm.fetch_ecos = lambda spec, a, b: {}
-    mm.fetch_kospi = lambda years=10: {}
+    mm.fetch_kospi = lambda *a, **k: {}
     try:
         kr = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
     finally:

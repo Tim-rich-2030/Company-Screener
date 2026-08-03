@@ -173,7 +173,7 @@ def fetch_ecos(spec: dict, start: dt.date, end: dt.date) -> dict:
     return out
 
 
-def fetch_kospi(years: int = YEARS) -> dict:
+def fetch_kospi(years: int = YEARS, diag: dict = None) -> dict:
     """
     코스피 일별 종가. 사건 이후 기록을 내려면 지수가 사건보다 길어야 한다.
 
@@ -184,6 +184,8 @@ def fetch_kospi(years: int = YEARS) -> dict:
         from pykrx import stock
     except Exception as e:                       # noqa: BLE001
         log(f"::warning::pykrx 를 쓸 수 없습니다 ({type(e).__name__}: {e})")
+        if diag is not None:
+            diag["pykrx"] = f"{type(e).__name__}: {e}"
         return {}
     # 10년을 한 번에 달라고 했더니 빈 표가 왔다 (실제로 0일치가 나왔다).
     # KRX 가 긴 구간을 잘라 버리는 것으로 보여, 해마다 나눠 받아 붙인다.
@@ -197,10 +199,18 @@ def fetch_kospi(years: int = YEARS) -> dict:
             df = stock.get_index_ohlcv_by_date(a, b, "1001")
         except Exception as e:                   # noqa: BLE001
             log(f"  코스피 {y}년 실패 ({type(e).__name__}: {e})")
+            if diag is not None:
+                diag[str(y)] = f"{type(e).__name__}: {e}"[:120]
             continue
         if df is None or df.empty:
             empty.append(str(y))
+            if diag is not None:
+                diag[str(y)] = "빈 표"
             continue
+        if diag is not None:
+            # 칸 이름이 바뀌었으면 행은 있는데 종가를 못 읽는다. 그것도 남긴다.
+            diag[str(y)] = f"{len(df)}행 · 칸 {list(df.columns)[:8]}"
+
         for idx, row in df.iterrows():
             try:
                 close = float(row["종가"])
@@ -316,10 +326,11 @@ def step_points(points: dict, events: list) -> list:
 def collect(years: int = YEARS) -> dict:
     end = dt.date.today()
     start = end - dt.timedelta(days=int(365.25 * years) + 10)
-    kospi = fetch_kospi(years)
+    kdiag = {}
+    kospi = fetch_kospi(years, kdiag)
     log(f"[수집] 코스피 {len(kospi)}일치")
 
-    out, failed = [], []
+    out, failed, why = [], [], {}
     for spec in SERIES:
         spec = dict(spec)
         name = spec["name"]
@@ -332,6 +343,7 @@ def collect(years: int = YEARS) -> dict:
                 pts = fetch_ecos(spec["ecos"], start, end)
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
+            why[name] = f"{type(e).__name__}: {e}"[:160]
             pts = {}
 
         # 원본을 못 받았을 때만 대용을 쓴다. 후보를 차례로 시도하고, 쓰게 되면
@@ -344,6 +356,7 @@ def collect(years: int = YEARS) -> dict:
                     pts = fetch_fred(fid, start)
                 except Exception as e:           # noqa: BLE001
                     log(f"  {name} 대용 후보 실패 {fid} ({type(e).__name__})")
+                    why[f"{name}/{fid}"] = f"{type(e).__name__}: {e}"[:160]
                     continue
                 if pts:
                     spec["name"] = name = fb["name"]
@@ -354,6 +367,7 @@ def collect(years: int = YEARS) -> dict:
 
         if not pts:
             failed.append(name)
+            why.setdefault(name, "받기는 했는데 값이 하나도 없음")
             log(f"  {name}: 없음")
             out.append({**{k: spec[k] for k in ("key", "name", "unit", "note")},
                         "points": [], "events": [], "after": {}, "last": None})
@@ -376,15 +390,21 @@ def collect(years: int = YEARS) -> dict:
             f"최근 {pts[last_day]}{spec['unit']} ({last_day})")
 
     return {"as_of": end.strftime("%Y%m%d"), "years": years,
-            "kospi_days": len(kospi), "series": out, "failed": failed}
+            "kospi_days": len(kospi), "kospi_diag": kdiag,
+            "series": out, "failed": failed, "why": why}
 
 
 def save(payload: dict) -> None:
-    for path in (STORE_PATH, DOCS_PATH):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    log(f"[저장] {STORE_PATH}, {DOCS_PATH}")
+    os.makedirs(os.path.dirname(STORE_PATH) or ".", exist_ok=True)
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    # 진단(why·kospi_diag)은 store/ 에만 남긴다. 화면이 읽을 이유가 없고,
+    # 로그는 다른 단계 출력에 밀려 정작 볼 때 안 보인다.
+    slim = {k: v for k, v in payload.items() if k not in ("why", "kospi_diag")}
+    os.makedirs(os.path.dirname(DOCS_PATH) or ".", exist_ok=True)
+    with open(DOCS_PATH, "w", encoding="utf-8") as f:
+        json.dump(slim, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"[저장] {STORE_PATH} (진단 포함), {DOCS_PATH}")
 
 
 def dump() -> int:

@@ -1034,8 +1034,9 @@ function renderTick(){
   b.style.display = '';
   var s = it[TICK % it.length];
   b.querySelector('.k').textContent = s.name;
+  // 숫자만 있으면 1,460 이 원인지 달러인지 알 수 없다. 단위를 붙인다.
   b.querySelector('.v').textContent =
-    num(s.last, s.unit === '원' ? 0 : 2) + (s.unit === '%' ? '%' : '');
+    num(s.last, s.unit === '원' ? 0 : 2) + (s.unit || '');
   // 언제 값인지·무엇인지는 눌러서 볼 수 있게 title 로 붙인다.
   b.title = (s.note || '') + (s.last_date ? ' · ' + ymd(s.last_date) : '');
 }
