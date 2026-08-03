@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from screener import screen
 import market_tree as mt
 import market_news as mn
+import market_flags
 
 
 def eq(got, want, what):
@@ -122,67 +123,123 @@ def test_sector_change_is_cap_weighted():
     print("test_sector_change_is_cap_weighted: OK")
 
 
-def test_tiles_are_cut_but_aggregates_are_not():
+def test_tiles_are_cut_per_market_but_aggregates_are_not():
     """
-    타일은 시총 상위만 그리지만, 업종 집계와 상승/하락 종목 수는 전 종목으로
-    낸다. 자른 뒤에 집계하면 '상승 109 / 하락 131' 이 대형주만의 이야기가 된다.
+    타일은 시장별 시총 상위만 그리지만, 업종 집계와 상승/하락 종목 수는
+    전 종목으로 낸다. 자른 뒤에 집계하면 '상승 2332' 가 대형주만의 이야기가 된다.
     """
-    items = [{"code": str(i), "name": f"종목{i}", "market": "KOSPI",
+    items = [{"code": str(i), "name": f"종목{i}",
+              "market": "코스피" if i < 4 else "코스닥",
               "sector": "화학" if i < 3 else "은행",
               "chg": 1.0 if i % 2 else -1.0,
-              "cap": (10 - i) * 1_000_000_000_000, "close": 100}
+              "cap": (10 - i) * 1_000_000_000_000, "close": 5000}
              for i in range(6)]
-    out = mt.build({"date": "20260731", "source": "pykrx", "items": items}, top_n=2)
+    raw = {"date": "20260731", "source": "pykrx", "items": items,
+           "seen": 100, "cut": {"관리종목": 3}, "flags": {"관리종목": 3}}
+    out = mt.build(raw, top_n=2)
     eq(out["breadth"], {"up": 3, "down": 3, "flat": 0, "total": 6},
        "상승/하락 집계는 전 종목")
     eq(len(out["sectors"]), 2, "업종도 전 종목 기준")
-    eq(out["shown"], 2, "타일만 잘린다")
-    eq([t["name"] for t in out["items"]], ["종목1", "종목0"],
-       "시총 상위 2개를 뽑은 뒤 상승순")
-    print("test_tiles_are_cut_but_aggregates_are_not: OK")
+    eq(out["markets"]["코스피"]["breadth"]["total"], 4, "코스피 전 종목 수")
+    eq([t["name"] for t in out["markets"]["코스피"]["items"]], ["종목1", "종목0"],
+       "시장별로 시총 상위 2개를 뽑은 뒤 상승순")
+    eq(out["universe"]["seen"], 100, "제외 전 종목 수가 남는다")
+    eq(out["universe"]["kept"], 6, "남은 종목 수")
+    print("test_tiles_are_cut_per_market_but_aggregates_are_not: OK")
 
 
-def test_sector_map_prefers_the_narrowest_index():
+def test_collect_excludes_and_counts_why():
     """
-    한 종목이 여러 업종지수에 들어가면 구성종목이 가장 적은 지수를 택한다.
-    은행 ⊂ 금융업 일 때 '은행' 이 나와야 한다.
+    제외한 것은 세어서 남긴다. 조용히 빼면 지도가 시장 전체로 읽힌다.
     """
-    class FakeStock:
-        idx = {"1021": ("금융업", ["A", "B", "C", "D"]),
-               "1022": ("은행", ["A", "B"]),
-               "1028": ("코스피200", ["A", "B", "C", "D"])}   # 업종 아님
+    class Row(dict):
+        def get(self, k, d=None): return dict.get(self, k, d)
 
-        def get_index_ticker_list(self, date, market="KOSPI"):
-            return list(self.idx)
+    class DF:
+        def __init__(self, rows): self.rows = rows; self.empty = not rows
+        def __contains__(self, k): return k == "종가"
+        def __len__(self): return len(self.rows)
+        def __getitem__(self, k):
+            class Col:
+                def __init__(s, v): s.v = v
+                def __gt__(s, n): return Col([x > n for x in s.v])
+                def any(s): return any(s.v)
+            return Col([r["종가"] for r in self.rows])
+        def iterrows(self):
+            return iter([(r["code"], Row(r)) for r in self.rows])
 
-        def get_index_ticker_name(self, t):
-            return self.idx[t][0]
+    def row(code, close, cap=1e12, chg=1.0, sec="화학"):
+        return {"code": code, "종목명": "이름" + code, "업종명": sec,
+                "종가": close, "등락률": chg, "시가총액": cap}
 
-        def get_index_portfolio_deposit_file(self, t, date):
-            return self.idx[t][1]
+    kospi = DF([row("000001", 5000), row("000002", 900),      # 동전주
+                row("000003", 5000), row("000004", 5000)])    # 관리, 환기
+    kosdaq = DF([row("100001", 3000)])
 
-    got = mt.sector_map(FakeStock(), "20260731", "KOSPI")
-    eq(got, {"A": "은행", "B": "은행", "C": "금융업", "D": "금융업"},
-       "좁은 지수 우선, 크기·테마 지수는 제외")
-    print("test_sector_map_prefers_the_narrowest_index: OK")
+    class Stock:
+        def get_market_sector_classifications(self, date, market):
+            return kospi if market == "KOSPI" else kosdaq
+
+    orig_stock, orig_flags = mt._stock, market_flags.collect
+    mt._stock = lambda: Stock()
+    market_flags.collect = lambda: {"관리종목": {"000003"},
+                                    "투자주의환기종목": {"000004"},
+                                    "source": {"관리종목": 1, "투자주의환기종목": 1}}
+    try:
+        raw = mt.collect("20260731", exclude_under=1000)
+    finally:
+        mt._stock, market_flags.collect = orig_stock, orig_flags
+
+    eq(sorted(i["code"] for i in raw["items"]), ["000001", "100001"], "남은 종목")
+    eq(raw["cut"]["관리종목"], 1, "관리종목 1")
+    eq(raw["cut"]["투자주의환기종목"], 1, "환기종목 1")
+    eq(raw["cut"]["1000원 미만"], 1, "동전주 1")
+    eq(raw["seen"], 5, "조회한 전체")
+    eq(raw["items"][0]["sector"], "화학", "업종은 KRX 분류를 그대로")
+    print("test_collect_excludes_and_counts_why: OK")
 
 
-def test_sector_map_survives_a_broken_index():
-    """지수 하나가 터져도 나머지는 분류된다. 업종은 있으면 좋은 것이지 필수가 아니다."""
-    class Flaky:
-        def get_index_ticker_list(self, date, market="KOSPI"):
-            return ["1008", "9999"]
+def test_flags_return_empty_on_failure_rather_than_guessing():
+    """
+    관리종목 목록을 못 받으면 빈 집합. 그러면 아무것도 제외되지 않는다.
 
-        def get_index_ticker_name(self, t):
-            if t == "9999":
-                raise RuntimeError("KRX 응답 없음")
-            return "화학"
+    멀쩡한 종목을 잘못 빼는 것보다, 빼야 할 것이 남는 편이 낫다 — 남은 것은
+    화면에서 보이지만 잘못 빠진 것은 아무도 눈치채지 못한다.
+    """
+    orig = market_flags.fetch
+    market_flags.fetch = lambda url: (_ for _ in ()).throw(RuntimeError("접속 실패"))
+    try:
+        eq(market_flags.admin_issues(), set(), "실패하면 빈 집합")
+        eq(market_flags.alert_issues(), set(), "실패하면 빈 집합")
+    finally:
+        market_flags.fetch = orig
+    print("test_flags_return_empty_on_failure_rather_than_guessing: OK")
 
-        def get_index_portfolio_deposit_file(self, t, date):
-            return ["A"]
 
-    eq(mt.sector_map(Flaky(), "20260731", "KOSPI"), {"A": "화학"}, "부분 실패")
-    print("test_sector_map_survives_a_broken_index: OK")
+def test_flags_parse_real_shapes():
+    """네이버는 종목 링크로, KIND 는 표 칸의 6자리 숫자로 찾는다."""
+    orig = market_flags.fetch
+    market_flags.fetch = lambda url: (
+        '<table><tr><td><a href="/item/main.naver?code=005930">삼성전자</a></td>'
+        '<td>1,000</td></tr>'
+        '<tr><td><a href="/item/main.naver?code=000660">SK하이닉스</a></td></tr>'
+        '<td><a href="/sise/sise_index.naver">코스피</a></td></table>')
+    try:
+        eq(market_flags.admin_issues(), {"005930", "000660"}, "종목 링크만")
+    finally:
+        market_flags.fetch = orig
+
+    market_flags.fetch = lambda url: (
+        '<table><tr><th>종목코드</th><th>회사명</th></tr>'
+        '<tr><td>123456</td><td>어떤회사</td><td>2026/01/02</td></tr>'
+        '<tr><td>654321</td><td>다른회사</td></tr></table>'
+        '<div>전화 021234567</div>')
+    try:
+        eq(market_flags.alert_issues(), {"123456", "654321"},
+           "표 칸에 홀로 든 6자리만 — 본문의 긴 숫자는 아니다")
+    finally:
+        market_flags.fetch = orig
+    print("test_flags_parse_real_shapes: OK")
 
 
 # =============================================================================
@@ -362,7 +419,7 @@ def test_tree_backs_off_to_the_last_trading_day():
         def __init__(self):
             self.asked = []
 
-        def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
+        def get_market_sector_classifications(self, date, market="KOSPI"):
             self.asked.append(date)
             # 휴장일에도 943행이 오는데 값이 0 이다 — 이게 실제로 있었던 일이다.
             return Frame([0, 0, 0] if date > "20260731" else [70000, 5000, 320])
@@ -375,7 +432,7 @@ def test_tree_backs_off_to_the_last_trading_day():
     assert mt.traded(Frame([1, 0, 0])), "하나라도 거래됐으면 거래일"
 
     class Dead:
-        def get_market_ohlcv_by_ticker(self, date, market="KOSPI"):
+        def get_market_sector_classifications(self, date, market="KOSPI"):
             raise RuntimeError("KRX 접속 실패")
 
     eq(mt.last_trading_day(Dead(), dt.date(2026, 8, 2), back=3), None,
@@ -389,9 +446,10 @@ if __name__ == "__main__":
     test_screen_excludes_foreign_currency_and_halted()
     test_screen_ranks_by_pbr_over_roe_and_states_the_rule()
     test_sector_change_is_cap_weighted()
-    test_tiles_are_cut_but_aggregates_are_not()
-    test_sector_map_prefers_the_narrowest_index()
-    test_sector_map_survives_a_broken_index()
+    test_tiles_are_cut_per_market_but_aggregates_are_not()
+    test_collect_excludes_and_counts_why()
+    test_flags_return_empty_on_failure_rather_than_guessing()
+    test_flags_parse_real_shapes()
     test_news_parses_by_link_shape_not_class_name()
     test_news_returns_nothing_rather_than_garbage()
     test_news_dedupes_the_same_article_across_sections()

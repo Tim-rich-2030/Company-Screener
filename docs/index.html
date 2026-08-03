@@ -111,8 +111,8 @@ h2 .note{float:right;font-family:'Pretendard',sans-serif;font-size:11.5px;
   margin-right:3px}
 
 /* 시장 지도 */
-#map{position:relative;width:100%;height:360px;margin-top:10px}
-@media (min-width:520px){#map{height:480px}}
+#map{position:relative;width:100%;height:440px;margin-top:10px}
+@media (min-width:520px){#map{height:520px}}
 .tile{position:absolute;overflow:hidden;border:1px solid var(--paper);
   padding:3px 4px;line-height:1.15}
 .tile b{display:block;font-weight:400;font-size:11px;
@@ -161,6 +161,13 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div class="tabs sm" id="tree-tabs"></div>
     <div id="map"></div>
     <div class="scale" id="tree-scale"></div>
+    <div class="rule-line" id="tree-why"></div>
+  </section>
+
+  <section id="etf">
+    <h2>ETF<span class="note" id="etf-note"></span></h2>
+    <div class="tabs sm" id="etf-tabs"></div>
+    <div id="etf-list"></div>
   </section>
 
   <section id="news">
@@ -345,7 +352,7 @@ function renderPicks(p){
 // =============================================================================
 // 시장 지도 (트리맵)
 // =============================================================================
-var TREE = null, TREE_VIEW = '상승순';
+var TREE = null, TREE_VIEW = null;   // 첫 탭은 데이터가 오면 정한다
 
 // 시총이 넓이, 등락률이 색. 색은 종이색에서 상승/하락색 쪽으로 섞는다.
 //
@@ -432,53 +439,98 @@ function squarify(items, X, Y, W, H){
   return out;
 }
 
+/*
+ * 넓이는 시가총액의 **제곱근**에 비례시킨다.
+ *
+ * 그대로 쓰면 SK하이닉스(1,255조) 하나가 지도의 3분의 1을 먹고, 서른 번째
+ * 종목은 20×20px 이 된다. 이름을 다 넣는 것이 산술적으로 불가능하다 —
+ * 실제로 시도해 보니 타일이 6개까지 줄었다.
+ *
+ * 제곱근을 쓰면 '큰 것이 크다'는 순서는 그대로 두면서 격차만 눌린다. 대신
+ * 넓이를 두 배로 읽으면 시총은 네 배라는 뜻이므로, 범례에 눈금을 적는다.
+ */
+function area(cap){ return Math.sqrt(Math.max(0, cap)); }
+
+var MIN_TILES = 8;
+
+/*
+ * 이름이 잘리는 타일이 없어질 때까지 개수를 줄인다.
+ *
+ * 폭을 px 로 어림잡는 방법도 써 봤는데, 한글 이름은 글자 수에 따라 필요한
+ * 폭이 제각각이라 어림이 잘 맞지 않았다. 그려 놓고 실제로 잘렸는지(scrollWidth)
+ * 재는 편이 정확하다. 뷰를 바꿀 때만 도는 계산이라 몇 번 다시 그려도 된다.
+ */
+function truncated(){
+  var t = document.querySelectorAll('.tile b'), n = 0;
+  for (var i = 0; i < t.length; i++){
+    if (t[i].scrollWidth > t[i].clientWidth + 1 ||
+        t[i].parentNode.clientHeight < 24) n++;
+  }
+  return n;
+}
+
 function renderTree(){
   if (!TREE) return;
   var el = $('map');
   var W = el.clientWidth, H = el.clientHeight;
   if (!W || !H) return;
 
-  var src, shown;
+  var rows, note, breadth = TREE.breadth || {};
   if (TREE_VIEW === '섹터순'){
     // 업종은 수가 적어 다 들어간다. 넓은 것부터 놓아야 타일이 반듯하다.
-    src = (TREE.sectors || []).filter(function(s){ return s.cap > 0; })
-            .map(function(s){ return {v:s.cap, chg:s.chg, name:s.name}; })
-            .sort(function(a, b){ return b.v - a.v; });
-    shown = src.length + '개 업종';
+    rows = (TREE.sectors || []).filter(function(s){ return s.cap > 0; })
+             .map(function(s){ return {v:area(s.cap), chg:s.chg, name:s.name}; })
+             .sort(function(a, b){ return b.v - a.v; });
+    note = function(n){ return n + ' / ' + rows.length + '개 업종'; };
   } else {
-    // 폰에서 200개를 깔면 색종이 조각이 된다. 화면 폭에 맞춰 개수를 줄이고,
-    // 몇 개를 그렸는지 위에 적는다 — 조용히 잘라내면 '전부'로 읽힌다.
-    // 실제 시가총액은 합성 데이터보다 훨씬 쏠려 있다 — SK하이닉스 한 종목이
-    // 지도 면적의 3분의 1을 먹는다. 그래서 개수를 더 줄여야 글자가 들어간다.
-    var budget = W < 520 ? 24 : 44;
-    var top = (TREE.items || []).filter(function(i){ return i.cap > 0; })
-                .sort(function(a, b){ return b.cap - a.cap; }).slice(0, budget);
-    // 상승순이니 많이 오른 것부터 왼쪽 위에 놓는다. 넓이순으로 놓아야 타일이
-    // 반듯해지지만, 그러면 '상승순'이라는 이름이 거짓말이 된다.
-    src = top.map(function(i){ return {v:i.cap, chg:i.chg, name:i.name}; })
-             .sort(function(a, b){ return b.chg - a.chg; });
-    shown = '시가총액 상위 ' + src.length + '종목 · 많이 오른 것부터';
+    var mk = (TREE.markets || {})[TREE_VIEW] || {};
+    breadth = mk.breadth || breadth;
+    // 시총 상위부터 후보로 삼되, 놓기는 많이 오른 것부터 — 상승순이니까.
+    rows = (mk.items || []).map(function(i){
+      return {v:area(i.cap), chg:i.chg, name:i.name}; });
+    var total = (mk.breadth || {}).total || rows.length;
+    note = function(n){
+      return '시총 상위 ' + n + ' / ' + total + '종목 · 많이 오른 것부터'; };
   }
-  if (!src.length) return;
+  if (!rows.length){
+    el.innerHTML = '<div class="miss">이 시장의 종목이 없습니다.</div>';
+    return;
+  }
 
   var base = hex(cssVar('--surface')), up = hex(cssVar('--up')),
-      down = hex(cssVar('--down')), span = tintSpan(src);
-  el.innerHTML = squarify(src, 0, 0, W, H).map(function(r){
-    var t = tint(r.it.chg, base, up, down, span);
-    var style = 'left:' + r.x.toFixed(1) + 'px;top:' + r.y.toFixed(1) +
-      'px;width:' + r.w.toFixed(1) + 'px;height:' + r.h.toFixed(1) +
-      'px;background:' + rgb(t.bg) + (t.fg ? ';color:' + t.fg : '');
-    // 글자가 안 들어갈 만큼 작으면 색만 남긴다. 잘린 글자는 없는 것만 못하다.
-    var label = (r.w > 42 && r.h > 24)
-      ? '<b>' + esc(r.it.name) + '</b><s>' + signed(r.it.chg, 1) + '%</s>' : '';
-    return '<div class="tile" style="' + style + '" title="' + esc(r.it.name) +
-      ' ' + signed(r.it.chg, 2) + '%">' + label + '</div>';
-  }).join('');
+      down = hex(cssVar('--down')), span = 1;
 
-  var b = TREE.breadth || {};
-  $('tree-note').textContent = shown;
+  function paint(n){
+    var use = rows.slice(0, n);
+    span = tintSpan(use);
+    el.innerHTML = squarify(use, 0, 0, W, H).map(function(r){
+      var t = tint(r.it.chg, base, up, down, span);
+      var style = 'left:' + r.x.toFixed(1) + 'px;top:' + r.y.toFixed(1) +
+        'px;width:' + r.w.toFixed(1) + 'px;height:' + r.h.toFixed(1) +
+        'px;background:' + rgb(t.bg) + (t.fg ? ';color:' + t.fg : '');
+      return '<div class="tile" style="' + style + '" title="' + esc(r.it.name) +
+        ' ' + signed(r.it.chg, 2) + '%"><b>' + esc(r.it.name) + '</b><s>' +
+        signed(r.it.chg, 1) + '%</s></div>';
+    }).join('');
+  }
+
+  // 줄인 뒤에는 반드시 그 개수로 다시 그린다. 그리기 전에 반복이 끝나면
+  // 화면의 타일 수와 위에 적은 숫자가 어긋난다.
+  var n = rows.length, guard = 0, bad;
+  paint(n);
+  while ((bad = truncated()) && n > MIN_TILES && guard++ < 16){
+    // 많이 잘렸으면 크게, 조금 잘렸으면 조금 줄인다.
+    n = Math.max(MIN_TILES,
+                 n - Math.max(1, Math.round(n * (bad > n / 3 ? 0.3 : 0.1))));
+    paint(n);
+  }
+
+  var b = breadth;
+  $('tree-note').textContent = note(n);
   $('tree-scale').innerHTML =
-    '<span style="white-space:nowrap">넓이=시총 · 색=등락률</span>' +
+    // 넓이가 시총에 그대로 비례하지 않는다는 것을 적는다. 안 적으면 넓이 두 배를
+    // 시총 두 배로 읽는다.
+    '<span style="white-space:nowrap">넓이=√시총 · 색=등락률</span>' +
     '<span class="bar" style="background:linear-gradient(90deg,' +
       rgb(mix(base, down, 1)) + ',' + rgb(base) + ',' + rgb(mix(base, up, 1)) +
       ')"></span>' +
@@ -486,21 +538,69 @@ function renderTree(){
     // 같은 빨강이 같은 뜻인 줄 알게 된다.
     '<span class="num">' + signed(-span, span < 10 ? 1 : 0) + '% ~ ' +
       signed(span, span < 10 ? 1 : 0) + '%</span>' +
-    (b.total ? '<span style="margin-left:auto">전체 ' + b.total +
+    (b.total ? '<span style="margin-left:auto">' + b.total +
       '종목 중 <b class="u">↑' + b.up + '</b> <b class="d">↓' + b.down +
       '</b></span>' : '');
+
+  var u = TREE.universe;
+  if (u && u.cut){
+    // 무엇이 왜 빠졌는지 적는다. 조용히 빼면 지도가 시장 전체로 읽힌다.
+    var why = Object.keys(u.cut).filter(function(k){ return u.cut[k]; })
+                .map(function(k){ return k + ' ' + u.cut[k]; }).join(' · ');
+    $('tree-why').textContent = why
+      ? '전체 ' + u.seen + '종목에서 ' + why + ' 제외 → ' + u.kept + '종목' : '';
+  }
 }
 
+function treeViews(){
+  return Object.keys((TREE && TREE.markets) || {}).concat(['섹터순']);
+}
 function renderTreeTabs(){
-  $('tree-tabs').innerHTML = ['상승순','섹터순'].map(function(n){
+  $('tree-tabs').innerHTML = treeViews().map(function(n){
     return '<button class="tab' + (n === TREE_VIEW ? ' on' : '') +
-      '" data-v="' + n + '">' + n + '</button>'; }).join('');
+      '" data-v="' + esc(n) + '">' + esc(n) + '</button>'; }).join('');
 }
 $('tree-tabs').addEventListener('click', function(e){
   var b = e.target.closest('.tab');
   if (b && b.dataset.v !== TREE_VIEW){
     TREE_VIEW = b.dataset.v; renderTreeTabs(); renderTree();
   }
+});
+
+// =============================================================================
+// ETF — 거래대금순 / 거래량순
+//
+// '많이 사는 순'은 아직 못 만든다. 거래대금은 사고판 것을 합친 값이라
+// 순매수와 다르다. 여기서는 있는 그대로 '거래대금순'이라고 적는다.
+// =============================================================================
+var ETF = null, ETF_VIEW = null;
+
+function etfViews(){ return ['거래대금순', '거래량순']; }
+
+function renderEtf(){
+  if (!ETF) return;
+  $('etf-tabs').innerHTML = etfViews().map(function(n){
+    return '<button class="tab' + (n === ETF_VIEW ? ' on' : '') +
+      '" data-v="' + esc(n) + '">' + esc(n) + '</button>'; }).join('');
+  var rows = ETF[ETF_VIEW] || [];
+  if (!rows.length){
+    $('etf-list').innerHTML = '<div class="miss">ETF 자료를 받지 못했습니다.</div>';
+    return;
+  }
+  var big = ETF_VIEW === '거래대금순';
+  $('etf-note').textContent = (ETF.counted ? ETF.counted['전체'] + '종목 중 거래된 '
+    + ETF.counted['거래된 것'] + '개에서' : '') + ' 상위 ' + Math.min(rows.length, 10);
+  $('etf-list').innerHTML = rows.slice(0, 10).map(function(e){
+    var amt = big ? (e.val / 1e8).toLocaleString('ko-KR', {maximumFractionDigits:0}) + '억'
+                  : (e.vol / 1e4).toLocaleString('ko-KR', {maximumFractionDigits:0}) + '만주';
+    return '<div class="pick"><span class="nm">' + esc(e.name) + '</span>' +
+      '<span class="vals"><span class="num ' + cls(e.chg) + '">' +
+      signed(e.chg, 2) + '%</span><span class="num">' + amt + '</span></span></div>';
+  }).join('');
+}
+$('etf-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== ETF_VIEW){ ETF_VIEW = b.dataset.v; renderEtf(); }
 });
 
 // =============================================================================
@@ -566,11 +666,21 @@ grab('screen.json').then(renderPicks).catch(function(){
 });
 
 grab('market_tree.json').then(function(p){
-  TREE = p; renderTreeTabs(); renderTree();
+  TREE = p;
+  TREE_VIEW = treeViews()[0];
+  renderTreeTabs(); renderTree();
   if (window.ResizeObserver) new ResizeObserver(renderTree).observe($('map'));
 }).catch(function(){
   $('map').style.height = 'auto';
   $('map').innerHTML = '<div class="miss">시장 지도를 불러오지 못했습니다 — ' +
+    '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
+});
+
+grab('market_etf.json').then(function(p){
+  ETF = p; ETF_VIEW = etfViews()[0]; renderEtf();
+}).catch(function(){
+  $('etf-list').innerHTML =
+    '<div class="miss">ETF 자료를 불러오지 못했습니다 — ' +
     '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
 });
 
