@@ -269,6 +269,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .cal .now::after{content:"";flex:1;height:1px;background:var(--accent)}
 .cal .more{background:none;border:0;padding:8px 0;font:inherit;font-size:11.5px;
   color:var(--ink-muted);cursor:pointer;font-family:'Pretendard',sans-serif}
+/* 더 보기 — 가운데. 목록의 끝이라는 표시라 줄 어느 쪽에도 붙지 않는다. */
+.more.mid{display:block;width:100%;text-align:center;background:none;border:0;
+  padding:13px 0 4px;font:inherit;font-size:12.5px;color:var(--ink-muted);
+  cursor:pointer;font-family:'Pretendard',sans-serif}
+.more.mid span{margin-left:4px}
 
 /* 조건에 걸린 종목 — 표가 아니라 괘선으로 나눈 줄 */
 .rule-line{font-size:11.5px;color:var(--ink-muted);padding:8px 0 2px}
@@ -450,7 +455,14 @@ function drawWorld(s){
              fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
     grid: {vertLines:{visible:false}, horzLines:{color: rule}},
     rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
-    crosshair:{mode:1}, handleScroll:true, handleScale:true,
+    crosshair:{mode:1},
+  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
+  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
+  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
+                 pressedMouseMove: true, mouseWheel: true},
+  handleScale: {pinch: true, mouseWheel: true,
+                axisPressedMouseMove: {time: true, price: false},
+                axisDoubleClickReset: true},
   });
   chart.addLineSeries({color: cssVar('--accent'), lineWidth:2,
     priceLineVisible:false}).setData(s.points.map(function(p){
@@ -487,7 +499,13 @@ function draw(name){
     timeScale: {borderColor: rule},
     crosshair: {mode: 1},
     // 손으로 밀고 확대할 수 있어야 한다. 잠가두면 차트가 그림이 된다.
-    handleScroll: true, handleScale: true,
+  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
+  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
+  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
+                 pressedMouseMove: true, mouseWheel: true},
+  handleScale: {pinch: true, mouseWheel: true,
+                axisPressedMouseMove: {time: true, price: false},
+                axisDoubleClickReset: true},
   });
   var cs = chart.addCandlestickSeries({
     upColor: cssVar('--up'), downColor: cssVar('--down'),
@@ -944,7 +962,14 @@ function renderMacro(){
                fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
       grid: {vertLines:{visible:false}, horzLines:{color: rule}},
       rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
-      crosshair:{mode:1}, handleScroll:true, handleScale:true,
+      crosshair:{mode:1},
+  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
+  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
+  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
+                 pressedMouseMove: true, mouseWheel: true},
+  handleScale: {pinch: true, mouseWheel: true,
+                axisPressedMouseMove: {time: true, price: false},
+                axisDoubleClickReset: true},
     });
     mchart.addLineSeries({
       color: cssVar('--accent'), lineWidth: 2,
@@ -1158,34 +1183,25 @@ function renderStrong(){
         '<em style="font-style:normal" class="' + cls(r.chg) + '">' +
         signed(r.chg, 1) + '%</em> · ' + money(r.value) + '</span></span></button>';
     }).join('') + (cut < rows.length
-      ? '<button class="more" id="strong-more">종목 더 보기 · 남은 ' +
-        (rows.length - cut) + '개</button>' : '');
+      ? '<button class="more mid" id="strong-more">종목 더 보기 ' +
+        '<span aria-hidden="true">▾</span></button>' : '');
     var mb = $('strong-more');
     if (mb) mb.addEventListener('click', function(){ SHOW++; renderStrong(); });
   }
-  // 기준은 제목 옆이 아니라 목록 아래에 한 번만 적는다.
-  // '실시간'이라는 이름과 달리 이 값은 **종가**다. 그 사실을 숨기지 않는다.
+  // 기준만 한 줄로. 길게 설명하면 목록보다 설명이 길어진다.
   var f = STRONG.floor || {}, why = [];
   if (mk){
-    why.push(mk.index_disparity === null
-      ? '지수 이격도를 못 읽어 비어 있습니다.'
-      : SV + ' 지수는 20일선보다 <b>' + signed(mk.index_disparity, 2) +
-        '%</b>. 그보다 위에 있는 ' + mk.strong_total + '종목을 이격도 순으로, ' +
-        '같으면 거래대금 순으로 세웠습니다.');
+    why.push(mk.index_disparity === null ? '지수 이격도를 못 읽었습니다'
+      : '20일선 이격도가 ' + SV + ' 지수(' + signed(mk.index_disparity, 2) +
+        '%)보다 높은 종목 · 이격도순');
   } else {
-    why.push('종가 기준 등락률 ' + (SV === '급상승' ? '상위 ' : '하위 ') +
-             rows.length + '종목입니다.');
+    why.push('등락률 ' + (SV === '급상승' ? '상위' : '하위'));
   }
   if (f['거래대금']){
-    why.push('거래대금 ' + money(f['거래대금']) + '원 · 시가총액 ' +
-      money(f['시가총액']) + '원 이상만 담습니다 — 못 사고 못 파는 종목을 ' +
-      '올려두면 그 줄은 읽을 이유가 없습니다' +
-      (mk ? ' (' + mk.liquid + '/' + mk.counted + '종목 통과)' : '') + '.');
+    why.push('거래대금 ' + money(f['거래대금']) + '원 이상');
   }
-  why.push('값은 <b>그날 종가</b>입니다. 장중에는 바뀌지 않습니다.');
-  why.push('테마에 엮인 종목은 이격이 며칠 만에 벌어졌다 그만큼 빠지기도 해서 ' +
-           '어느 테마인지 함께 적습니다.');
-  $('strong-why').innerHTML = why.join('<br>');
+  why.push('종가 기준');
+  $('strong-why').textContent = why.join(' · ');
 }
 $('strong-tabs').addEventListener('click', function(e){
   var b = e.target.closest('.tab');
@@ -1271,7 +1287,14 @@ function drawSheetChart(){
              fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
     grid: {vertLines:{visible:false}, horzLines:{color: rule}},
     rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
-    crosshair:{mode:1}, handleScroll:true, handleScale:true,
+    crosshair:{mode:1},
+  // 세로로 끌면 차트가 값 축을 늘여 버려 정작 화면을 위아래로 못 넘긴다.
+  // 손가락 세로 이동은 차트가 먹지 않게 하고, 좌우 이동과 확대·축소만 남긴다.
+  handleScroll: {vertTouchDrag: false, horzTouchDrag: true,
+                 pressedMouseMove: true, mouseWheel: true},
+  handleScale: {pinch: true, mouseWheel: true,
+                axisPressedMouseMove: {time: true, price: false},
+                axisDoubleClickReset: true},
   });
   schart.addCandlestickSeries({
     upColor: cssVar('--up'), downColor: cssVar('--down'),
