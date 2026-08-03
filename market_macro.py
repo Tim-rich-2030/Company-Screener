@@ -163,7 +163,7 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
             r.raise_for_status()
         except Exception as e:                   # noqa: BLE001
             if why is not None:
-                why[f"금/{page}쪽"] = f"{type(e).__name__}: {e}"[:140]
+                why[f"금/{page}쪽"] = safe(f"{type(e).__name__}: {e}")[:140]
             break
         doc = r.content.decode("cp949", "replace")
 
@@ -219,7 +219,7 @@ def fetch_stooq(sym: str, start: dt.date, why: dict = None) -> dict:
     r.raise_for_status()
     head = " ".join(r.text.splitlines()[:2])[:120]
     if why is not None:
-        why[f"stooq/{sym}"] = f"{r.status_code} · {len(r.text)}자 · {head}"
+        why[f"stooq/{sym}"] = safe(f"{r.status_code} · {len(r.text)}자 · {head}")
     out = {}
     for row in csv.DictReader(io.StringIO(r.text)):
         try:
@@ -236,7 +236,25 @@ def fetch_stooq(sym: str, start: dt.date, why: dict = None) -> dict:
 
 
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    print(safe(msg), flush=True)
+
+
+def safe(msg) -> str:
+    """
+    남길 글에서 키를 지운다.
+
+    ECOS 는 인증키를 **주소 경로**에 넣는다. 그래서 접속이 끊겼을 때 예외
+    메시지에 주소가 통째로 들어오고, 그걸 그대로 진단에 적었더니 공개
+    저장소에 키가 커밋됐다. 예외 메시지는 우리가 쓴 글이 아니다 —
+    남기기 전에 반드시 지운다.
+    """
+    out = str(msg)
+    key = os.environ.get("ECOS_KEY", "").strip()
+    if key:
+        out = out.replace(key, "***")
+    # 키를 못 읽는 자리에서도 안전하게: ECOS 주소의 키 자리를 통째로 가린다.
+    out = re.sub(r"(StatisticSearch/)[^/\s]+", r"\1***", out)
+    return out
 
 
 # =============================================================================
@@ -299,7 +317,7 @@ def fetch_ecos(spec: dict, start: dt.date, end: dt.date,
         # ECOS 는 오류도 200 으로 준다. 키가 틀렸거나 통계표 코드가 틀린 경우다.
         log(f"::warning::ECOS 응답에 자료가 없습니다: {str(body)[:200]}")
         if why is not None:
-            why["ECOS"] = f"키는 있는데 자료가 없음: {str(body)[:180]}"
+            why["ECOS"] = safe(f"키는 있는데 자료가 없음: {str(body)[:180]}")
         return {}
     out = {}
     for row in body["StatisticSearch"].get("row", []):
@@ -508,7 +526,7 @@ def collect(years: int = YEARS) -> dict:
                 pts = fetch_ecos(spec["ecos"], start, end, why)
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
-            why[name] = f"{type(e).__name__}: {e}"[:160]
+            why[name] = safe(f"{type(e).__name__}: {e}")[:160]
             pts = {}
 
         # 원본을 못 받았을 때만 대용을 쓴다. 후보를 차례로 시도하고, 쓰게 되면
@@ -521,7 +539,7 @@ def collect(years: int = YEARS) -> dict:
                     pts = fetch_fred(fid, start)
                 except Exception as e:           # noqa: BLE001
                     log(f"  {name} 대용 후보 실패 {fid} ({type(e).__name__})")
-                    why[f"{name}/{fid}"] = f"{type(e).__name__}: {e}"[:160]
+                    why[f"{name}/{fid}"] = safe(f"{type(e).__name__}: {e}")[:160]
                     continue
                 if pts:
                     spec["name"] = name = fb["name"]

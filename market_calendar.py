@@ -78,8 +78,26 @@ MONTHS = {m: i + 1 for i, m in enumerate(
 MONTHS3 = {m[:3].lower(): i for m, i in MONTHS.items()}
 
 
+def safe(msg) -> str:
+    """
+    남길 글에서 키를 지운다.
+
+    requests 의 예외 메시지에는 주소가 통째로 들어온다. FRED 는 키를 질의
+    문자열에, ECOS 는 주소 경로에 넣기 때문에 예외를 그대로 적으면 키가
+    공개 저장소에 커밋된다 — 실제로 ECOS 키가 그렇게 새어 나갔다.
+    예외 메시지는 우리가 쓴 글이 아니다. 남기기 전에 반드시 지운다.
+    """
+    out = str(msg)
+    for name in ("FRED_API_KEY", "ECOS_KEY", "DART_API_KEY"):
+        v = os.environ.get(name, "").strip()
+        if v:
+            out = out.replace(v, "***")
+    out = re.sub(r"(api_key=)[^&\s]+", r"\1***", out)
+    return out
+
+
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    print(safe(msg), flush=True)
 
 
 # =============================================================================
@@ -245,7 +263,7 @@ def fomc_dates(today: dt.date) -> list:
              "dday": (d - today).days} for d in sorted(set(out))]
 
 
-def bok_dates(today: dt.date) -> list:
+def bok_dates(today: dt.date, why: dict = None) -> list:
     """
     한국은행 금융통화위원회(통화정책방향) 회의일.
 
@@ -255,9 +273,13 @@ def bok_dates(today: dt.date) -> list:
         doc = fetch(BOK_URL)
     except Exception as e:                       # noqa: BLE001
         log(f"::warning::금통위 가져오기 실패 ({type(e).__name__}: {e})")
+        if why is not None:
+            why["금통위"] = safe(f"{type(e).__name__}: {e}")[:180]
         return []
     if not doc:
         log("::warning::금통위 페이지를 글자로 풀지 못했습니다")
+        if why is not None:
+            why["금통위"] = "글자로 풀지 못함"
         return []
     # 날짜는 표 안에 있다. 페이지 전체를 훑으면 주소·전화번호 같은 숫자가 섞이니
     # <td> 안만 본다. 첫 시도에서 'YYYY.M.D' 하나만 찾다가 0건이 나왔는데,
@@ -276,6 +298,8 @@ def bok_dates(today: dt.date) -> list:
         years = re.findall(r"(20\d{2})\s*년", strip_tags(doc))
     ctx_year = int(max(set(years), key=years.count)) if years else today.year
     log(f"  금통위 기준 연도 {ctx_year} (근거 {len(years)}건)")
+    if why is not None:
+        why["금통위/연도"] = f"{ctx_year} (근거 {len(years)}건)"
 
     out = set()
     for m in re.finditer(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})",
@@ -298,6 +322,9 @@ def bok_dates(today: dt.date) -> list:
     if not keep:
         log(f"::warning::금통위 날짜를 {len(out)}개 찾았지만 쓸 만한 것이 "
             "없습니다 — 표를 못 읽은 것으로 봅니다")
+        if why is not None:
+            why["금통위"] = (f"날짜 {len(out)}개를 찾았지만 -90~+400일 창 "
+                             f"안에 없음 · 앞 3개 {sorted(out)[:3]}")
         return []
     return [{"date": d.strftime("%Y%m%d"), "name": "한은 금통위",
              "dday": (d - today).days} for d in keep]
@@ -310,11 +337,17 @@ _UNUSED_US_DATE = re.compile(
 
 
 def _fred(path: str, key: str, **params) -> dict:
-    """FRED API 한 번. 작은 JSON 이라 화면을 긁는 것보다 훨씬 빠르다."""
+    """
+    FRED API 한 번. 작은 JSON 이라 화면을 긁는 것보다 훨씬 빠르다.
+
+    오류일 때 FRED 는 본문에 무엇이 틀렸는지 적어 준다. 상태 코드만 보고
+    넘기면 그 설명을 버리게 되므로 본문을 예외에 붙인다 (키는 지운 뒤).
+    """
     params.update({"api_key": key, "file_type": "json"})
     r = requests.get(f"{FRED_API}/{path}", params=params,
                      headers={"User-Agent": UA}, timeout=TIMEOUT)
-    r.raise_for_status()
+    if r.status_code >= 400:
+        raise RuntimeError(safe(f"{r.status_code} · {r.text[:200]}"))
     return r.json()
 
 
@@ -347,7 +380,7 @@ def bls_dates(today: dt.date, why: dict = None) -> list:
     except Exception as e:                       # noqa: BLE001
         log(f"  미국 지표 목록 실패 ({type(e).__name__}: {e})")
         if why is not None:
-            why["FRED/releases"] = f"{type(e).__name__}: {e}"[:180]
+            why["FRED/releases"] = safe(f"{type(e).__name__}: {e}")[:180]
         return []
 
     # 이름 → 우리 이름. 번호는 해마다 바뀌지 않지만 박아 두지 않는다.
@@ -364,15 +397,18 @@ def bls_dates(today: dt.date, why: dict = None) -> list:
         return []
 
     try:
+        # realtime_end 를 앞날로 잡았더니 400 이 왔다. FRED 의 realtime 은
+        # '언제 시점의 자료냐'를 뜻하지 발표일 범위가 아니다. 앞날 일정은
+        # include_release_dates_with_no_data 로 따라온다 (자료가 아직 없는
+        # 예정일도 준다는 뜻이다).
         got = _fred("releases/dates", key,
                     realtime_start=(today - dt.timedelta(days=30)).isoformat(),
-                    realtime_end=(today + dt.timedelta(days=400)).isoformat(),
                     include_release_dates_with_no_data="true",
-                    sort_order="asc", limit=10000)
+                    sort_order="asc", limit=1000)
     except Exception as e:                       # noqa: BLE001
         log(f"  미국 지표 날짜 실패 ({type(e).__name__}: {e})")
         if why is not None:
-            why["FRED/dates"] = f"{type(e).__name__}: {e}"[:180]
+            why["FRED/dates"] = safe(f"{type(e).__name__}: {e}")[:180]
         return []
 
     out, seen = [], set()
@@ -409,9 +445,9 @@ def collect(today: dt.date = None) -> dict:
     today = today or dt.date.today()
     rows = filed_counts(periods(today))
 
-    fomc = fomc_dates(today)
-    bok = bok_dates(today)
     why = {}
+    fomc = fomc_dates(today)
+    bok = bok_dates(today, why)
     bls = bls_dates(today, why)
     failed = []
     if not fomc:

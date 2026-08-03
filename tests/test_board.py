@@ -665,6 +665,38 @@ def test_us_indicators_say_when_the_key_is_missing():
     print("test_us_indicators_say_when_the_key_is_missing: OK")
 
 
+def test_diagnostics_never_carry_the_key():
+    """
+    예외 메시지에는 주소가 통째로 들어온다. ECOS 는 키를 **주소 경로**에,
+    FRED 는 질의 문자열에 넣기 때문에, 예외를 그대로 진단에 적으면 키가
+    공개 저장소에 커밋된다 — 실제로 ECOS 키가 그렇게 새어 나갔다.
+
+    키를 환경변수에서 못 읽는 상황에서도 가려져야 한다.
+    """
+    ecos = "SBWPRN0VBX88RXDQVR1Y"
+    msg = ("ConnectTimeout: HTTPSConnectionPool(host='ecos.bok.or.kr'): "
+           f"Max retries exceeded with url: /api/StatisticSearch/{ecos}/json/kr")
+    had = os.environ.pop("ECOS_KEY", None)
+    try:
+        assert ecos not in mm.safe(msg), mm.safe(msg)
+        os.environ["ECOS_KEY"] = ecos
+        assert ecos not in mm.safe(msg), mm.safe(msg)
+    finally:
+        os.environ.pop("ECOS_KEY", None)
+        if had is not None:
+            os.environ["ECOS_KEY"] = had
+
+    fred = "abcdef0123456789abcdef0123456789"
+    hit = f"400 Client Error for url: https://api.stlouisfed.org/fred/x?api_key={fred}"
+    had2 = os.environ.pop("FRED_API_KEY", None)
+    try:
+        assert fred not in mc.safe(hit), mc.safe(hit)
+    finally:
+        if had2 is not None:
+            os.environ["FRED_API_KEY"] = had2
+    print("test_diagnostics_never_carry_the_key: OK")
+
+
 def test_calendar_fetch_tries_again_before_giving_up():
     """
     금통위 페이지를 수집 단계에서는 못 받고 2분 뒤 진단 단계에서는 멀쩡히
@@ -1253,6 +1285,7 @@ if __name__ == "__main__":
     test_us_indicator_dates_keep_only_the_ones_people_watch()
     test_us_indicators_say_when_the_key_is_missing()
     test_calendar_fetch_tries_again_before_giving_up()
+    test_diagnostics_never_carry_the_key()
     test_rate_changes_are_the_events()
     test_after_returns_says_nothing_when_the_sample_is_tiny()
     test_after_returns_handles_a_holiday_decision_date()
