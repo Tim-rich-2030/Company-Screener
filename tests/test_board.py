@@ -835,18 +835,23 @@ def test_strong_skips_holidays_and_returns_oldest_first():
     print("test_strong_skips_holidays_and_returns_oldest_first: OK")
 
 
+BIG = 200_000_000_000       # 문턱(1,000억)을 넉넉히 넘는 값
+
+
+def _r(code, disp, val=BIG, market="코스피", chg=0.0, cap=BIG):
+    return {"code": code, "name": code, "market": market, "disparity": disp,
+            "value": val, "chg": chg, "cap": cap}
+
+
 def test_strong_is_measured_against_that_market_index():
     """
     '강하다'는 지수 이격도보다 위라는 뜻이다. 등락률이 아니라 이격도로 잰다.
 
     정렬은 1차 이격도, 2차 거래대금. 이격이 같으면 거래가 실린 쪽이 앞이다.
     """
-    def r(code, disp, val, market="코스피", chg=0.0):
-        return {"code": code, "name": code, "market": market,
-                "disparity": disp, "value": val, "chg": chg}
-
-    rows = [r("A", 5.0, 100), r("B", 5.0, 900), r("C", -1.0, 999),
-            r("D", 12.0, 1, "코스닥", 30.0), r("E", -9.0, 1, "코스닥", -30.0)]
+    rows = [_r("A", 5.0, BIG), _r("B", 5.0, BIG * 9), _r("C", -1.0),
+            _r("D", 12.0, market="코스닥", chg=30.0),
+            _r("E", -9.0, market="코스닥", chg=-30.0)]
     out = mst.build(rows, {"코스피": 0.0, "코스닥": 20.0}, top=10)
 
     k = out["markets"]["코스피"]
@@ -860,6 +865,33 @@ def test_strong_is_measured_against_that_market_index():
     print("test_strong_is_measured_against_that_market_index: OK")
 
 
+def test_strong_drops_stocks_you_cannot_actually_trade():
+    """
+    거래대금·시가총액 문턱을 못 넘으면 네 목록 어디에도 안 올린다.
+
+    안 걸렀을 때 코스닥 1~6위가 거래대금 1억·4,438만·3,105만원짜리로
+    채워졌다. 못 사고 못 파는 종목이다. 게다가 20일 사이 몇 배가 된 종목이라
+    이격도가 +263% 로 나오는데, 그쯤 되면 '20일선 대비'라는 말의 뜻이 없다.
+
+    문턱을 넘은 종목이 몇이었는지는 세어서 남긴다 — 한산한 날 목록이 왜
+    짧은지 화면이 스스로 말해야 한다.
+    """
+    rows = [_r("크다", 3.0), _r("거래없음", 99.0, val=1_000_000),
+            _r("잔챙이", 88.0, cap=1_000_000),
+            _r("떨어짐", -50.0, chg=-29.0)]
+    out = mst.build(rows, {"코스피": 0.0}, top=10)
+    eq([x["code"] for x in out["markets"]["코스피"]["strong"]], ["크다"],
+       "이격 +99% 라도 거래가 없으면 안 올린다")
+    eq(out["markets"]["코스피"]["counted"], 4, "계산한 종목 수는 그대로")
+    eq(out["markets"]["코스피"]["liquid"], 2, "문턱을 넘은 종목 수")
+    eq([x["code"] for x in out["급하락"]], ["떨어짐", "크다"],
+       "급상승·급하락에도 같은 문턱을 쓴다")
+    # 분포는 거래대금만 본다 (시총은 따로 거른다). 셋이 1,000억을 넘는다.
+    eq(out["spread"]["코스피"]["1000억 이상"], 3, "분포를 남겨 문턱을 다시 잰다")
+    eq(out["spread"]["코스피"]["3000억 이상"], 0, "그 위 눈금도 함께 남긴다")
+    print("test_strong_drops_stocks_you_cannot_actually_trade: OK")
+
+
 def test_strong_leaves_the_list_empty_when_the_index_is_unknown():
     """
     지수 이격도를 못 읽으면 '강한 종목'을 만들지 않는다.
@@ -867,9 +899,7 @@ def test_strong_leaves_the_list_empty_when_the_index_is_unknown():
     기준 없이 이격도 상위만 뽑으면 그건 '지수보다 강한 종목'이 아니라 그냥
     많이 오른 종목이다. 이름과 다른 것을 보여주느니 비운다.
     """
-    rows = [{"code": "A", "market": "코스피", "disparity": 9.0,
-             "value": 1, "chg": 1.0}]
-    out = mst.build(rows, {}, top=5)
+    out = mst.build([_r("A", 9.0, chg=1.0)], {}, top=5)
     eq(out["markets"]["코스피"]["strong"], [], "기준이 없으면 비운다")
     eq(out["markets"]["코스피"]["index_disparity"], None, "기준이 없다고 적는다")
     eq(len(out["급상승"]), 1, "급상승은 지수와 무관하니 그대로 나온다")
@@ -1080,6 +1110,7 @@ if __name__ == "__main__":
     test_strong_drops_stocks_without_a_full_window()
     test_strong_skips_holidays_and_returns_oldest_first()
     test_strong_is_measured_against_that_market_index()
+    test_strong_drops_stocks_you_cannot_actually_trade()
     test_strong_leaves_the_list_empty_when_the_index_is_unknown()
     test_strong_tags_themes_but_only_two()
     test_strong_reads_the_same_index_number_the_front_page_shows()
