@@ -26,9 +26,18 @@ import argparse
 import requests
 
 ADMIN_URL = "https://finance.naver.com/sise/management.naver"
-# KIND 투자주의환기종목. 조회 조건 없이 열면 전체 목록이 나온다.
-ALERT_URL = ("https://kind.krx.co.kr/investwarn/alertissue.do"
-             "?method=searchAlertIssueSub&currentPageSize=500&pageIndex=1")
+
+# KIND 투자주의환기종목.
+#
+# 처음에 쓴 ...?method=searchAlertIssueSub 는 **404** 였다. 목록을 그리는 AJAX
+# 조각이라 짐작했는데 그런 주소가 없었다. KIND 의 주소 규칙을 모르는 채로
+# 하나만 찍는 대신, 후보를 몇 개 놓고 되는 것을 쓴다. 전부 404 면 환기종목은
+# 걸러지지 않고, --dump 가 각 후보의 응답을 찍어 다음에 고칠 근거를 남긴다.
+ALERT_URLS = [
+    "https://kind.krx.co.kr/investwarn/alertissue.do?method=searchAlertIssueMain",
+    "https://kind.krx.co.kr/investwarn/alertissue.do",
+    "https://kind.krx.co.kr/investwarn/investwarnissue.do?method=investwarnIssueMain",
+]
 
 TIMEOUT = 20
 UA = ("Mozilla/5.0 (compatible; kkujungbuja/1.0; "
@@ -87,27 +96,37 @@ def admin_issues() -> set:
     return set(NAVER_CODE.findall(doc))
 
 
-def alert_issues() -> set:
+def codes_in_cells(doc: str) -> set:
     """
-    투자주의환기종목 종목코드 (코스닥).
+    표 칸(<td>) 안에 홀로 든 6자리 숫자만 종목코드로 본다.
 
-    KIND 는 표 안에 종목코드를 그대로 적는다. 다만 페이지 어디에나 6자리
-    숫자가 있을 수 있으므로, 표(<td>) 안에 홀로 들어 있는 것만 센다.
+    페이지 어디에나 6자리 숫자가 있다 (전화번호, 우편번호, 사업자번호).
+    표 칸 하나가 통째로 숫자일 때만 센다.
     """
-    try:
-        doc = fetch(ALERT_URL)
-    except Exception as e:                       # noqa: BLE001
-        log(f"::warning::투자주의환기종목 가져오기 실패 ({type(e).__name__}: {e})")
-        return set()
-    if not doc:
-        log("::warning::투자주의환기종목 페이지를 글자로 풀지 못했습니다")
-        return set()
     out = set()
     for cell in re.findall(r"<td[^>]*>(.*?)</td>", doc, re.I | re.S):
         text = html.unescape(re.sub(r"<[^>]+>", " ", cell)).strip()
         if re.fullmatch(r"\d{6}", text):
             out.add(text)
     return out
+
+
+def alert_issues() -> set:
+    """투자주의환기종목 종목코드 (코스닥). 후보 주소를 차례로 시도한다."""
+    for url in ALERT_URLS:
+        try:
+            doc = fetch(url)
+        except Exception as e:                   # noqa: BLE001
+            log(f"  환기종목 후보 실패 ({type(e).__name__}) {url[:70]}")
+            continue
+        if not doc:
+            continue
+        got = codes_in_cells(doc)
+        if got:
+            log(f"  환기종목 출처: {url}")
+            return got
+    log("::warning::투자주의환기종목을 어느 주소에서도 받지 못했습니다")
+    return set()
 
 
 def collect() -> dict:
@@ -131,8 +150,10 @@ def collect() -> dict:
 
 
 def dump() -> int:
-    for name, url, pat in (("관리종목", ADMIN_URL, NAVER_CODE),
-                           ("투자주의환기종목", ALERT_URL, KIND_CODE)):
+    targets = [("관리종목", ADMIN_URL, NAVER_CODE)]
+    targets += [(f"환기종목 후보{i+1}", u, KIND_CODE)
+                for i, u in enumerate(ALERT_URLS)]
+    for name, url, pat in targets:
         log(f"\n===== {name} {url} =====")
         try:
             doc = fetch(url)
