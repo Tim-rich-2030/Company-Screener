@@ -53,9 +53,17 @@ ECOS_URL = ("https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/10000"
 SERIES = [
     {"key": "us_rate", "name": "미국 기준금리", "unit": "%", "step": True,
      "fred": "DFEDTARU", "note": "연방기금목표금리 상단"},
+    # ECOS 키가 있으면 한국은행 기준금리를 그대로 받는다. 키가 없거나 ECOS 가
+    # 막혀 있으면 FRED 의 한국 단기금리로 대신하되, **이름과 설명을 바꿔 단다**.
+    # 콜금리는 기준금리를 따라다니지만 같은 값이 아니다. 같은 이름을 달면
+    # 대용을 원본으로 읽게 된다.
     {"key": "kr_rate", "name": "한국 기준금리", "unit": "%", "step": True,
      "ecos": {"stat": "722Y001", "cycle": "D", "item": "0101000"},
-     "note": "한국은행 기준금리"},
+     "note": "한국은행 기준금리",
+     "fallback": {"name": "한국 단기금리", "note": "기준금리 대용 — ECOS 키가 없어 "
+                                            "FRED 의 한국 콜/단기금리로 대신함",
+                  "fred": ["IRSTCI01KRM156N", "IR3TIB01KRM156N",
+                           "INTDSRKRM193N"]}},
     {"key": "usdkrw", "name": "원/달러", "unit": "원", "step": False,
      "fred": "DEXKOUS", "note": "매매기준율(FRED)"},
     {"key": "wti", "name": "WTI 유가", "unit": "달러", "step": False,
@@ -266,6 +274,7 @@ def collect(years: int = YEARS) -> dict:
 
     out, failed = [], []
     for spec in SERIES:
+        spec = dict(spec)
         name = spec["name"]
         try:
             if "fred" in spec:
@@ -275,6 +284,24 @@ def collect(years: int = YEARS) -> dict:
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
             pts = {}
+
+        # 원본을 못 받았을 때만 대용을 쓴다. 후보를 차례로 시도하고, 쓰게 되면
+        # 이름과 설명을 대용의 것으로 바꿔 단다 — 대용을 원본 이름으로 내보내면
+        # 보는 사람이 알 방법이 없다.
+        if not pts and spec.get("fallback"):
+            fb = spec["fallback"]
+            for fid in fb["fred"]:
+                try:
+                    pts = fetch_fred(fid, start)
+                except Exception as e:           # noqa: BLE001
+                    log(f"  {name} 대용 후보 실패 {fid} ({type(e).__name__})")
+                    continue
+                if pts:
+                    spec["name"] = name = fb["name"]
+                    spec["note"] = f"{fb['note']} ({fid})"
+                    log(f"::warning::{name} — 원본 대신 대용을 씁니다: {fid}")
+                    break
+
         if not pts:
             failed.append(name)
             log(f"  {name}: 없음")

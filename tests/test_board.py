@@ -608,6 +608,41 @@ def test_after_returns_handles_a_holiday_decision_date():
     print("test_after_returns_handles_a_holiday_decision_date: OK")
 
 
+def test_fallback_series_is_relabelled_not_disguised():
+    """
+    ECOS 키가 없으면 한국 기준금리를 FRED 의 단기금리로 대신한다. 그때
+    **이름과 설명을 대용의 것으로 바꿔 단다.**
+
+    콜금리는 기준금리를 따라다니지만 같은 값이 아니다. 같은 이름을 달면
+    보는 사람이 대용을 원본으로 읽는다.
+    """
+    calls = []
+
+    def fake_fred(fid, start):
+        calls.append(fid)
+        return {"20240101": 3.5, "20240301": 3.25} \
+            if fid == "IR3TIB01KRM156N" else {}
+
+    o_fred, o_ecos, o_kospi = mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi
+    mm.fetch_fred, mm.fetch_kospi = fake_fred, (lambda years=10: {})
+    try:
+        mm.fetch_ecos = lambda spec, s, e: {}          # ECOS 안 됨
+        kr = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
+        eq(kr["name"], "한국 단기금리", "대용이면 이름이 바뀐다")
+        assert "대용" in kr["note"] and "IR3TIB01KRM156N" in kr["note"], kr["note"]
+        assert kr["points"], "두 번째 후보에서 받아왔어야 한다"
+
+        calls.clear()
+        mm.fetch_ecos = lambda spec, s, e: {"20240101": 3.5, "20240301": 3.25}
+        kr2 = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
+        eq(kr2["name"], "한국 기준금리", "원본이 되면 이름 그대로")
+        assert "대용" not in kr2["note"]
+        assert not [c for c in calls if "KR" in c], "원본이 되면 대용을 안 부른다"
+    finally:
+        mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi = o_fred, o_ecos, o_kospi
+    print("test_fallback_series_is_relabelled_not_disguised: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -636,4 +671,5 @@ if __name__ == "__main__":
     test_rate_changes_are_the_events()
     test_after_returns_says_nothing_when_the_sample_is_tiny()
     test_after_returns_handles_a_holiday_decision_date()
+    test_fallback_series_is_relabelled_not_disguised()
     print("\nALL BOARD TESTS PASSED")
