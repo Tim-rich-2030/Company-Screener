@@ -233,9 +233,12 @@ def build(rows: list, themes: list, members: dict) -> dict:
                 if x["chg"] is not None and x["n"]:
                     wsum += x["chg"] * x["n"]
                     wn += x["n"]
+            # codes 는 store/ 에만 남는다. market_strong.py 가 이걸로 종목에
+            # 테마 뱃지를 붙인다. 화면은 개수만 쓴다.
             subs.append({"name": s["name"],
                          "themes": slot["themes"],
-                         "stocks": len(slot["codes"])})
+                         "stocks": len(slot["codes"]),
+                         "codes": sorted(slot["codes"])})
         out.append({"name": th["name"], "subs": subs,
                     "stocks": len(codes),
                     "themes": sum(len(s["themes"]) for s in subs),
@@ -306,6 +309,12 @@ def slim_of(payload: dict) -> dict:
     slim = {k: v for k, v in payload.items()
             if k not in ("rows", "markers", "detail_failed", "unmatched")}
     slim["unmatched"] = len(payload.get("unmatched", []))
+    # 편입 종목 코드는 화면이 안 쓴다 (1,855건이라 파일만 커진다).
+    # 종목별 테마 뱃지는 market_strong.json 에 이미 붙어서 나간다.
+    slim["groups"] = [
+        {**g, "subs": [{k: v for k, v in s.items() if k != "codes"}
+                       for s in g["subs"]]}
+        for g in slim.get("groups", [])]
     return slim
 
 

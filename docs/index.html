@@ -62,6 +62,31 @@ h1{font-size:22px;letter-spacing:1px}
 .head .date{margin-left:auto;font-size:11.5px;color:var(--ink-muted);
   font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
 
+/* 머리 — 왼쪽에 오늘 이벤트, 오른쪽에 지수. 토스증권 '발견' 화면의 배치다.
+   다만 칸을 나누는 것은 상자가 아니라 세로 괘선 하나다. */
+.strip{display:flex;align-items:stretch;gap:14px;padding:11px 0 12px;
+  border-bottom:1px solid var(--rule)}
+.ev{flex:0 0 34%;max-width:142px;min-width:0;text-align:left;cursor:pointer;
+  background:none;border:0;padding:0;font:inherit;color:inherit;
+  border-right:1px solid var(--rule)}
+.ev .k{font-size:10.5px;color:var(--ink-muted);letter-spacing:.3px}
+.ev .v{font-family:'Noto Serif KR',serif;font-size:12.5px;line-height:1.35;
+  margin-top:3px;padding-right:12px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden}
+.ev .d{font-size:10.5px;color:var(--ink-muted);margin-top:2px}
+/* 지수는 옆으로 넘긴다. 다섯 개를 억지로 우겨넣으면 숫자가 깨진다. */
+.idx{flex:1;min-width:0;display:flex;gap:15px;overflow-x:auto;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.idx::-webkit-scrollbar{display:none}
+.idx button{flex:0 0 auto;min-width:92px;background:none;border:0;
+  padding:0 0 3px;font:inherit;color:inherit;cursor:pointer;text-align:left;
+  white-space:nowrap;border-bottom:2px solid transparent}
+.idx button.on{border-bottom-color:var(--accent)}
+.idx .k{font-size:10.5px;color:var(--ink-muted)}
+.idx .v{font-size:13.5px;margin-top:2px;line-height:1.25}
+.idx .c{font-size:11px;line-height:1.3}
+
 /* 목차 — 어느 면이 있는지 위에 붙여 둔다. 스크롤해도 따라온다. */
 .toc{position:sticky;top:0;z-index:20;background:var(--paper);
   display:flex;gap:15px;overflow-x:auto;scrollbar-width:none;
@@ -83,7 +108,7 @@ h2 .note{margin-left:auto;font-family:'Pretendard',sans-serif;font-size:11.5px;
 
 /* 1면은 스크롤 없이 완결된다. 차트가 남는 높이를 먹고, 아래 세 줄은 고정. */
 #today{margin-top:0;border-top:0;padding-top:0;
-  min-height:calc(100dvh - 118px);display:flex;flex-direction:column}
+  min-height:calc(100dvh - 196px);display:flex;flex-direction:column}
 
 /* 전환은 박스가 아니라 밑줄로 표시한다. */
 .tabs{display:flex;gap:22px;padding:8px 0 0}
@@ -145,6 +170,88 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
   text-overflow:ellipsis;font-family:'Noto Serif KR',serif;font-size:14px}
 .tbl td+td{padding-left:14px}
 .tbl .mark{color:var(--accent);font-size:11px;margin-right:4px}
+
+/* 종목 줄 — 순위 · 이름(+테마) · 이격 / 값들. 두 줄로 눕힌다.
+   한 줄에 다 넣으면 종목명이 잘리고, 잘린 종목명은 아무 쓸모가 없다. */
+.lst{font-size:13px}
+.lst .r{display:flex;align-items:flex-start;gap:11px;width:100%;
+  padding:10px 0;border-bottom:1px solid var(--rule);
+  background:none;border-left:0;border-right:0;border-top:0;
+  font:inherit;color:inherit;text-align:left;cursor:pointer}
+.lst .no{flex:0 0 18px;color:var(--ink-muted);font-size:11.5px;padding-top:2px}
+.lst .mid{flex:1;min-width:0}
+.lst .nm{display:block;font-family:'Noto Serif KR',serif;font-size:14.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lst .sub{display:block;font-size:11.5px;color:var(--ink-muted);margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lst .rt{flex:0 0 auto;text-align:right}
+.lst .gap{display:block;font-size:14px}
+.lst .amt{display:block}
+.lst .gap i{font-style:normal;font-size:10px;color:var(--ink-muted);
+  margin-right:3px}
+.lst .amt{font-size:11.5px;color:var(--ink-muted);margin-top:3px}
+/* 테마 뱃지 — 상자가 아니라 괘선 하나로 두른다. */
+.tag{display:inline-block;font-size:10.5px;line-height:1.5;padding:0 5px;
+  margin-right:4px;color:var(--ink-muted);border:1px solid var(--rule);
+  font-family:'Pretendard',sans-serif}
+.why{font-size:11.5px;color:var(--ink-muted);padding:9px 0 0;line-height:1.65}
+
+/* 종목 상세 — 아래에서 올라오는 장. 화면을 갈아엎지 않고 위에 덮는다. */
+.sheet{position:fixed;inset:0;z-index:60;display:none}
+.sheet.on{display:block}
+.sheet .veil{position:absolute;inset:0;background:rgba(0,0,0,.35)}
+.sheet .card{position:absolute;left:0;right:0;bottom:0;max-height:92dvh;
+  overflow-y:auto;background:var(--paper);border-top:3px solid var(--ink);
+  padding:0 18px calc(24px + env(safe-area-inset-bottom));
+  max-width:760px;margin:0 auto}
+.sheet .top{position:sticky;top:0;background:var(--paper);z-index:2;
+  display:flex;align-items:baseline;gap:10px;padding:14px 0 10px;
+  border-bottom:1px solid var(--rule)}
+.sheet .top b{font-family:'Noto Serif KR',serif;font-weight:400;font-size:17px}
+.sheet .top .x{margin-left:auto;background:none;border:0;font:inherit;
+  font-size:20px;line-height:1;color:var(--ink-muted);cursor:pointer;padding:0 4px}
+.sheet h3{font-family:'Noto Serif KR',serif;font-weight:400;font-size:13px;
+  color:var(--ink-muted);margin:22px 0 8px;letter-spacing:.3px}
+.sheet .line{height:170px;margin-top:4px}
+/* 범위 막대 — 오늘 값이 20일 폭 어디쯤인지. 숫자만으로는 안 보인다. */
+.band{height:3px;background:var(--rule);position:relative;margin:14px 0 6px}
+.band i{position:absolute;top:-3px;width:9px;height:9px;margin-left:-4px;
+  border-radius:50%;background:var(--accent)}
+.band+.ends{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--ink-muted)}
+.kv{display:flex;flex-wrap:wrap;gap:0 22px}
+.kv div{flex:1 0 40%;display:flex;justify-content:space-between;
+  padding:7px 0;border-bottom:1px solid var(--rule);font-size:12.5px;gap:10px}
+.kv span{color:var(--ink-muted)}
+/* 순매수 — 개인과 외국인을 같은 자로 재야 길이가 뜻을 갖는다. */
+.flow{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px}
+.flow span{flex:0 0 44px;color:var(--ink-muted)}
+.flow b{flex:0 0 92px;font-weight:400;text-align:right}
+.flow .bar{flex:1;height:6px;background:var(--rule);position:relative}
+.flow .bar i{position:absolute;top:0;bottom:0}
+
+/* 일정 전체 보기 — 주별 / 월별 */
+.ovl{position:fixed;inset:0;z-index:70;display:none;background:var(--paper);
+  overflow-y:auto}
+.ovl.on{display:block}
+.ovl .in{max-width:760px;margin:0 auto;
+  padding:calc(14px + env(safe-area-inset-top)) 18px
+          calc(28px + env(safe-area-inset-bottom))}
+.ovl .top{display:flex;align-items:baseline;gap:14px;padding-bottom:10px;
+  border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--paper)}
+.ovl .top b{font-family:'Noto Serif KR',serif;font-weight:400;font-size:17px}
+.ovl .top .x{background:none;border:0;font:inherit;font-size:20px;
+  color:var(--ink-muted);cursor:pointer;padding:0 4px}
+.mon{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:14px}
+.mon td{border-top:1px solid var(--rule);vertical-align:top;padding:6px 3px 10px;
+  width:20%;font-size:10.5px;line-height:1.45}
+.mon .dn{font-size:12px;margin-bottom:4px;
+  font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+.mon .dn.off{color:var(--ink-muted)}
+.mon .dn.now{color:var(--accent)}
+.mon em{font-style:normal;display:block;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;border-left:2px solid var(--rule);padding-left:4px;
+  margin-bottom:3px}
 
 /* 캘린더 — 날짜가 왼쪽 기둥이다. 오늘이 어디인지 목록 안에 선으로 긋는다. */
 .cal{font-size:13px}
@@ -208,15 +315,22 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </div>
   <div class="rule2"></div>
 
+  <!-- 머리 — 왼쪽 오늘 이벤트, 오른쪽 지수 다섯. 지수를 누르면 아래 차트가 바뀐다. -->
+  <div class="strip">
+    <button class="ev" id="ev"><div class="k">오늘 이벤트</div>
+      <div class="v">–</div><div class="d"></div></button>
+    <div class="idx" id="idx"></div>
+  </div>
+
   <nav class="toc" id="toc">
-    <a href="#today">오늘</a><a href="#picks">종목</a><a href="#tree">지도</a>
-    <a href="#cal">일정</a><a href="#news">뉴스</a><a href="#macro">기록</a>
-    <a href="#etf">참고</a><a class="last" href="stocks.html">종목 실적 ›</a>
+    <a href="#today">오늘</a><a href="#strong">강한 종목</a><a href="#picks">조건</a>
+    <a href="#tree">지도</a><a href="#cal">일정</a><a href="#news">뉴스</a>
+    <a href="#macro">기록</a><a href="#etf">참고</a>
+    <a class="last" href="stocks.html">종목 실적 ›</a>
   </nav>
 
-  <!-- 1면 — 지수가 어디쯤인가, 그리고 안쪽 면으로 넘기는 세 줄. -->
+  <!-- 1면 — 고른 지수가 어디쯤인가. -->
   <section id="today">
-    <div class="tabs" id="tabs"></div>
     <div class="legend" id="legend"></div>
     <div id="chart"></div>
     <div class="figs" id="figs"></div>
@@ -224,14 +338,21 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div class="lead" id="lead"></div>
   </section>
 
+  <section id="strong">
+    <h2><span class="no">二</span>지수보다 강한 종목<span class="note" id="strong-note"></span></h2>
+    <div class="tabs sm" id="strong-tabs"></div>
+    <div class="lst" id="strong-list"></div>
+    <div class="why" id="strong-why"></div>
+  </section>
+
   <section id="picks">
-    <h2><span class="no">二</span>조건에 걸린 종목<span class="note" id="picks-note"></span></h2>
+    <h2><span class="no">三</span>조건에 걸린 종목<span class="note" id="picks-note"></span></h2>
     <div id="picks-list"></div>
     <div class="rule-line" id="picks-rule"></div>
   </section>
 
   <section id="tree">
-    <h2><span class="no">三</span>시장 지도<span class="note" id="tree-note"></span></h2>
+    <h2><span class="no">四</span>시장 지도<span class="note" id="tree-note"></span></h2>
     <div class="tabs sm" id="tree-tabs"></div>
     <div id="map"></div>
     <div class="scale" id="tree-scale"></div>
@@ -239,19 +360,19 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </section>
 
   <section id="cal">
-    <h2><span class="no">四</span>일정<span class="note" id="cal-note"></span></h2>
+    <h2><span class="no">五</span>일정<span class="note" id="cal-note"></span></h2>
     <div class="cal" id="cal-list"></div>
     <div class="rule-line" id="cal-why"></div>
   </section>
 
   <section id="news">
-    <h2><span class="no">五</span>주요 뉴스<span class="note" id="news-note"></span></h2>
+    <h2><span class="no">六</span>주요 뉴스<span class="note" id="news-note"></span></h2>
     <div class="tabs sm" id="news-tabs"></div>
     <div class="news" id="news-list"></div>
   </section>
 
   <section id="macro">
-    <h2><span class="no">六</span>지표 기록<span class="note" id="macro-note"></span></h2>
+    <h2><span class="no">七</span>지표 기록<span class="note" id="macro-note"></span></h2>
     <div class="tabs sm" id="macro-tabs"></div>
     <div class="figs" id="macro-figs"></div>
     <div id="macro-chart"></div>
@@ -260,13 +381,25 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </section>
 
   <section id="etf">
-    <h2><span class="no">七</span>ETF<span class="note" id="etf-note"></span></h2>
+    <h2><span class="no">八</span>ETF<span class="note" id="etf-note"></span></h2>
     <div class="tabs sm" id="etf-tabs"></div>
     <div id="etf-list"></div>
   </section>
 
   <footer id="foot"></footer>
 </div>
+
+<!-- 종목 상세 — 목록에서 종목을 누르면 아래에서 올라온다. -->
+<div class="sheet" id="sheet"><div class="veil" data-close="1"></div>
+  <div class="card" id="sheet-card"></div></div>
+
+<!-- 일정 전체 — 머리의 '오늘 이벤트' 를 누르면 열린다. -->
+<div class="ovl" id="ovl"><div class="in">
+  <div class="top"><b>일정</b>
+    <div class="tabs sm" id="ovl-tabs" style="padding:0"></div>
+    <button class="x" data-close="1" style="margin-left:auto">✕</button></div>
+  <div id="ovl-body"></div>
+</div></div>
 
 <script src="assets/vendor/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -302,29 +435,32 @@ function renderLead(){
   if (!el) return;
   var out = [];
 
-  if (CAL){
-    var next = calRows(CAL).filter(function(r){ return r.n >= 0; }).slice(0, 2);
-    out.push(leadRow('#cal', '다가올 일', next.length
-      ? next.map(function(r){
-          return '<em class="num">' + dday(r.n) + '</em> ' + esc(r.k); }).join(' · ')
-      : '예정된 일정이 없습니다', '四 '));
+  // 다가올 일정은 머리에 이미 있다. 여기서 또 적지 않는다.
+  if (STRONG){
+    var st = [];
+    ['코스피', '코스닥'].forEach(function(m){
+      var d = (STRONG.markets || {})[m];
+      if (d) st.push(esc(m) + ' <em class="num">' + d.strong_total + '</em>종목');
+    });
+    out.push(leadRow('#strong', '강한 종목',
+                     st.join(' · ') || '아직 없습니다', '二 '));
   }
   if (PICKS){
     // 이름까지 넣으면 좁은 폰에서 줄이 잘린다. 이름은 二면에 있다.
     var n = (PICKS.items || []).length, d = picksDelta(PICKS);
     out.push(leadRow('#picks', '조건 종목',
       '<em class="num">' + n + '</em>종목 · ' +
-      (d.kept ? esc(d.txt) : '<em class="chg">' + esc(d.txt) + '</em>'), '二 '));
+      (d.kept ? esc(d.txt) : '<em class="chg">' + esc(d.txt) + '</em>'), '三 '));
   }
   if (TREE){
     // '오늘 무엇이 올랐나' 는 종목이 아니라 업종으로 답한다. 한 종목이 올랐다는
     // 것보다 어느 갈래가 움직였는지가 하루를 설명한다.
-    var s = (TREE.sectors || []).slice()
+    var sec = (TREE.sectors || []).slice()
       .sort(function(a, b){ return b.chg - a.chg; }).slice(0, 2);
-    out.push(leadRow('#tree', '오른 곳', s.length
-      ? s.map(function(x){ return esc(x.name) + ' <em class="num">' +
+    out.push(leadRow('#tree', '오른 곳', sec.length
+      ? sec.map(function(x){ return esc(x.name) + ' <em class="num">' +
           signed(x.chg, 1) + '%</em>'; }).join(' · ')
-      : '업종 자료가 없습니다', '三 '));
+      : '업종 자료가 없습니다', '四 '));
   }
   el.innerHTML = out.join('');
 }
@@ -352,9 +488,43 @@ function sma(rows, w){
   return out;
 }
 
+/* 해외 지수는 종가만 온다. 봉을 그릴 수 없으니 선으로 그리고 그렇다고 적는다. */
+function drawWorld(s){
+  var el = $('chart');
+  if (chart){ chart.remove(); chart = null; }
+  el.innerHTML = '';
+  $('figs').innerHTML =
+    fig('종가', num(s.last, 2), '') +
+    fig('전일 대비', s.chg === null ? '–' : signed(s.chg, 2) + '%', cls(s.chg)) +
+    fig('기준일', ymd(s.date).slice(5), '');
+  $('state').innerHTML = esc(s.name) +
+    ' 종가입니다. 20일선 이격은 우리가 직접 받는 코스피·코스닥에만 냅니다.' +
+    '<div class="sub">' + esc(s.note || '') + '</div>';
+  if (!window.LightweightCharts || (s.points || []).length < 2) return;
+  var muted = cssVar('--ink-muted'), rule = cssVar('--rule');
+  chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth, height: el.clientHeight,
+    layout: {background:{color:'transparent'}, textColor: muted,
+             fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
+    grid: {vertLines:{visible:false}, horzLines:{color: rule}},
+    rightPriceScale:{borderColor: rule}, timeScale:{borderColor: rule},
+    crosshair:{mode:1}, handleScroll:true, handleScale:true,
+  });
+  chart.addLineSeries({color: cssVar('--accent'), lineWidth:2,
+    priceLineVisible:false}).setData(s.points.map(function(p){
+      return {time: toTime(p[0]), value: p[1]}; }));
+  if (ro) ro.disconnect();
+  ro = new ResizeObserver(function(){
+    if (chart) chart.applyOptions({width: el.clientWidth, height: el.clientHeight});
+  });
+  ro.observe(el);
+}
+
 function draw(name){
   CUR = name;
   renderTabs();
+  var w = worldOf(name);
+  if (w) return drawWorld(w);
   var series = (DATA.series || {})[name] || {};
   var rows = Object.keys(series).sort().map(function(d){
     var b = bar(series[d]);
@@ -401,13 +571,60 @@ function draw(name){
   ro.observe(el);
 }
 
+// =============================================================================
+// 머리의 지수 다섯 — 코스피·코스닥은 우리가 받은 봉, 해외 셋은 FRED 종가.
+//
+// 해외는 **하루 늦다.** 미국 장이 새벽에 끝나고 FRED 에 올라오기까지 시차가
+// 있다. 같은 줄에 세워 두면 같은 날짜로 읽히므로 날짜를 함께 적는다.
+// =============================================================================
+var WORLD = null;
+
+function worldOf(key){
+  var all = (WORLD && WORLD.series) || [];
+  for (var i = 0; i < all.length; i++) if (all[i].key === key) return all[i];
+  return null;
+}
+
+/* 지수의 전일 대비. computed 에는 이격도만 있어서 종가 두 개로 직접 낸다. */
+function idxChange(name){
+  var s = (DATA && DATA.series || {})[name] || {};
+  var ks = Object.keys(s).sort();
+  if (ks.length < 2) return null;
+  var a = bar(s[ks[ks.length - 2]]).c, b = bar(s[ks[ks.length - 1]]).c;
+  return a ? (b - a) / a * 100 : null;
+}
+
+function strip(){
+  var out = [];
+  NAMES.forEach(function(n){
+    var d = (DATA.computed || DATA).indices[n];
+    out.push({key: n, name: n, last: d.close, chg: idxChange(n), krx: true});
+  });
+  ((WORLD && WORLD.series) || []).forEach(function(s){
+    out.push({key: s.key, name: s.name, last: s.last, chg: s.chg,
+              date: s.date, krx: false});
+  });
+  return out;
+}
+
+function renderStrip(){
+  $('idx').innerHTML = strip().map(function(s){
+    return '<button data-k="' + esc(s.key) + '"' +
+      (s.key === CUR ? ' class="on"' : '') + '><div class="k">' + esc(s.name) +
+      '</div><div class="v num">' + num(s.last, 2) + '</div>' +
+      '<div class="c num ' + cls(s.chg) + '">' +
+      (s.chg === null ? '–' : signed(s.chg, 2) + '%') + '</div></button>';
+  }).join('');
+}
+
 function renderTabs(){
-  $('tabs').innerHTML = NAMES.map(function(n){
-    return '<button class="tab' + (n === CUR ? ' on' : '') + '" data-n="' +
-      esc(n) + '">' + esc(n) + '</button>'; }).join('');
-  $('legend').innerHTML = MAS.map(function(p){
-    return '<span><i style="background:var(' + p[1] + ')"></i>' + p[0] +
-           '일선</span>'; }).join('');
+  renderStrip();
+  $('legend').innerHTML = worldOf(CUR)
+    ? '<span>' + esc(worldOf(CUR).note || '') + ' · ' +
+      ymd(worldOf(CUR).date) + ' 기준 — 우리 장보다 하루 늦게 옵니다</span>'
+    : MAS.map(function(p){
+        return '<span><i style="background:var(' + p[1] + ')"></i>' + p[0] +
+               '일선</span>'; }).join('');
 }
 
 function fig(k, v, c, unit){
@@ -461,9 +678,9 @@ function renderNumbers(name){
   renderLead();
 }
 
-$('tabs').addEventListener('click', function(e){
-  var b = e.target.closest('.tab');
-  if (b && b.dataset.n !== CUR) draw(b.dataset.n);
+$('idx').addEventListener('click', function(e){
+  var b = e.target.closest('button');
+  if (b && b.dataset.k !== CUR) draw(b.dataset.k);
 });
 
 // =============================================================================
@@ -590,6 +807,7 @@ function renderCal(c){
                  : '<div class="rule-line">앞으로 예정된 일정이 없습니다.</div>');
   var mb = $('cal-more');
   if (mb) mb.addEventListener('click', function(){ CAL_ALL = true; renderCal(c); });
+  renderEv();
 
   $('cal-note').textContent = next.length ? '다가올 ' + next.length + '건' : '';
   renderLead();
@@ -987,6 +1205,317 @@ $('news-tabs').addEventListener('click', function(e){
 });
 
 // =============================================================================
+// 지수보다 강한 종목
+//
+// 등락률이 아니라 **20일선 이격도**로 잰다. 어제 20% 오른 종목이 오늘 1%
+// 오른 것과, 석 달 눌려 있던 종목이 오늘 1% 오른 것은 다른 일이다.
+// 테마에 엮이면 이격이 며칠 만에 벌어졌다 그만큼 빠지기도 해서, 테마에 걸린
+// 종목은 어느 테마인지 함께 적는다. 빼지 않는다 — 판단은 보는 사람 몫이다.
+// =============================================================================
+var STRONG = null, SV = null;
+
+function money(v){
+  if (v === null || v === undefined) return '–';
+  var a = Math.abs(v);
+  if (a >= 1e12) return (v / 1e12).toFixed(1) + '조';
+  if (a >= 1e8) return Math.round(v / 1e8).toLocaleString('ko-KR') + '억';
+  if (a >= 1e4) return Math.round(v / 1e4).toLocaleString('ko-KR') + '만';
+  return Math.round(v).toLocaleString('ko-KR');
+}
+function strongViews(){ return ['코스피', '코스닥', '급상승', '급하락']; }
+function strongRows(v){
+  if (!STRONG) return [];
+  if (v === '급상승' || v === '급하락') return STRONG[v] || [];
+  return ((STRONG.markets || {})[v] || {}).strong || [];
+}
+function findRow(code){
+  var vs = strongViews();
+  for (var i = 0; i < vs.length; i++){
+    var rs = strongRows(vs[i]);
+    for (var j = 0; j < rs.length; j++) if (rs[j].code === code) return rs[j];
+  }
+  return null;
+}
+
+function renderStrong(){
+  if (!STRONG) return;
+  if (!SV) SV = strongViews()[0];
+  $('strong-tabs').innerHTML = strongViews().map(function(v){
+    return '<button class="tab' + (v === SV ? ' on' : '') + '" data-v="' +
+      esc(v) + '">' + esc(v) + '</button>'; }).join('');
+
+  var rows = strongRows(SV), mk = (STRONG.markets || {})[SV];
+  if (mk){
+    var base = mk.index_disparity;
+    $('strong-note').textContent = base === null
+      ? '지수 이격도를 못 읽어 비어 있습니다'
+      : '지수 ' + signed(base, 2) + '%보다 위 · ' +
+        mk.strong_total + '/' + mk.counted + '종목';
+  } else {
+    $('strong-note').textContent = '종가 기준 등락률 ' +
+      (SV === '급상승' ? '상위 ' : '하위 ') + rows.length;
+  }
+
+  if (!rows.length){
+    $('strong-list').innerHTML =
+      '<div class="miss">이 갈래에 걸린 종목이 없습니다.</div>';
+  } else {
+    $('strong-list').innerHTML = rows.map(function(r, i){
+      var tags = (r.themes || []).map(function(t){
+        return '<i class="tag">' + esc(t.sub) + '</i>'; }).join('');
+      return '<button class="r" data-c="' + esc(r.code) + '">' +
+        '<span class="no num">' + (i + 1) + '</span><span class="mid">' +
+        '<span class="nm">' + esc(r.name) + '</span>' +
+        '<span class="sub">' + tags + esc(r.sector || '') + '</span></span>' +
+        '<span class="rt"><span class="gap num ' + cls(r.disparity) + '">' +
+        '<i>이격</i>' + signed(r.disparity, 1) + '%</span>' +
+        '<span class="amt num">' + num(r.close, 0) + ' · ' +
+        '<em style="font-style:normal" class="' + cls(r.chg) + '">' +
+        signed(r.chg, 1) + '%</em> · ' + money(r.value) + '</span></span></button>';
+    }).join('');
+  }
+  $('strong-why').innerHTML =
+    '20일선에서 얼마나 떨어져 있는지(이격도)를 그 시장 지수의 이격도와 견줍니다. ' +
+    '테마에 엮인 종목은 이격이 며칠 만에 벌어졌다 그만큼 빠지기도 해서 어느 ' +
+    '테마인지 함께 적습니다.' +
+    (STRONG.cut ? '<br>전체 ' + STRONG.seen + '종목에서 ' +
+      Object.keys(STRONG.cut).filter(function(k){ return STRONG.cut[k]; })
+        .map(function(k){ return k + ' ' + STRONG.cut[k]; }).join(' · ') +
+      ' 제외 → ' + STRONG.counted + '종목' : '');
+}
+$('strong-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== SV){ SV = b.dataset.v; renderStrong(); }
+});
+$('strong-list').addEventListener('click', function(e){
+  var b = e.target.closest('.r');
+  if (b) openSheet(b.dataset.c);
+});
+
+// =============================================================================
+// 종목 상세
+//
+// 받아온 것만 적는다. 못 받은 칸은 '–' 로 둔다 — 0 으로 채우면 배당이 없는
+// 회사와 값을 못 받은 회사가 같아 보인다.
+// =============================================================================
+var schart = null;
+
+function kv(k, v){
+  return '<div><span>' + k + '</span><b class="num" style="font-weight:400">' +
+    v + '</b></div>';
+}
+
+function flowRow(k, v, max){
+  var w = max ? Math.min(100, Math.abs(v) / max * 100) : 0;
+  var c = v >= 0 ? 'var(--up)' : 'var(--down)';
+  return '<div class="flow"><span>' + k + '</span>' +
+    '<b class="num ' + cls(v) + '">' + (v > 0 ? '+' : '') + money(v) + '</b>' +
+    '<span class="bar"><i style="left:0;width:' + w.toFixed(1) +
+    '%;background:' + c + '"></i></span></div>';
+}
+
+function openSheet(code){
+  var r = findRow(code);
+  if (!r) return;
+  var f = ((STRONG && STRONG.facts) || {})[code] || {};
+  var ser = ((STRONG && STRONG.series) || {})[code] || [];
+  var lo = ser.length ? Math.min.apply(null, ser) : null;
+  var hi = ser.length ? Math.max.apply(null, ser) : null;
+  var pos = (lo !== null && hi > lo) ? (r.close - lo) / (hi - lo) * 100 : 50;
+  var days = (STRONG && STRONG.days) || 20;
+  var mx = Math.max(Math.abs(f.buy_person || 0), Math.abs(f.buy_foreign || 0));
+
+  $('sheet-card').innerHTML =
+    '<div class="top"><b>' + esc(r.name) + '</b>' +
+    '<span class="num">' + num(r.close, 0) + '원</span>' +
+    '<span class="num ' + cls(r.chg) + '">' + signed(r.chg, 2) + '%</span>' +
+    '<button class="x" data-close="1">✕</button></div>' +
+
+    '<h3>' + days + '일 종가</h3><div class="line" id="sheet-chart"></div>' +
+    '<div class="band"><i style="left:' + pos.toFixed(1) + '%"></i></div>' +
+    '<div class="ends"><span class="num">' + days + '일 최저 ' + num(lo, 0) +
+    '</span><span class="num">최고 ' + num(hi, 0) + '</span></div>' +
+
+    '<h3>시세</h3><div class="kv">' +
+    kv('시가', num(r.open, 0)) + kv('종가', num(r.close, 0)) +
+    kv('거래량', money(r.volume) + '주') + kv('거래대금', money(r.value) + '원') +
+    kv('20일선', num(r.sma20, 0)) +
+    kv('이격도', '<span class="' + cls(r.disparity) + '">' +
+       signed(r.disparity, 2) + '%</span>') + '</div>' +
+
+    (mx ? '<h3>투자자 동향 <span style="font-size:11px">순매수 · 그날 하루</span></h3>' +
+      flowRow('개인', f.buy_person || 0, mx) +
+      flowRow('외국인', f.buy_foreign || 0, mx) : '') +
+
+    '<h3>투자 지표</h3><div class="kv">' +
+    kv('시가총액', money(r.cap) + '원') +
+    kv('배당수익률', f.div === undefined ? '–' : f.div.toFixed(2) + '%') +
+    kv('PBR', f.pbr === undefined ? '–' : f.pbr.toFixed(2) + '배') +
+    kv('PER', f.per === undefined ? '–' : f.per.toFixed(2) + '배') +
+    kv('외국인 지분', f.foreign === undefined ? '–' : f.foreign.toFixed(2) + '%') +
+    kv('업종', esc(r.sector || '–')) + '</div>' +
+
+    ((r.themes || []).length ? '<h3>테마</h3><div class="why">' +
+      r.themes.map(function(t){
+        return '<i class="tag">' + esc(t.group) + ' · ' + esc(t.sub) + '</i>';
+      }).join('') + '</div>' : '') +
+
+    '<div class="why">PBR·PER·배당수익률·외국인 지분은 KRX 가 그날 낸 값입니다. ' +
+    'ROE 와 분기별 실적은 <a href="stocks.html" style="color:var(--accent)">' +
+    '종목 실적</a>에 있습니다 (DART 공시로 만든 292종목).</div>';
+
+  $('sheet').classList.add('on');
+  document.body.style.overflow = 'hidden';
+
+  if (schart){ schart.remove(); schart = null; }
+  var el = $('sheet-chart');
+  if (window.LightweightCharts && ser.length > 1 && STRONG.from){
+    // 날짜는 안 담아 왔다. 마지막 점이 기준일이 되도록 거꾸로 세어 붙인다.
+    var end = new Date(+STRONG.date.slice(0,4), +STRONG.date.slice(4,6) - 1,
+                       +STRONG.date.slice(6,8));
+    var pts = ser.map(function(v, i){
+      var d = new Date(end); d.setDate(d.getDate() - (ser.length - 1 - i));
+      return {time: {year:d.getFullYear(), month:d.getMonth()+1, day:d.getDate()},
+              value: v};
+    });
+    schart = LightweightCharts.createChart(el, {
+      width: el.clientWidth, height: el.clientHeight,
+      layout: {background:{color:'transparent'}, textColor: cssVar('--ink-muted'),
+               fontFamily:"'IBM Plex Mono', monospace", fontSize:10},
+      grid: {vertLines:{visible:false}, horzLines:{color: cssVar('--rule')}},
+      rightPriceScale:{borderColor: cssVar('--rule')},
+      timeScale:{borderColor: cssVar('--rule')}, crosshair:{mode:1},
+    });
+    schart.addLineSeries({color: cssVar('--accent'), lineWidth:2,
+      priceLineVisible:false}).setData(pts);
+  }
+}
+
+function closeSheet(){
+  $('sheet').classList.remove('on');
+  document.body.style.overflow = '';
+  if (schart){ schart.remove(); schart = null; }
+}
+$('sheet').addEventListener('click', function(e){
+  if (e.target.closest('[data-close]')) closeSheet();
+});
+
+// =============================================================================
+// 일정 — 머리의 '오늘 이벤트' 와 주별·월별 보기
+// =============================================================================
+var OV = '월별';
+
+function evOf(){
+  /* 오늘 것. 없으면 가장 가까운 다음 일정. 빈 칸으로 두지 않는다. */
+  var rows = calRows(CAL);
+  for (var i = 0; i < rows.length; i++) if (rows[i].n === 0) return rows[i];
+  for (var j = 0; j < rows.length; j++) if (rows[j].n > 0) return rows[j];
+  return null;
+}
+
+function renderEv(){
+  var e = evOf(), b = $('ev');
+  if (!e){
+    b.querySelector('.v').textContent = '예정된 일정이 없습니다';
+    b.querySelector('.d').textContent = '';
+    return;
+  }
+  b.querySelector('.k').textContent = e.n === 0 ? '오늘 이벤트' : '다음 이벤트';
+  b.querySelector('.v').textContent = e.k;
+  b.querySelector('.d').textContent = ymd(e.d).slice(5) + ' · ' + dday(e.n);
+}
+
+function weekOf(d){
+  /* 월요일이 한 주의 시작. */
+  var x = new Date(d);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+function ymdOf(d){
+  return d.getFullYear() +
+    ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+}
+function today(){
+  var a = (CAL && CAL.as_of) || '';
+  return a ? new Date(+a.slice(0,4), +a.slice(4,6) - 1, +a.slice(6,8)) : new Date();
+}
+
+function renderOvl(){
+  $('ovl-tabs').innerHTML = ['주별', '월별'].map(function(v){
+    return '<button class="tab' + (v === OV ? ' on' : '') + '" data-v="' +
+      esc(v) + '">' + esc(v) + '</button>'; }).join('');
+  var rows = calRows(CAL), by = {};
+  rows.forEach(function(r){ (by[r.d] = by[r.d] || []).push(r); });
+  var now = today(), html;
+
+  if (OV === '주별'){
+    var st = weekOf(now), out = [], n = 0;
+    for (var i = 0; i < 7; i++){
+      var d = new Date(st); d.setDate(st.getDate() + i);
+      var key = ymdOf(d), list = by[key] || [];
+      n += list.length;
+      var mine = key === ymdOf(now);
+      out.push('<div class="now"' + (mine ? '' :
+          ' style="color:var(--ink-muted)"') + '>' +
+        ymd(key).slice(5) + ' ' + '일월화수목금토'[d.getDay()] +
+        (mine ? ' · 오늘' : '') + '</div>' +
+        (list.length ? list.map(calRow).join('')
+                     : '<div class="row"><span class="dd"></span>' +
+                       '<span class="meta">–</span></div>'));
+    }
+    html = '<div class="rule-line">' + ymd(ymdOf(st)).slice(5) + ' 주</div>' +
+      '<div class="cal">' + out.join('') + '</div>' +
+      (n ? '' : '<div class="why">이번 주에 잡힌 일정이 없습니다. ' +
+        '월별로 보면 다음 일정이 보입니다.</div>');
+  } else {
+    // 월별은 평일 5칸. 주말에는 장이 안 선다.
+    var first = new Date(now.getFullYear(), now.getMonth(), 1);
+    var last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    var cur = weekOf(first), tr = [];
+    while (cur <= last){
+      var tds = '';
+      for (var k = 0; k < 5; k++){
+        var dd = new Date(cur); dd.setDate(cur.getDate() + k);
+        var kk = ymdOf(dd), off = dd.getMonth() !== now.getMonth();
+        tds += '<td><div class="dn' + (off ? ' off' : '') +
+          (kk === ymdOf(now) ? ' now' : '') + '">' + dd.getDate() + '</div>' +
+          (by[kk] || []).map(function(r){
+            return '<em title="' + esc(r.k) + '">' + esc(r.k) + '</em>'; }).join('') +
+          '</td>';
+      }
+      tr.push('<tr>' + tds + '</tr>');
+      cur = new Date(cur); cur.setDate(cur.getDate() + 7);
+    }
+    html = '<div class="rule-line">' + (now.getMonth() + 1) + '월 · 평일만</div>' +
+      '<table class="mon">' + tr.join('') + '</table>';
+  }
+  $('ovl-body').innerHTML = html + '<div class="why">' +
+    ((CAL && CAL.note) || '') + '</div>';
+}
+
+$('ev').addEventListener('click', function(){
+  if (!CAL) return;
+  renderOvl();
+  $('ovl').classList.add('on');
+  document.body.style.overflow = 'hidden';
+});
+$('ovl').addEventListener('click', function(e){
+  if (e.target.closest('[data-close]')){
+    $('ovl').classList.remove('on');
+    document.body.style.overflow = '';
+    return;
+  }
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== OV){ OV = b.dataset.v; renderOvl(); }
+});
+addEventListener('keydown', function(e){
+  if (e.key !== 'Escape') return;
+  closeSheet();
+  $('ovl').classList.remove('on');
+  document.body.style.overflow = '';
+});
+
+// =============================================================================
 // 불러오기 — 칸마다 따로 실패한다. 하나가 없다고 화면 전체가 죽지 않는다.
 // =============================================================================
 function grab(file){
@@ -1056,6 +1585,17 @@ grab('screen.json').then(renderPicks).catch(function(){
 grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');
 });
+
+grab('market_strong.json').then(function(p){
+  STRONG = p; renderStrong(); renderLead();
+}).catch(function(){
+  hide('strong', '지수보다 강한 종목');
+});
+
+// 해외 지수는 없어도 코스피·코스닥은 그대로 나온다. 머리에서 그 셋만 빠진다.
+grab('market_world.json').then(function(p){
+  WORLD = p; renderStrip();
+}).catch(function(){});
 
 grab('market_tree.json').then(function(p){
   TREE = p;
