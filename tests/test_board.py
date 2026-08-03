@@ -18,6 +18,7 @@ import market_news as mn
 import market_flags
 import market_calendar as mc
 import market_macro as mm
+import market_theme as mth
 
 
 def eq(got, want, what):
@@ -710,6 +711,132 @@ def test_kospi_is_fetched_year_by_year():
     print("test_kospi_is_fetched_year_by_year: OK")
 
 
+# =============================================================================
+# 테마
+# =============================================================================
+
+# 실제 구조에서 뽑아 줄인 것 (theme_probe.py, 2026-08-03).
+# 열: 테마명 · 전일대비 · 전체 · 상승 · 보합 · 하락 · 등락그래프
+THEME_LIST = """
+<table summary="테마별 시세">
+<tr><th>테마명</th><th>전일대비</th></tr>
+<tr><td><a href="/sise/sise_group_detail.naver?type=theme&amp;no=505">로봇(협동로봇)</a></td>
+<td><span class="tah p11 red01">+6.63%</span></td>
+<td>71</td><td>66</td><td>0</td><td>5</td>
+<td><div class="graph"><span style="width:99%"></span><span class="blind">99%</span></div></td></tr>
+<tr><td><a href="/sise/sise_group_detail.naver?type=theme&amp;no=64">HBM(고대역폭메모리)</a></td>
+<td><span class="tah p11 nv01">-1.20%</span></td>
+<td>18</td><td>3</td><td>1</td><td>14</td>
+<td><div class="graph"><span class="blind">17%</span></div></td></tr>
+<tr><td><a href="/sise/sise_group_detail.naver?type=theme&amp;no=99">우주항공</a></td>
+<td><span>+2.00%</span></td><td>9</td><td>7</td><td>0</td><td>2</td></tr>
+<tr><td><a href="/sise/sise_group_detail.naver?type=theme&amp;no=999">알수없는테마</a></td>
+<td><span>+0.10%</span></td><td>5</td><td>2</td><td>0</td><td>3</td></tr>
+</table>
+"""
+
+
+def test_theme_row_reads_the_numbers_that_follow_the_link():
+    """
+    <tr> 로 자르지 않고 테마 링크를 기준으로 자른다. 표 구조가 바뀌어도
+    링크 뒤에 등락률·종목수가 오는 순서는 잘 안 바뀐다.
+
+    등락그래프 칸의 '99%' 를 종목 수로 착각하면 안 된다 — 소수점 없는 %는
+    등락률이 아니고, % 앞의 숫자는 종목 수도 아니다.
+    """
+    rows = mth.parse_list(THEME_LIST)
+    eq([r["no"] for r in rows], [505, 64, 99, 999], "테마 번호")
+    eq(rows[0]["name"], "로봇(협동로봇)", "테마 이름")
+    eq((rows[0]["chg"], rows[0]["n"], rows[0]["up"], rows[0]["flat"],
+        rows[0]["down"]), (6.63, 71, 66, 0, 5), "등락률과 종목 수")
+    eq(rows[1]["chg"], -1.20, "내린 날은 음수")
+    print("test_theme_row_reads_the_numbers_that_follow_the_link: OK")
+
+
+def test_theme_members_come_from_the_biggest_block_not_the_sidebar():
+    """
+    네이버 금융 페이지에는 '인기 검색 종목' 사이드바가 딸려 있고 거기에도
+    같은 모양의 종목 링크가 있다. 뉴스에서 링크 모양만 보고 집었다가 사이드바를
+    주요뉴스로 내보낸 적이 있다 — 여기서는 같은 실수를 하지 않는다.
+
+    편입 종목표는 종목 링크가 가장 많이 모인 덩어리다. 어느 덩어리였는지도
+    함께 돌려받아 store/ 에 남긴다.
+    """
+    doc = """
+    <div class="aside_area"><ul class="lst"><li><a href="/item/main.naver?code=005930">삼성전자</a></li>
+    <li><a href="/item/main.naver?code=000660">SK하이닉스</a></li></ul></div>
+    <div class="box_type_l"><table class="type_5"><tbody>
+    <tr><td><a href="/item/main.naver?code=108320">LX세미콘</a></td><td>1,000</td></tr>
+    <tr><td><a href="/item/main.naver?code=108320"><img src="x.gif"></a></td><td>1,000</td></tr>
+    <tr><td><a href="/item/main.nhn?code=042700&amp;page=1">한미반도체</a></td><td>2,000</td></tr>
+    <tr><td><a href="/item/main.naver?code=095340">ISC</a></td><td>3,000</td></tr>
+    </tbody></table></div>
+    """
+    got, marker = mth.parse_members(doc)
+    eq([m["code"] for m in got], ["108320", "042700", "095340"],
+       "사이드바 종목은 빼고, 같은 종목은 한 번만")
+    eq(got[0]["name"], "LX세미콘", "글자가 있는 링크를 남긴다")
+    eq(marker, "type_5", "어느 덩어리에서 집었는지 함께 돌려준다")
+    eq(mth.parse_members("<p>종목이 없다</p>"), ([], ""), "없으면 빈 목록")
+    print("test_theme_members_come_from_the_biggest_block_not_the_sidebar: OK")
+
+
+THEMES = [
+    {"name": "반도체", "subs": [
+        {"name": "HBM·메모리", "match": ["HBM", "메모리"]},
+        {"name": "소부장", "match": ["반도체장비"]}]},
+    {"name": "로봇", "subs": [{"name": "협동로봇", "match": ["로봇"]}]},
+]
+
+
+def test_theme_match_prefers_the_longer_fragment():
+    """긴 조각일수록 좁은 뜻이다. '메모리' 와 'HBM' 이 함께 걸리면 긴 쪽."""
+    eq(mth.match_theme("HBM(고대역폭메모리)", THEMES), ("반도체", "HBM·메모리"),
+       "긴 조각이 이긴다")
+    eq(mth.match_theme("반도체장비", THEMES), ("반도체", "소부장"), "장비")
+    eq(mth.match_theme("알수없는테마", THEMES), None, "안 걸리면 None")
+    print("test_theme_match_prefers_the_longer_fragment: OK")
+
+
+def test_theme_group_change_is_weighted_by_stock_count():
+    """
+    대분류 등락률은 그 아래 테마들의 평균인데, 테마마다 종목 수가 다르다.
+    3종목짜리 테마와 70종목짜리 테마를 같은 무게로 두면 작은 테마가 화면을
+    흔든다. 종목 수로 눌러 평균을 낸다.
+    """
+    rows = [{"no": 1, "name": "HBM", "chg": 10.0, "n": 3},
+            {"no": 2, "name": "반도체장비", "chg": 0.0, "n": 27}]
+    out = mth.build(rows, THEMES, {1: [{"code": "000660", "name": "가"}],
+                                   2: [{"code": "000660", "name": "가"},
+                                       {"code": "042700", "name": "나"}]})
+    semi = [g for g in out["groups"] if g["name"] == "반도체"][0]
+    eq(semi["chg"], 1.0, "(10*3 + 0*27) / 30")
+    eq(semi["themes"], 2, "테마 수")
+    eq(semi["stocks"], 2, "겹치는 종목은 한 번만 센다")
+    robot = [g for g in out["groups"] if g["name"] == "로봇"][0]
+    eq((robot["chg"], robot["themes"]), (None, 0),
+       "걸린 테마가 없으면 등락률을 지어내지 않는다")
+    print("test_theme_group_change_is_weighted_by_stock_count: OK")
+
+
+def test_theme_unmatched_is_counted_not_hidden():
+    """
+    우리 분류에 안 걸린 테마는 조각을 고쳐야 한다는 신호다. 목록은 store/ 에
+    남기고 화면에는 몇 개인지를 넘긴다. 조용히 지우면 영영 못 고친다.
+    """
+    rows = [{"no": 1, "name": "HBM", "chg": 1.0, "n": 3},
+            {"no": 9, "name": "알수없는테마", "chg": 5.0, "n": 4},
+            {"no": 8, "name": "또다른테마", "chg": 5.0, "n": 4}]
+    out = mth.build(rows, THEMES, {})
+    eq(out["unmatched"], ["또다른테마", "알수없는테마"], "미분류를 그대로 남긴다")
+    slim = mth.slim_of({**out, "rows": rows, "markers": {"type_5": 2},
+                        "detail_failed": []})
+    eq(slim["unmatched"], 2, "화면에는 개수만")
+    eq([k for k in ("rows", "markers", "detail_failed") if k in slim], [],
+       "화면이 안 쓰는 것은 안 내보낸다")
+    print("test_theme_unmatched_is_counted_not_hidden: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -741,4 +868,9 @@ if __name__ == "__main__":
     test_fallback_series_is_relabelled_not_disguised()
     test_fallback_is_not_treated_as_a_step_function()
     test_kospi_is_fetched_year_by_year()
+    test_theme_row_reads_the_numbers_that_follow_the_link()
+    test_theme_members_come_from_the_biggest_block_not_the_sidebar()
+    test_theme_match_prefers_the_longer_fragment()
+    test_theme_group_change_is_weighted_by_stock_count()
+    test_theme_unmatched_is_counted_not_hidden()
     print("\nALL BOARD TESTS PASSED")
