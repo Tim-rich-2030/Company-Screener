@@ -52,12 +52,29 @@ UA = ("Mozilla/5.0 (compatible; kkujungbuja/1.0; "
 # 목록을 여러 곳에서 받는다. 한 곳만 보면 그 매체 편집의 그림자가 그대로
 # 순위가 된다. 네이버 뉴스는 국내 주요 일간지·경제지 기사를 한자리에 모아
 # 두므로, 섹션을 나눠 받으면 발행 수를 셀 만한 표본이 된다.
+#
+# 세 번째 칸이 **기사 목록을 담은 덩어리** 다. 이름을 못박는다.
+#
+#   처음엔 '그 쪽에서 가장 큰 덩어리'를 골랐다. 사이드바가 본문 목록보다
+#   작을 거라 여겼는데, 실제로는 반대였다.
+#
+#     덩어리/경제        83건 rl_border · 46건 sa_text
+#     덩어리/증권        83건 rl_border · 36건 sa_text
+#     덩어리/금융        83건 rl_border · 36건 sa_text
+#     덩어리/글로벌 경제   83건 rl_border · 36건 sa_text
+#
+#   rl_border 는 네 쪽 모두에 똑같이 실린 '많이 본 뉴스' 다. 그게 제일 커서
+#   네 쪽 다 같은 83건을 집었고(새것 0건), 표본이 99건으로 쪼그라들면서
+#   경제 섹션 순위에 고깃집 기사와 재판 기사가 올라왔다.
+#
+#   크기로는 못 가른다. 이름으로 가른다. 이름이 바뀌면 그 갈래는 빈다 —
+#   엉뚱한 목록을 헤드라인이라고 내보내는 것보다 낫다 (market_news 와 같은 원칙).
 FEEDS = [
-    ("경제", "https://news.naver.com/section/101"),
-    ("증권", "https://news.naver.com/breakingnews/section/101/258"),
-    ("금융", "https://news.naver.com/breakingnews/section/101/259"),
-    ("글로벌 경제", "https://news.naver.com/breakingnews/section/101/262"),
-    ("금융 주요뉴스", "https://finance.naver.com/news/mainnews.naver"),
+    ("경제", "https://news.naver.com/section/101", "sa_text"),
+    ("증권", "https://news.naver.com/breakingnews/section/101/258", "sa_text"),
+    ("금융", "https://news.naver.com/breakingnews/section/101/259", "sa_text"),
+    ("글로벌 경제", "https://news.naver.com/breakingnews/section/101/262", "sa_text"),
+    ("금융 주요뉴스", "https://finance.naver.com/news/mainnews.naver", "newsList"),
 ]
 
 READ_URL = "https://n.news.naver.com/mnews/article/{oid}/{aid}"
@@ -178,14 +195,18 @@ def ok_title(t: str) -> bool:
             and len(HANGUL.findall(t)) >= MIN_HANGUL)
 
 
-def parse_list(doc: str, base: str, why: dict = None, name: str = "") -> list:
+def parse_list(doc: str, base: str, block: str = "", why: dict = None,
+               name: str = "") -> list:
     """
-    목록에서 기사 제목과 주소를, **가장 큰 덩어리 안에서만** 집는다.
+    목록에서 기사 제목과 주소를, **이름을 지정한 덩어리 안에서만** 집는다.
 
-    한 페이지에는 본문 목록 말고도 '많이 본 뉴스' 같은 곁목록이 함께 온다.
-    문서 순서대로 다 집었더니 경제 섹션에서 고깃집 별점 기사와 재판 기사가
-    올라왔다. 본문 목록은 언제나 그 페이지에서 가장 큰 덩어리다 — 곁목록은
-    대여섯 건뿐이라 개수로 갈리고, class 이름을 못박지 않아도 된다.
+    한 쪽에는 본문 목록 말고 '많이 본 뉴스' 같은 곁목록이 함께 온다. 그리고
+    그 곁목록이 본문 목록보다 클 수 있다 — 네이버 경제 섹션이 그렇다
+    (rl_border 83건 vs sa_text 46건). 크기로는 못 가른다.
+
+    덩어리 이름을 못 찾으면 **빈 목록을 낸다.** 엉뚱한 목록을 헤드라인이라고
+    내보내는 것보다 낫다. 어느 덩어리에 몇 건이 있었는지는 진단에 남으므로,
+    이름이 바뀌면 그걸 보고 고친다.
     """
     doc = doc or ""
     marks = [(m.start(), m.group(2)) for m in MARKER.finditer(doc)]
@@ -215,27 +236,33 @@ def parse_list(doc: str, base: str, why: dict = None, name: str = "") -> list:
     counts = {}
     for h in hits:
         counts[h["block"]] = counts.get(h["block"], 0) + 1
-    best = max(counts, key=lambda k: counts[k])
     if why is not None and name:
-        top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:4]
         why[f"덩어리/{name}"] = " · ".join(f"{v}건 {k[:28]}" for k, v in top)
 
     out, seen = [], set()
     for h in hits:
-        if h["block"] != best or h["key"] in seen:
+        # 덩어리 이름은 'sa_text' 처럼 딱 떨어지기도 하고 'sa_text foo' 처럼
+        # 다른 이름이 붙어 오기도 한다. 들어 있으면 같은 덩어리로 본다.
+        if block and block not in h["block"]:
+            continue
+        if h["key"] in seen:
             continue
         seen.add(h["key"])
         out.append({k: h[k] for k in ("key", "title", "url")})
+    if not out and why is not None and name:
+        why[f"목록/{name}"] = (f"'{block}' 덩어리를 못 찾아 이 갈래는 비웁니다 "
+                              f"— 위 '덩어리/{name}' 을 보고 고칩니다")
     return out
 
 
 def gather(why: dict) -> list:
     """목록을 모두 받아 기사 번호로 중복을 지운다."""
     pool, seen = [], set()
-    for name, url in FEEDS:
+    for name, url, block in FEEDS:
         try:
             doc = fetch(url)
-            items = parse_list(doc, url, why, name)
+            items = parse_list(doc, url, block, why, name)
         except Exception as e:                           # noqa: BLE001
             why[f"목록/{name}"] = f"{type(e).__name__}: {e}"[:140]
             log(f"  {name}: 실패 ({type(e).__name__})")
@@ -247,7 +274,8 @@ def gather(why: dict) -> list:
             seen.add(it["key"])
             pool.append(it)
             fresh += 1
-        why[f"목록/{name}"] = f"{len(items)}건 중 새것 {fresh}건"
+        if items:
+            why[f"목록/{name}"] = f"{len(items)}건 중 새것 {fresh}건"
         log(f"  {name}: {len(items)}건 (새것 {fresh})")
         time.sleep(PAUSE)
     return pool

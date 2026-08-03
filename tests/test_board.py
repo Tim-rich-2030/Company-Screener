@@ -1179,26 +1179,46 @@ def test_a_javascript_fragment_is_not_a_headline():
     print("test_a_javascript_fragment_is_not_a_headline: OK")
 
 
-def test_only_the_biggest_block_on_the_page_is_the_article_list():
+def test_article_list_is_named_not_guessed_by_size():
     """
-    한 쪽에는 본문 목록 말고 '많이 본 뉴스' 같은 곁목록이 함께 온다. 문서
-    순서대로 다 집었더니 경제 섹션에서 고깃집 별점 기사가 올라왔다.
-    본문 목록은 언제나 그 쪽에서 가장 큰 덩어리다.
+    처음엔 '그 쪽에서 가장 큰 덩어리'를 본문 목록으로 봤다. 실제로는 반대였다.
+
+        덩어리/경제   83건 rl_border · 46건 sa_text
+
+    rl_border 는 네 쪽에 똑같이 실린 '많이 본 뉴스' 다. 그게 제일 커서 네 쪽
+    다 같은 83건을 집었고, 표본이 쪼그라들면서 경제 섹션 순위에 고깃집 기사가
+    올라왔다. 크기로는 못 가른다 — 이름으로 가른다.
     """
     doc = """
-    <ul class="sa_list">
-      <a href="/mnews/article/001/1" title="한국은행 기준금리 동결 결정했다">x</a>
-      <a href="/mnews/article/001/2" title="코스피 외국인 순매도 확대되었다">x</a>
-      <a href="/mnews/article/001/3" title="반도체 수출 규제 추가 발표되었다">x</a>
-    </ul>
-    <div class="ranking_home">
-      <a href="/mnews/article/009/9" title="고깃집 사장 분노 반찬 리필 사건">x</a>
-    </div>"""
+    <div class="rl_border">
+      <a href="/mnews/article/009/1" title="많이 본 뉴스 고깃집 사장 분노 사건">x</a>
+      <a href="/mnews/article/009/2" title="많이 본 뉴스 오세훈 재판 유죄 판단">x</a>
+      <a href="/mnews/article/009/3" title="많이 본 뉴스 연예기획사 대표 구속됐다">x</a>
+    </div>
+    <div class="sa_text"><a href="/mnews/article/001/1"
+       title="한국은행 기준금리 동결 결정했다">x</a></div>
+    <div class="sa_text"><a href="/mnews/article/001/2"
+       title="코스피 외국인 순매도 확대되었다">x</a></div>"""
     why = {}
-    rows = mh.parse_list(doc, "https://news.naver.com/section/101", why, "경제")
-    eq([r["key"] for r in rows], ["001/1", "001/2", "001/3"], "본문 목록만")
-    assert "덩어리/경제" in why, why
-    print("test_only_the_biggest_block_on_the_page_is_the_article_list: OK")
+    rows = mh.parse_list(doc, "https://news.naver.com/section/101",
+                         "sa_text", why, "경제")
+    eq([r["key"] for r in rows], ["001/1", "001/2"],
+       "작아도 이름이 맞는 덩어리")
+    assert "rl_border" in why["덩어리/경제"], why
+    print("test_article_list_is_named_not_guessed_by_size: OK")
+
+
+def test_feed_goes_blank_when_the_block_name_is_gone():
+    """
+    이름이 바뀌면 그 갈래는 빈다. 엉뚱한 목록을 헤드라인이라고 내보내는 것보다
+    낫다 — 첫 실행에서 바로 그 일이 일어났다.
+    """
+    doc = ('<div class="rl_border"><a href="/mnews/article/009/1" '
+           'title="많이 본 뉴스 고깃집 사장 분노 사건">x</a></div>')
+    why = {}
+    eq(mh.parse_list(doc, "https://x/", "sa_text", why, "경제"), [], "빈 목록")
+    assert "못 찾아" in why["목록/경제"], why
+    print("test_feed_goes_blank_when_the_block_name_is_gone: OK")
 
 
 def test_office_drops_the_portal_that_only_carried_it():
@@ -1604,6 +1624,7 @@ if __name__ == "__main__":
     test_rank_survives_when_no_body_can_be_read()
     test_unchanged_rank_is_not_written_again()
     test_a_javascript_fragment_is_not_a_headline()
-    test_only_the_biggest_block_on_the_page_is_the_article_list()
+    test_article_list_is_named_not_guessed_by_size()
+    test_feed_goes_blank_when_the_block_name_is_gone()
     test_office_drops_the_portal_that_only_carried_it()
     print("\nALL BOARD TESTS PASSED")

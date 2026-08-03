@@ -575,15 +575,29 @@ function idxChange(name){
   return a ? (b - a) / a * 100 : null;
 }
 
+/* 현황판이 받은 실시간 값. 같은 열쇠(nasdaq·sp500·dow)를 쓴다. */
+function nightOf(key){
+  var rows = (BOARD && BOARD.night) || [];
+  for (var i = 0; i < rows.length; i++) if (rows[i].key === key) return rows[i];
+  return null;
+}
+
 function strip(){
   var out = [];
   NAMES.forEach(function(n){
     var d = (DATA.computed || DATA).indices[n];
     out.push({key: n, name: n, last: d.close, chg: idxChange(n), krx: true});
   });
+  // 해외 지수 값은 **현황판 것을 먼저 쓴다.** FRED 종가는 하루 늦어서, 머리에
+  // 나스닥 25,373(7/31)이 뜨는데 바로 아래 현황판에는 25,913(8/3)이 뜬다.
+  // 한 화면에 같은 지수가 두 값으로 나오면 어느 쪽도 못 믿게 된다.
   ((WORLD && WORLD.series) || []).forEach(function(s){
-    out.push({key: s.key, name: s.name, last: s.last, chg: s.chg,
-              date: s.date, krx: false});
+    var n = nightOf(s.key);
+    var live = n && n.last !== null && n.last !== undefined;
+    out.push({key: s.key, name: s.name,
+              last: live ? n.last : s.last,
+              chg: live ? n.rate : s.chg,
+              date: live ? null : s.date, krx: false});
   });
   return out;
 }
@@ -684,7 +698,10 @@ function hhmm(iso){
 }
 
 function renderNight(){
-  var rows = (BOARD && BOARD.night) || [];
+  // in_board 가 false 인 줄은 목록에 넣지 않는다. 다우가 그렇다 —
+  // 머리의 지수 띠에 쓸 값만 함께 받아 둔 것이라 여기 다섯 줄에는 안 낀다.
+  var rows = ((BOARD && BOARD.night) || []).filter(function(s){
+    return s.in_board !== false; });
   if (!rows.length){
     $('night').innerHTML = '<div class="miss">간밤의 증시를 받지 못했습니다.</div>';
     return;
@@ -802,6 +819,12 @@ function drawTrend(){
     TSER.push({spec: s, series: line, color: color,
                value: s.points[s.points.length - 1][1] / base * 100});
   });
+  // 반년치를 다 보여준다. 기본값으로 두면 마지막 한 달 반만 보여서
+  // '추세'를 보라고 만든 화면이 정작 추세를 자른다.
+  // 오른쪽에 예닐곱 칸을 비워 둔다 — 값표가 선의 끝을 덮지 않게.
+  var len = 0;
+  ser.forEach(function(s){ len = Math.max(len, s.points.length); });
+  tchart.timeScale().setVisibleLogicalRange({from: 0, to: len + 7});
   tchart.timeScale().subscribeVisibleLogicalRangeChange(placeTrendTags);
   requestAnimationFrame(placeTrendTags);
 
@@ -1677,8 +1700,11 @@ function openIdxSheet(key){
   var w = worldOf(key);
   if (!w && idxBars(key).length < 2) return;
   SKIND = 'index'; SIDX = key;
-  var last = w ? w.last : ((DATA.computed || DATA).indices[key] || {}).close;
-  var chg = w ? w.chg : idxChange(key);
+  var n = w ? nightOf(key) : null;
+  var live = n && n.last !== null && n.last !== undefined;
+  var last = w ? (live ? n.last : w.last)
+               : ((DATA.computed || DATA).indices[key] || {}).close;
+  var chg = w ? (live ? n.rate : w.chg) : idxChange(key);
 
   $('sheet-card').innerHTML =
     '<div class="top"><b>' + esc(w ? w.name : key) + '</b>' +
@@ -1893,6 +1919,8 @@ grab('market_signal.json').then(function(p){
 // 파일도 따로 받는다. 한쪽이 늦어도 다른 쪽은 그대로 나온다.
 grab('market_board.json').then(function(p){
   BOARD = p; renderBoard();
+  // 띠의 해외 지수 값이 현황판 것으로 바뀐다 — 다시 그려야 반영된다.
+  if (DATA) renderStrip();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawTrend);
 }).catch(function(){
   $('night').innerHTML = '<div class="miss">간밤의 증시를 아직 받지 못했습니다.</div>';
