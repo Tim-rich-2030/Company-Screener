@@ -100,6 +100,12 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
         run: python market_strong.py
 
+      # 목록에 나온 종목에만 뉴스를 붙인다 (2,500종목에 붙일 이유가 없다).
+      # market_strong.py 가 만든 목록을 읽으므로 반드시 그 뒤에 둔다.
+      - name: 종목 뉴스 (목록에 나온 종목만)
+        continue-on-error: true
+        run: python market_stocknews.py
+
       # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
       # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
       - name: 뉴스 수집 (네이버 금융)
@@ -135,7 +141,9 @@ jobs:
                    store/market_news.json  docs/market_news.json \
                    store/market_theme.json docs/market_theme.json \
                    store/market_strong.json docs/market_strong.json \
-                   store/market_world.json  docs/market_world.json; do
+                   store/market_world.json  docs/market_world.json \
+                   store/market_stocknews.json docs/market_stocknews.json \
+                   docs/market_px.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --staged --quiet; then

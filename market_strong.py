@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import time
 import argparse
 import datetime as dt
 
@@ -43,6 +44,26 @@ BACK_CAL = 45            # 영업일 20일을 채우려고 달력으로 거슬�
 TOP = 40                 # 목록 하나에 담을 종목 수
 EXCLUDE_UNDER = market_tree.EXCLUDE_UNDER
 
+# 거래가 거의 없는 종목을 뺀다.
+#
+#   처음엔 안 걸렀다. 그랬더니 코스닥 1~6위가 거래대금 1억·4,438만·3,105만원
+#   짜리로 채워졌다. 못 사고 못 파는 종목이다. 게다가 20일 사이 몇 배가 된
+#   종목이라 이격도가 +263% 로 나오는데, 그쯤 되면 '20일선 대비'라는 말의 뜻이
+#   사라진다. 코스피는 상위 40개 중 거래대금 100억 이상이 둘뿐이었다.
+#
+#   금액을 고정으로 박아 두면 한산한 날엔 목록이 확 줄고 터진 날엔 헐렁해진다.
+#   그래서 그날 몇 종목이 이 문턱을 넘었는지 화면과 저장 파일에 함께 적는다.
+MIN_VALUE = 100_000_000_000     # 거래대금 1,000억
+MIN_CAP = 100_000_000_000       # 시가총액 1,000억
+
+# 문턱을 다시 정할 때 쓰려고 남기는 분포 (단위: 억). 상위 몇 개만 저장하면
+# 정작 문턱을 옮길 근거가 없다 — 실제로 그래서 한 번 더 돌려야 했다.
+LIQ_STEPS = (10, 50, 100, 300, 500, 1000, 3000)
+
+# 상세 화면 차트용 일봉. 120일선이 화면에 남으려면 240봉쯤은 있어야 한다.
+PX_DAYS = 250
+PX_PAUSE = 0.05          # 종목마다 한 번씩 부르는 유일한 자리다
+
 MARKETS = ("코스피", "코스닥")
 MARKET_ARG = {"코스피": "KOSPI", "코스닥": "KOSDAQ"}
 
@@ -50,6 +71,9 @@ SIGNAL_PATH = os.path.join("store", "market_signal.json")
 THEME_PATH = os.path.join("store", "market_theme.json")
 STORE_PATH = os.path.join("store", "market_strong.json")
 DOCS_PATH = os.path.join("docs", "market_strong.json")
+# 일봉은 따로 둔다. 첫 화면이 읽을 이유가 없고, 같이 넣으면 목록을 보려고
+# 1MB 를 먼저 받게 된다. 종목을 눌렀을 때만 받는다.
+PX_PATH = os.path.join("docs", "market_px.json")
 
 
 def log(msg: str) -> None:
@@ -127,6 +151,47 @@ def series_of(hist: list, days: int = DAYS):
                 }
     full = {c: v for c, v in closes.items() if len(v) == days}
     return full, today
+
+
+def fetch_px(stock, codes, date: str, days: int = PX_DAYS) -> dict:
+    """
+    목록에 나온 종목의 **일봉**. {코드: [[날짜, 시,고,저,종], …]}
+
+    상세 화면의 차트를 지수 차트와 같은 모양(봉 + 20·60·120일선)으로 그리려면
+    120일선이 화면에 남을 만큼은 있어야 한다. 그래서 1년치를 받는다.
+    주봉·월봉은 따로 받지 않고 화면에서 일봉을 묶어 만든다.
+
+    여기만 **종목마다 한 번씩** 부른다. 전종목 한 번짜리로는 과거를 못 받는다.
+    대신 목록에 실제로 나온 종목(최대 160개)만 받는다.
+    """
+    end = dt.datetime.strptime(date, "%Y%m%d").date()
+    start = (end - dt.timedelta(days=int(days * 1.55))).strftime("%Y%m%d")
+    out, failed = {}, []
+    for code in sorted(codes):
+        try:
+            df = stock.get_market_ohlcv_by_date(start, date, code)
+        except Exception as e:                   # noqa: BLE001
+            failed.append(code)
+            if len(failed) <= 3:
+                log(f"  일봉 실패 {code} ({type(e).__name__}: {e})")
+            continue
+        rows = []
+        if df is not None and not df.empty:
+            for idx, row in df.iterrows():
+                c = _f(row, "종가")
+                if not c or c <= 0:              # 거래정지일은 0 으로 온다
+                    continue
+                rows.append([idx.strftime("%Y%m%d"), int(_f(row, "시가") or c),
+                             int(_f(row, "고가") or c), int(_f(row, "저가") or c),
+                             int(c)])
+        if len(rows) >= 2:
+            out[code] = rows[-days:]
+        else:
+            failed.append(code)
+        time.sleep(PX_PAUSE)
+    log(f"  일봉 {len(out)}종목 (실패 {len(failed)}) · "
+        f"평균 {sum(len(v) for v in out.values()) // max(1, len(out))}일")
+    return out
 
 
 def fetch_facts(stock, date: str, codes: set) -> dict:
@@ -232,16 +297,38 @@ def index_disparity(path: str = SIGNAL_PATH) -> dict:
 # 만들기
 # =============================================================================
 
-def build(rows: list, index_disp: dict, top: int = TOP) -> dict:
+def liquid(r, min_value: int = MIN_VALUE, min_cap: int = MIN_CAP) -> bool:
+    return r["value"] >= min_value and r["cap"] >= min_cap
+
+
+def spread(rows: list) -> dict:
+    """시장별 거래대금 분포. 문턱을 다시 정할 때 이것만 보면 된다."""
+    out = {}
+    for m in MARKETS:
+        vals = [r["value"] for r in rows if r["market"] == m]
+        out[m] = {f"{s}억 이상": sum(1 for v in vals if v >= s * 1e8)
+                  for s in LIQ_STEPS}
+    return out
+
+
+def build(rows: list, index_disp: dict, top: int = TOP,
+          min_value: int = MIN_VALUE, min_cap: int = MIN_CAP) -> dict:
     """
     시장별 '지수보다 강한 종목' 과 시장 전체의 급상승·급하락.
 
+    **네 목록 모두 거래대금·시가총액 문턱을 넘은 종목만 담는다.** 못 사고 못
+    파는 종목을 목록에 올리면 그 줄은 읽을 이유가 없다.
+
     강한 종목 정렬은 **1차 이격도, 2차 거래대금**이다. 이격이 같으면 거래가
     실린 쪽을 앞에 둔다 — 같은 이격이라도 손이 많이 탄 쪽이 시장이 본 종목이다.
+
+    '강하다'의 기준은 좁히지 않았다. 지수 이격도보다 위면 강한 것이 맞고,
+    대신 몇 종목 중 몇 종목인지를 그대로 적어 화면이 상황을 말하게 한다.
     """
+    ok = [r for r in rows if liquid(r, min_value, min_cap)]
     markets = {}
     for m in MARKETS:
-        mine = [r for r in rows if r["market"] == m]
+        mine = [r for r in ok if r["market"] == m]
         base = index_disp.get(m)
         strong = []
         if base is not None:
@@ -249,13 +336,16 @@ def build(rows: list, index_disp: dict, top: int = TOP) -> dict:
                             key=lambda r: (-r["disparity"], -r["value"]))
         markets[m] = {
             "index_disparity": None if base is None else round(base, 2),
-            "counted": len(mine),
+            "counted": sum(1 for r in rows if r["market"] == m),
+            "liquid": len(mine),
             "strong_total": len(strong),
             "strong": strong[:top],
         }
-    up = sorted(rows, key=lambda r: -r["chg"])[:top]
-    down = sorted(rows, key=lambda r: r["chg"])[:top]
-    return {"markets": markets, "급상승": up, "급하락": down}
+    up = sorted(ok, key=lambda r: -r["chg"])[:top]
+    down = sorted(ok, key=lambda r: r["chg"])[:top]
+    return {"markets": markets, "급상승": up, "급하락": down,
+            "floor": {"거래대금": min_value, "시가총액": min_cap},
+            "liquid_total": len(ok), "spread": spread(rows)}
 
 
 def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
@@ -334,25 +424,33 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
              for r in lst}
     facts = fetch_facts(stock, date, shown)
 
-    # 상세 화면이 그릴 20일 종가. 보여줄 종목만 담는다 (2,500종목을 다 담으면
-    # 화면이 읽어야 할 파일이 몇 MB 가 된다).
-    series = {c: [int(v) for v in closes[c]] for c in shown if c in closes}
+    px = fetch_px(stock, shown, date)
 
     return {
+        "px": px,
         "date": date, "source": "pykrx", "days": days,
         "from": hist[0][0],
         "seen": seen, "counted": len(rows), "cut": cut,
+        "floor": out["floor"], "liquid_total": out["liquid_total"],
+        "spread": out["spread"],
         "markets": out["markets"], "급상승": out["급상승"], "급하락": out["급하락"],
-        "facts": facts, "series": series,
+        "facts": facts,
     }
 
 
 def save(payload: dict) -> None:
+    px = payload.pop("px", {})
     for path in (STORE_PATH, DOCS_PATH):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    log(f"[저장] {STORE_PATH}, {DOCS_PATH}")
+    # 일봉은 docs/ 에만. store/ 에도 두면 저장소가 하루에 두 배로 커진다.
+    os.makedirs(os.path.dirname(PX_PATH) or ".", exist_ok=True)
+    with open(PX_PATH, "w", encoding="utf-8") as f:
+        json.dump({"date": payload["date"], "days": PX_DAYS, "px": px},
+                  f, ensure_ascii=False, separators=(",", ":"))
+    kb = os.path.getsize(PX_PATH) / 1024
+    log(f"[저장] {STORE_PATH}, {DOCS_PATH}, {PX_PATH} ({kb:,.0f}KB)")
 
 
 def main(argv=None) -> int:
@@ -365,11 +463,16 @@ def main(argv=None) -> int:
     payload = collect(a.date, a.days, a.top)
     save(payload)
 
-    log(f"\n{payload['date']} · {payload['days']}일선 기준")
+    f = payload["floor"]
+    log(f"\n{payload['date']} · {payload['days']}일선 기준 · "
+        f"거래대금 {f['거래대금']/1e8:,.0f}억 · 시총 {f['시가총액']/1e8:,.0f}억 이상")
+    for m, sp in payload["spread"].items():
+        log(f"  [{m}] 거래대금 분포 " + " · ".join(f"{k} {v}" for k, v in sp.items()))
     for m, d in payload["markets"].items():
         base = d["index_disparity"]
         log(f"  [{m}] 지수 이격도 {'–' if base is None else f'{base:+.2f}%'} · "
-            f"강한 종목 {d['strong_total']}/{d['counted']}")
+            f"문턱 통과 {d['liquid']}/{d['counted']} · "
+            f"그중 강한 종목 {d['strong_total']}")
         for r in d["strong"][:5]:
             tag = " ".join(t["sub"] for t in r["themes"]) or "-"
             log(f"      {r['name'][:12]:12} 이격 {r['disparity']:+6.2f}%  "
