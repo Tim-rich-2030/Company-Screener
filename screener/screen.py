@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import json
+import datetime as dt
 
 # --- 조건 (여기만 고치면 걸러지는 종목이 바뀐다) -----------------------------
 # (지표명, 최소, 최대) — None 은 그쪽 방향으로 제한 없음.
@@ -33,6 +34,8 @@ RANK_KEY = "PBR/ROE"
 SHOW = ["PBR", "PER", "ROE(%)"]
 
 DOCS_PATH = os.path.join("docs", "screen.json")
+HISTORY_PATH = os.path.join("store", "screen_history.json")
+KEEP_DAYS = 40          # 기록을 남기는 날 수. 첫 화면은 직전 하루만 본다.
 
 
 def rule_text() -> str:
@@ -109,6 +112,64 @@ def build(data: dict, as_of: str = "") -> dict:
         "screened": len(data),
         "items": hits,
     }
+
+
+def kst_today() -> str:
+    """
+    한국 장 기준 날짜.
+
+    워크플로는 UTC 로 도는데, 한국 장이 끝난 뒤에 돌리면 UTC 로는 아직 같은 날
+    낮이라 날짜가 하루 어긋날 수 있다. 이 목록은 한국 장 종가로 만든 것이므로
+    한국 날짜로 적는다.
+    """
+    return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=9)).strftime("%Y%m%d")
+
+
+def record(payload: dict, today: str = "", path: str = HISTORY_PATH) -> dict:
+    """
+    직전 수집일의 목록과 견주어 무엇이 새로 들어오고 무엇이 빠졌는지 적는다.
+
+    첫 화면에서 '어제와 같은가'에 답하려면 어제 목록이 있어야 하는데, 지표
+    파일에는 오늘 것밖에 없다. 그래서 날짜별 목록을 store/ 에 따로 남긴다.
+
+    같은 날 두 번 돌면 그날 것을 덮어쓰고 **그 전날과** 견준다. 아침 실행에서
+    들어온 종목이 오후 실행에서 조용히 사라지면 안 된다.
+
+    견줄 기록이 없으면 changed 를 None 으로 둔다. 비어 있는 것과 '바뀐 게 없다'는
+    다른 말이다 — 첫 실행에서 '어제와 같음'이라고 적으면 거짓말이 된다.
+    """
+    today = today or kst_today()
+    days = []
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                days = json.load(f).get("days") or []
+        except (ValueError, OSError):
+            days = []                  # 깨진 기록은 없는 것과 같이 다룬다
+    now = {h["code"]: h["name"] for h in payload.get("items", [])}
+
+    prev = None
+    for d in reversed(days):
+        if d.get("date") != today:
+            prev = d
+            break
+    if prev:
+        was = prev.get("items") or {}
+        payload["changed"] = {
+            "since": prev.get("date", ""),
+            "new": [{"code": c, "name": n} for c, n in now.items() if c not in was],
+            "gone": [{"code": c, "name": n} for c, n in was.items() if c not in now],
+        }
+    else:
+        payload["changed"] = None
+
+    days = [d for d in days if d.get("date") != today]
+    days.append({"date": today, "items": now})
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"days": days[-KEEP_DAYS:]}, f,
+                  ensure_ascii=False, separators=(",", ":"))
+    return payload
 
 
 def save(payload: dict, out_dir: str = None) -> str:
