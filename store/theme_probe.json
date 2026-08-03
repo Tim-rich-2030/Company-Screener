@@ -1,0 +1,319 @@
+{
+ "checked_at": "2026-08-03T05:09:08Z",
+ "targets": [
+  {
+   "name": "네이버 테마 목록",
+   "url": "https://finance.naver.com/sise/theme.naver",
+   "status": 200,
+   "final_url": "https://finance.naver.com/sise/theme.naver",
+   "bytes": 82014,
+   "title": "테마별 시세 : Npay 증권",
+   "hangul": true,
+   "tables": 3,
+   "rows": 65,
+   "sample": [
+    [
+     "테마명",
+     "전일대비",
+     "최근3일 등락률(평균)",
+     "전일대비 등락현황",
+     "주도주"
+    ],
+    [
+     "상승",
+     "보합",
+     "하락"
+    ],
+    [
+     "로봇(산업용/협동로봇 등)",
+     "+6.63%",
+     "+1.71%",
+     "66",
+     "0",
+     "5",
+     "티엑스알로..",
+     "원익홀딩스"
+    ],
+    [
+     "2026 하반기 신규상장",
+     "+6.44%",
+     "+6.22%",
+     "2",
+     "0",
+     "2",
+     "매드업",
+     "레몬헬스케.."
+    ],
+    [
+     "항공/저가 항공사(LCC)",
+     "+5.16%",
+     "+1.36%",
+     "9",
+     "0",
+     "0",
+     "티웨이홀딩..",
+     "한진칼"
+    ],
+    [
+     "피지컬 AI/휴머노이드 로봇",
+     "+5.02%",
+     "+1.72%",
+     "36",
+     "0",
+     "7",
+     "한국피아이..",
+     "나우로보틱.."
+    ],
+    [
+     "제습기",
+     "+4.53%",
+     "+2.34%",
+     "5",
+     "0",
+     "3",
+     "위닉스",
+     "에스피지"
+    ],
+    [
+     "유리 기판",
+     "+4.27%",
+     "+1.25%",
+     "20",
+     "0",
+     "1",
+     "태성",
+     "기가비스"
+    ]
+   ],
+   "links_total": 232,
+   "theme_links": 53,
+   "theme_link_sample": [
+    "/sise/theme.naver",
+    "/sise/theme.naver",
+    "/sise/theme.naver?field=name&ordering=asc",
+    "/sise/theme.naver?field=change_rate&ordering=asc",
+    "/sise/theme.naver?field=recent_3days_change_rate&ordering=asc",
+    "/sise/sise_group_detail.naver?type=theme&no=505"
+   ]
+  },
+  {
+   "name": "네이버 테마 목록 2쪽",
+   "url": "https://finance.naver.com/sise/theme.naver?&page=2",
+   "status": 200,
+   "final_url": "https://finance.naver.com/sise/theme.naver?&page=2",
+   "bytes": 82251,
+   "title": "테마별 시세 : Npay 증권",
+   "hangul": true,
+   "tables": 3,
+   "rows": 65,
+   "sample": [
+    [
+     "테마명",
+     "전일대비",
+     "최근3일 등락률(평균)",
+     "전일대비 등락현황",
+     "주도주"
+    ],
+    [
+     "상승",
+     "보합",
+     "하락"
+    ],
+    [
+     "PCB(FPCB 등)",
+     "+2.60%",
+     "+1.17%",
+     "26",
+     "0",
+     "5",
+     "태성",
+     "이브이첨단.."
+    ],
+    [
+     "원자력발전소 해체",
+     "+2.59%",
+     "+0.18%",
+     "10",
+     "1",
+     "4",
+     "케이엔알시..",
+     "우리기술"
+    ],
+    [
+     "전자결제(전자화폐)",
+     "+2.53%",
+     "+0.60%",
+     "11",
+     "0",
+     "2",
+     "쿠콘",
+     "카페24"
+    ],
+    [
+     "페라이트",
+     "+2.51%",
+     "+0.17%",
+     "8",
+     "1",
+     "5",
+     "케스피온",
+     "유니온머티.."
+    ],
+    [
+     "고령화 사회(노인복지)",
+     "+2.48%",
+     "+0.54%",
+     "28",
+     "0",
+     "7",
+     "코오롱티슈..",
+     "앱클론"
+    ],
+    [
+     "일자리(취업)",
+     "+2.46%",
+     "+0.87%",
+     "7",
+     "0",
+     "2",
+     "TS인베스..",
+     "원티드랩"
+    ]
+   ],
+   "links_total": 233,
+   "theme_links": 54,
+   "theme_link_sample": [
+    "/sise/theme.naver",
+    "/sise/theme.naver",
+    "/sise/theme.naver?field=name&ordering=asc",
+    "/sise/theme.naver?field=change_rate&ordering=asc",
+    "/sise/theme.naver?field=recent_3days_change_rate&ordering=asc",
+    "/sise/sise_group_detail.naver?type=theme&no=287"
+   ]
+  },
+  {
+   "name": "네이버 업종/테마 묶음",
+   "url": "https://finance.naver.com/sise/sise_group.naver?type=theme",
+   "status": 200,
+   "final_url": "https://finance.naver.com/sise/sise_group.naver?type=theme",
+   "bytes": 196331,
+   "title": "테마별 시세 : Npay 증권",
+   "hangul": true,
+   "tables": 2,
+   "rows": 435,
+   "sample": [
+    [
+     "테마명",
+     "전일대비",
+     "전일대비 등락현황",
+     "등락그래프"
+    ],
+    [
+     "전체",
+     "상승",
+     "보합",
+     "하락"
+    ],
+    [
+     "로봇(산업용/협동로봇 등)",
+     "+6.63%",
+     "71",
+     "66",
+     "0",
+     "5",
+     "99%"
+    ],
+    [
+     "2026 하반기 신규상장",
+     "+6.44%",
+     "4",
+     "2",
+     "0",
+     "2",
+     "96%"
+    ],
+    [
+     "항공/저가 항공사(LCC)",
+     "+5.16%",
+     "9",
+     "9",
+     "0",
+     "0",
+     "77%"
+    ],
+    [
+     "피지컬 AI/휴머노이드 로봇",
+     "+5.02%",
+     "43",
+     "36",
+     "0",
+     "7",
+     "75%"
+    ],
+    [
+     "제습기",
+     "+4.53%",
+     "8",
+     "5",
+     "0",
+     "3",
+     "68%"
+    ],
+    [
+     "유리 기판",
+     "+4.27%",
+     "21",
+     "20",
+     "0",
+     "1",
+     "64%"
+    ]
+   ],
+   "links_total": 367,
+   "theme_links": 267,
+   "theme_link_sample": [
+    "/sise/theme.naver",
+    "/sise/sise_group_detail.naver?type=theme&no=505",
+    "/sise/sise_group_detail.naver?type=theme&no=615",
+    "/sise/sise_group_detail.naver?type=theme&no=166",
+    "/sise/sise_group_detail.naver?type=theme&no=587",
+    "/sise/sise_group_detail.naver?type=theme&no=328"
+   ]
+  },
+  {
+   "name": "인포스탁 메인",
+   "url": "http://www.infostock.co.kr/",
+   "status": 403,
+   "final_url": "http://www.infostock.co.kr/",
+   "bytes": 915
+  },
+  {
+   "name": "인포스탁 테마(추정)",
+   "url": "http://www.infostock.co.kr/sise/siseD_theme.asp",
+   "status": 403,
+   "final_url": "http://www.infostock.co.kr/sise/siseD_theme.asp",
+   "bytes": 915
+  },
+  {
+   "name": "인포스탁데일리",
+   "url": "https://www.infostockdaily.co.kr/",
+   "status": 200,
+   "final_url": "https://www.infostockdaily.co.kr/",
+   "bytes": 88864,
+   "title": "인포스탁데일리",
+   "hangul": true,
+   "tables": 1,
+   "rows": 1,
+   "sample": [
+    [
+     "항목",
+     "현재가",
+     "전일대비"
+    ]
+   ],
+   "links_total": 148,
+   "theme_links": 0,
+   "theme_link_sample": []
+  }
+ ]
+}
