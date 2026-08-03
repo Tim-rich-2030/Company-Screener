@@ -69,14 +69,17 @@ IDX_URLS = [
 
 NIGHT = [
     {"key": "nasdaq", "name": "나스닥", "market": "US",
-     "syms": ["NAS@IXIC", ".IXIC", "IXIC"],
-     "note": "나스닥 종합지수"},
+     "syms": [".IXIC", "NAS@IXIC"], "note": "나스닥 종합지수"},
     {"key": "sp500", "name": "S&P 500", "market": "US",
-     "syms": ["SPI@SPX", ".INX", "SPX"],
-     "note": "S&P 500 지수"},
+     "syms": [".INX", "SPI@SPX"], "note": "S&P 500 지수"},
     {"key": "sox", "name": "필라델피아 반도체", "market": "US",
-     "syms": ["SPI@SOX", ".SOX", "SOX"],
-     "note": "필라델피아 반도체 지수"},
+     "syms": [".SOX", "SPI@SOX"], "note": "필라델피아 반도체 지수"},
+    # 다우는 '간밤의 증시' 목록에 넣지 않는다 (다섯 줄만 보기로 했다). 다만
+    # 머리의 지수 띠에는 다우가 있고, 거기 값이 FRED 종가라 하루 늦다.
+    # 같은 화면에 나스닥이 두 값으로 나오면 어느 쪽도 못 믿게 되므로,
+    # 띠에 쓸 값만 여기서 함께 받아 둔다.
+    {"key": "dow", "name": "다우", "market": "US", "in_board": False,
+     "syms": [".DJI", "DJI@DJI"], "note": "다우존스 산업평균"},
     {"key": "k200_night", "name": "코스피200 야간선물", "market": "KR_NIGHT",
      "syms": ["KOSPI200F_NIGHT", "CME_KOSPI200", "KPI200F", "K200F"],
      "note": "코스피200 야간선물"},
@@ -84,6 +87,25 @@ NIGHT = [
      "syms": ["KOSDAQ150F_NIGHT", "KQ150F", "KOSDAQ150F"],
      "note": "코스닥150 야간선물"},
 ]
+
+# 야간선물을 어디서 받을 수 있는지는 아직 모른다. 첫 실행이 알려준 것:
+#
+#   api.stock.naver.com/index/KOSPI200F_NIGHT/basic          → 409
+#   polling.finance.naver.com/api/realtime/domestic/index/…  → 200, datas: []
+#
+# 409 는 '그런 심볼이 없다'는 뜻이지 '그런 주소가 없다'가 아니다. 두 주소 다
+# 살아 있고 **심볼만 틀렸다.** 그래서 --probe 로 심볼을 찾는다. 아는 심볼
+# (KOSPI)로 먼저 답이 오는지 확인하고, 네이버 화면이 실제로 쓰는 코드를
+# 페이지에서 긁어 본다 — 짐작으로 이름을 지어내지 않는다.
+PROBE_SYMS = ["KOSPI", "KOSDAQ", "KPI200", "KOSPI200", "KOSPI200F", "K200F",
+              "KRDRVFUK2I", "KRDRVFUKQI", "FUT", "KOSPI200FUT",
+              "KOSPI200F_NIGHT", "NIGHT_KOSPI200F", "CME_KOSPI200"]
+PROBE_PAGES = [
+    "https://finance.naver.com/sise/",
+    "https://finance.naver.com/sise/sise_index.naver?code=KPI200",
+    "https://m.stock.naver.com/domestic/index/KOSPI/total",
+]
+CODE_TOKEN = re.compile(r"(?:code=|/index/|/futures/|symbol=)([A-Za-z0-9_.@]{2,24})")
 
 # 어느 열쇠에 값이 들어 있는지는 주소마다 다르다. 이름 후보를 늘어놓고 찾는다.
 CLOSE_KEYS = ("closePrice", "tradePrice", "currentPrice", "nv", "now", "clpr")
@@ -177,7 +199,9 @@ def quote_of(body) -> dict:
         return {"last": close,
                 "diff": None if diff is None else round(diff, 2),
                 "rate": None if rate is None else round(rate, 2),
-                "at": None if at is None else str(at)[:24],
+                # 시각은 '2026-08-03T17:15:59-04:00' 로 온다. 24자에서 자르면
+                # 시간대가 '-04:0' 으로 잘려 못 읽는 값이 된다.
+                "at": None if at is None else str(at)[:32],
                 "keys": ",".join(list(d)[:10])}
     return {}
 
@@ -320,6 +344,7 @@ def collect(days: int = DAYS) -> dict:
         q = fetch_quote(spec, why)
         row = {"key": spec["key"], "name": spec["name"],
                "market": spec["market"], "note": spec["note"],
+               "in_board": spec.get("in_board", True),
                "last": q.get("last"), "diff": q.get("diff"),
                "rate": q.get("rate"), "at": q.get("at")}
         if row["last"] is None:
@@ -407,13 +432,67 @@ def dump() -> int:
     return 0
 
 
+def probe() -> int:
+    """
+    야간선물 심볼을 **찾는다.** 지어내지 않는다.
+
+    두 가지를 한다.
+      1. 아는 심볼(KOSPI)부터 두드려, 국내 지수 주소가 실제로 답하는 모양을 본다.
+         그 모양을 알아야 답이 온 것과 빈 답을 가릴 수 있다.
+      2. 네이버 화면이 쓰는 코드를 페이지에서 그대로 긁는다. 우리가 상상한
+         이름이 아니라 네이버가 쓰는 이름이어야 한다.
+    """
+    log("===== 1. 후보 심볼")
+    for sym in PROBE_SYMS:
+        for tpl in IDX_URLS:
+            url = tpl.format(sym=sym)
+            try:
+                r = requests.get(url, headers={"User-Agent": UA,
+                                               "Referer": "https://m.stock.naver.com/"},
+                                 timeout=TIMEOUT)
+            except Exception as e:                       # noqa: BLE001
+                log(f"  {sym:18} {url.split('//')[-1][:56]:56} {type(e).__name__}")
+                continue
+            body, mark = None, ""
+            try:
+                body = r.json()
+            except ValueError:
+                mark = "JSON 아님"
+            if body is not None:
+                q = quote_of(body)
+                mark = f"시세 {q['last']}" if q else f"빈 답 {str(body)[:60]}"
+            log(f"  {sym:18} {url.split('//')[-1][:56]:56} {r.status_code} {mark}")
+            time.sleep(PAUSE)
+
+    log("\n===== 2. 네이버 화면이 쓰는 코드")
+    for page in PROBE_PAGES:
+        try:
+            r = requests.get(page, headers={"User-Agent": UA}, timeout=TIMEOUT)
+            doc = r.content.decode("cp949", "replace")
+        except Exception as e:                           # noqa: BLE001
+            log(f"  {page} → {type(e).__name__}")
+            continue
+        codes = sorted(set(CODE_TOKEN.findall(doc)))
+        log(f"  {page} → {r.status_code} · 코드 {len(codes)}개")
+        log("      " + ", ".join(codes[:60]))
+        # 선물·야간이라는 낱말이 실제로 이 화면에 있는지도 함께 본다.
+        for word in ("야간", "선물", "F_NIGHT", "futures"):
+            if word in doc:
+                log(f"      '{word}' 있음")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="증시 현황판 — 간밤의 증시·주요 지표")
     p.add_argument("--days", type=int, default=DAYS)
     p.add_argument("--dump", action="store_true")
+    p.add_argument("--probe", action="store_true",
+                   help="야간선물 심볼을 찾는다 (저장하지 않음)")
     a = p.parse_args(argv)
     if a.dump:
         return dump()
+    if a.probe:
+        return probe()
 
     payload = collect(a.days)
     save(payload)
