@@ -597,21 +597,23 @@ def test_bok_ignores_a_stray_date_and_reads_the_table():
     print("test_bok_ignores_a_stray_date_and_reads_the_table: OK")
 
 
-BLS_PAGE = """<table><tr><th>Release Date</th><th>Time</th><th>Release</th></tr>
-<tr><td>Tuesday, August 11, 2026</td><td>08:30 AM</td><td>Consumer Price Index for July 2026</td></tr>
-<tr><td>Thursday, August 13, 2026</td><td>08:30 AM</td><td>Producer Price Index for July 2026</td></tr>
-<tr><td>Friday, September 4, 2026</td><td>08:30 AM</td><td>Employment Situation for August 2026</td></tr>
-<tr><td>Wednesday, August 5, 2026</td><td>10:00 AM</td><td>County Employment and Wages</td></tr>
+# FRED 발표일정은 달 이름을 줄여 쓰기도 한다 (Aug 11, 2026).
+BLS_PAGE = """<table><tr><th>Date</th><th>Release</th></tr>
+<tr><td>Aug 11, 2026</td><td>Consumer Price Index</td></tr>
+<tr><td>August 13, 2026</td><td>Producer Price Index</td></tr>
+<tr><td>Sep. 4, 2026</td><td>Employment Situation</td></tr>
+<tr><td>Aug 5, 2026</td><td>Regional Employment and Unemployment</td></tr>
 </table>"""
 
 
 def test_us_indicator_dates_keep_only_the_ones_people_watch():
     """
-    노동통계국은 한 해 200건 넘게 낸다. 대부분 지역·업종 세부 통계라 그대로
-    넣으면 달력이 그것으로 덮인다. 자주 회자되는 넷만 남긴다.
+    FRED 발표일정에는 한 해 수백 건이 올라온다. 대부분 지역·업종 세부 통계라
+    그대로 넣으면 달력이 그것으로 덮인다. 자주 회자되는 넷만 남긴다.
 
-    같은 발표가 여러 줄에 걸릴 수 있어 날짜+이름으로 한 번만 남긴다
-    (올해·내년 두 장을 받으므로 겹칠 수 있다).
+    (노동통계국을 먼저 봤는데 깃허브 러너에서 403 이다. 브라우저 UA 를 붙여도
+    막혔다 — 자료센터 IP 를 거르는 것으로 보인다. FRED 는 같은 러너에서
+    CSV 를 잘 주므로 그쪽으로 옮겼다.)
     """
     orig = mc.fetch
     mc.fetch = lambda url, tries=2, ua=None: BLS_PAGE
@@ -624,7 +626,7 @@ def test_us_indicator_dates_keep_only_the_ones_people_watch():
        "고른 것만, 날짜순으로")
     eq(got[0]["date"], "20260811", "'August 11, 2026' 을 날짜로")
     eq(got[0]["dday"], 8, "남은 날")
-    assert not any("County" in e["name"] for e in got), "세부 통계는 안 넣는다"
+    assert not any("Regional" in e["name"] for e in got), "세부 통계는 안 넣는다"
     print("test_us_indicator_dates_keep_only_the_ones_people_watch: OK")
 
 
@@ -786,50 +788,31 @@ def test_fallback_is_not_treated_as_a_step_function():
     print("test_fallback_is_not_treated_as_a_step_function: OK")
 
 
-def test_kospi_is_fetched_year_by_year():
+def test_kospi_comes_from_the_file_the_index_step_already_wrote():
     """
-    10년을 한 번에 달라고 했더니 빈 표가 왔다 (실제로 0일치가 나와 이후 기록이
-    통째로 비었다). 해마다 나눠 받고, 한 해가 터지거나 비어도 나머지는 남긴다.
+    KRX 에서 직접 받으려다 두 번 실패했다 (빈 표 → KeyError: '지수명' →
+    이름 조회를 꺼도 또 빈 표). market_signal 이 같은 실행에서 이미 받아 둔
+    3년치를 읽는 편이 확실하고 KRX 도 덜 두드린다.
+
+    저장값은 [시가,고가,저가,종가]다. 종가만 담던 옛 파일도 읽어야 한다.
     """
-    import types
-
-    class Idx:
-        def __init__(self, s): self.s = s
-        def strftime(self, f): return self.s
-
-    class DF:
-        def __init__(self, rows): self.rows = rows; self.empty = not rows
-        def iterrows(self):
-            return iter([(Idx(d), {"종가": v}) for d, v in self.rows])
-
-    calls = []
-
-    class Stock:
-        # name_display 를 안 받으면 TypeError 가 나는데, 그걸 '해마다 실패'로
-        # 삼켜 버린다. 가짜도 실제 서명대로 받는다.
-        def get_index_ohlcv_by_date(self, a, b, t, name_display=True):
-            assert name_display is False, "지수 이름은 안 쓴다 — 켜면 KeyError 가 난다"
-            calls.append(a[:4])
-            y = a[:4]
-            if y == "2024":
-                return DF([])                       # 빈 해
-            if y == "2023":
-                raise RuntimeError("KRX 오류")       # 터진 해
-            return DF([(f"{y}0102", 2000.0), (f"{y}0103", 2010.0)])
-
-    saved = sys.modules.get("pykrx")
-    fake = types.ModuleType("pykrx"); fake.stock = Stock()
-    sys.modules["pykrx"] = fake
+    d = os.path.join(tempfile.mkdtemp(), "sig.json")
+    with open(d, "w", encoding="utf-8") as f:
+        json.dump({"series": {"코스피": {
+            "20260102": [10, 12, 9, 11],
+            "20260105": 20,                       # 옛 꼴
+            "20260106": [0, 0, 0, 0],             # 휴장·오류
+        }}}, f)
+    orig = mm.SIGNAL_PATH
+    mm.SIGNAL_PATH = d
     try:
-        got = mm.fetch_kospi(3)
+        eq(mm.fetch_kospi(3), {"20260102": 11.0, "20260105": 20.0},
+           "종가만, 0 은 뺀다")
+        mm.SIGNAL_PATH = os.path.join(d, "없음")
+        eq(mm.fetch_kospi(3), {}, "파일이 없으면 빈 표 (이후 기록만 빈다)")
     finally:
-        if saved is not None:
-            sys.modules["pykrx"] = saved
-        else:
-            del sys.modules["pykrx"]
-    eq(len(calls), 4, "해마다 한 번씩 부른다")
-    eq(len(got), 4, "터진 해·빈 해를 빼고 나머지는 남는다")
-    print("test_kospi_is_fetched_year_by_year: OK")
+        mm.SIGNAL_PATH = orig
+    print("test_kospi_comes_from_the_file_the_index_step_already_wrote: OK")
 
 
 # =============================================================================
@@ -1164,7 +1147,7 @@ if __name__ == "__main__":
     test_after_returns_handles_a_holiday_decision_date()
     test_fallback_series_is_relabelled_not_disguised()
     test_fallback_is_not_treated_as_a_step_function()
-    test_kospi_is_fetched_year_by_year()
+    test_kospi_comes_from_the_file_the_index_step_already_wrote()
     test_theme_row_reads_the_numbers_that_follow_the_link()
     test_theme_members_come_from_the_biggest_block_not_the_sidebar()
     test_theme_match_prefers_the_longer_fragment()

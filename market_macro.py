@@ -35,6 +35,8 @@ import datetime as dt
 import requests
 
 STORE_PATH = os.path.join("store", "market_macro.json")
+# 코스피는 여기서 읽는다. market_signal 이 같은 실행에서 먼저 채운다.
+SIGNAL_PATH = os.path.join("store", "market_signal.json")
 DOCS_PATH = os.path.join("docs", "market_macro.json")
 
 YEARS = 10               # 표본을 늘리려면 길어야 한다. 3년이면 결정이 스무 번뿐이다
@@ -76,15 +78,61 @@ SERIES = [
     # 금은 FRED 의 런던금(GOLDPMGBD228NLBM)이 2023년에 끊겼다. 과거 값은 아직
     # 주지만 최신값이 없어 머리에 띄우면 몇 년 전 값이 오늘 시세로 읽힌다.
     # 그래서 stooq 의 XAU/USD 를 먼저 보고, 안 되면 FRED 로 물러선다.
+    # 금은 갈 곳이 마땅치 않다. FRED 의 런던금 두 계열은 404 로 없어졌고,
+    # stooq 는 CSV 대신 봇 벽(noindex/noscript, 796자)을 준다. 네이버 금융의
+    # 시장지표는 국제 금 시세를 날짜별로 표에 적어 둔다.
     {"key": "gold", "name": "금", "unit": "달러", "step": False,
-     "stooq": ["xauusd", "gc.f"], "note": "국제 금 현물 (트로이온스)",
-     "fallback": {"name": "금(옛 자료)", "step": False,
-                  "note": "stooq 를 못 받아 FRED 런던금으로 대신함 — "
-                          "2023년에 끊긴 계열이라 최신값이 아닐 수 있다",
-                  "fred": ["GOLDPMGBD228NLBM", "GOLDAMGBD228NLBM"]}},
+     "naver_gold": True, "note": "국제 금 (네이버 금융 시장지표)"},
 ]
 
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d"
+GOLD_URL = ("https://finance.naver.com/marketindex/goldDailyQuote.naver"
+            "?marketindexCd=CMDT_GC&page={page}")
+
+
+def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
+    """
+    국제 금 시세 — 네이버 금융 시장지표의 날짜별 표.
+
+    한 쪽에 열흘쯤 들어 있어 몇 쪽을 이어 받는다. 표 구조를 짐작하지 않고
+    줄마다 'YYYY.MM.DD' 와 그 뒤 첫 숫자를 짝지어 읽는다.
+    """
+    out = {}
+    for page in range(1, pages + 1):
+        try:
+            r = requests.get(GOLD_URL.format(page=page),
+                             headers={"User-Agent": UA,
+                                      "Referer": "https://finance.naver.com/marketindex/"},
+                             timeout=TIMEOUT)
+            r.raise_for_status()
+        except Exception as e:                   # noqa: BLE001
+            if why is not None:
+                why[f"금/{page}쪽"] = f"{type(e).__name__}: {e}"[:140]
+            break
+        doc = r.content.decode("cp949", "replace")
+        if why is not None and page == 1:
+            why["금/1쪽"] = f"{r.status_code} · {len(doc)}자 · <tr> " \
+                            f"{len(re.findall(r'<tr', doc, re.I))}개"
+        got = 0
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S):
+            text = re.sub(r"<[^>]+>", " ", row)
+            m = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", text)
+            if not m:
+                continue
+            v = re.search(r"([\d,]+\.\d+)", text[m.end():])
+            if not v:
+                continue
+            try:
+                d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                val = float(v.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            if d >= start and val > 0:
+                out[d.strftime("%Y%m%d")] = val
+                got += 1
+        if not got:                              # 더 볼 쪽이 없다
+            break
+    return out
 
 
 def fetch_stooq(sym: str, start: dt.date, why: dict = None) -> dict:
@@ -198,54 +246,42 @@ def fetch_kospi(years: int = YEARS, diag: dict = None) -> dict:
     """
     코스피 일별 종가. 사건 이후 기록을 내려면 지수가 사건보다 길어야 한다.
 
-    시장 신호는 3년만 모은다 (화면에 그 정도면 충분하다). 여기서는 표본을
-    늘리려고 따로 10년을 받아 store/ 에만 둔다.
+    **이미 받아 둔 것을 쓴다.** market_signal 이 같은 실행에서 코스피 3년치를
+    store/market_signal.json 에 넣어 두므로 그 파일을 읽는다.
+
+        KRX 에서 직접 받으려고 두 번 고쳤는데 두 번 다 실패했다.
+          · 한 번에 10년   → 빈 표
+          · 해마다 한 번씩 → KeyError: '지수명' (지수 이름 조회에서 터짐)
+          · 이름 조회를 꺼도 → 여전히 빈 표 (11년 전부)
+        같은 함수를 market_signal 은 3년 한 번으로 멀쩡히 받는다. 무엇이
+        다른지 알아내는 것보다 이미 받아 둔 것을 쓰는 편이 확실하고 KRX 도
+        덜 두드린다. 대신 창이 10년에서 3년으로 줄어 사건 표본이 준다.
     """
     try:
-        from pykrx import stock
-    except Exception as e:                       # noqa: BLE001
-        log(f"::warning::pykrx 를 쓸 수 없습니다 ({type(e).__name__}: {e})")
+        with open(SIGNAL_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        log(f"::warning::코스피를 읽지 못했습니다 ({type(e).__name__}) — "
+            "이후 기록이 빕니다")
         if diag is not None:
-            diag["pykrx"] = f"{type(e).__name__}: {e}"
+            diag["읽기"] = f"{type(e).__name__}: {e}"[:120]
         return {}
-    # 10년을 한 번에 달라고 했더니 빈 표가 왔다 (실제로 0일치가 나왔다).
-    # KRX 가 긴 구간을 잘라 버리는 것으로 보여, 해마다 나눠 받아 붙인다.
-    # 한 해가 비어도 나머지는 남는다.
-    end = dt.date.today()
-    out, empty = {}, []
-    for y in range(end.year - years, end.year + 1):
-        a = dt.date(y, 1, 1).strftime("%Y%m%d")
-        b = min(dt.date(y, 12, 31), end).strftime("%Y%m%d")
-        try:
-            # name_display=False. 켜 두면 pykrx 가 지수 이름을 찾다가
-            # KeyError: '지수명' 으로 터진다 — 11년치가 통째로 그렇게 비었다.
-            # 우리는 이름을 안 쓴다.
-            df = stock.get_index_ohlcv_by_date(a, b, "1001", name_display=False)
-        except Exception as e:                   # noqa: BLE001
-            log(f"  코스피 {y}년 실패 ({type(e).__name__}: {e})")
-            if diag is not None:
-                diag[str(y)] = f"{type(e).__name__}: {e}"[:120]
-            continue
-        if df is None or df.empty:
-            empty.append(str(y))
-            if diag is not None:
-                diag[str(y)] = "빈 표"
-            continue
-        if diag is not None:
-            # 칸 이름이 바뀌었으면 행은 있는데 종가를 못 읽는다. 그것도 남긴다.
-            diag[str(y)] = f"{len(df)}행 · 칸 {list(df.columns)[:8]}"
 
-        for idx, row in df.iterrows():
-            try:
-                close = float(row["종가"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if close > 0:
-                out[idx.strftime("%Y%m%d")] = close
-    if empty:
-        log(f"  코스피 빈 해: {', '.join(empty)}")
+    series = ((data.get("series") or {}).get("코스피")) or {}
+    out = {}
+    for day, v in series.items():
+        # 저장값은 [시가,고가,저가,종가]. 종가 하나만 담던 옛 파일도 읽는다.
+        close = v[3] if isinstance(v, list) and len(v) >= 4 else v
+        try:
+            close = float(close)
+        except (TypeError, ValueError):
+            continue
+        if close > 0:
+            out[day] = close
+    if diag is not None:
+        diag["출처"] = f"{SIGNAL_PATH} · {len(out)}일"
     if not out:
-        log("::warning::코스피를 하나도 받지 못했습니다 — 이후 기록이 비게 됩니다")
+        log("::warning::코스피가 비어 있습니다 — 이후 기록이 빕니다")
     return out
 
 
@@ -359,7 +395,9 @@ def collect(years: int = YEARS) -> dict:
         spec = dict(spec)
         name = spec["name"]
         try:
-            if "stooq" in spec:
+            if spec.get("naver_gold"):
+                pts = fetch_gold(start, why=why)
+            elif "stooq" in spec:
                 syms = spec["stooq"]
                 syms = syms if isinstance(syms, list) else [syms]
                 pts = {}

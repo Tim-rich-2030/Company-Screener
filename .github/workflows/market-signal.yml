@@ -112,15 +112,19 @@ jobs:
         continue-on-error: true
         run: python market_news.py || python market_news.py --dump
 
-      # 받아오는 목록들의 원본 구조를 찍는다. 앞 단계에 섞어 두면 로그가 길어
-      # 뒤로 밀린 진단이 안 보인다 — 실제로 금통위 표 9행이 로그에 있었는데도
-      # 메뉴만 찍혀 원인을 한 번 더 돌려야 알았다. 실패한 것만 찍는다.
+      # 진단은 **--dump 만** 돌린다. 절대 수집기를 다시 돌리지 않는다.
+      #
+      #   'python X.py >/dev/null || python X.py --dump' 로 두었더니, 실패
+      #   여부를 보려고 돌린 앞쪽 수집기가 **앞 단계의 결과를 덮어썼다.**
+      #   게다가 이 단계에는 secrets 를 안 넘겨 뒀다. 그래서 ECOS_KEY 를
+      #   제대로 등록해 두고도 저장 파일에는 '키가 비어 있음'이 남았다 —
+      #   키 없이 다시 돈 결과가 진짜 결과를 지운 것이다.
+      #
+      #   지금은 못 받은 이유가 store/*.json 에 남으므로 여기서 수집기를
+      #   다시 돌릴 이유가 없다. 저장하지 않는 --dump 만 남긴다.
       - name: 진단 (못 받은 목록의 원본 구조)
         continue-on-error: true
-        run: |
-          python market_flags.py    >/dev/null || python market_flags.py --dump
-          python market_calendar.py >/dev/null || python market_calendar.py --dump
-          python market_macro.py    >/dev/null || python market_macro.py --dump
+        run: python market_flags.py --dump
 
       # theme_probe.py 는 여기서 뺐다. 어디서 받을 수 있는지 확인하려던 것이고
       # 답은 나왔다 (네이버 금융). 기록은 store/theme_probe.json 에 남아 있고,
