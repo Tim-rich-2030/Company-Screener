@@ -163,7 +163,8 @@ def decode(raw: bytes, declared: str = "") -> str | None:
     return None
 
 
-def fetch(url: str, tries: int = 2, ua: str = None) -> str | None:
+def fetch(url: str, tries: int = 2, ua: str = None,
+          timeout: int = None) -> str | None:
     """
     한 번 더 두드린다.
 
@@ -174,7 +175,7 @@ def fetch(url: str, tries: int = 2, ua: str = None) -> str | None:
     last = None
     for i in range(tries):
         try:
-            return _fetch_once(url, ua)
+            return _fetch_once(url, ua, timeout)
         except Exception as e:                   # noqa: BLE001
             last = e
             if i + 1 < tries:
@@ -182,8 +183,9 @@ def fetch(url: str, tries: int = 2, ua: str = None) -> str | None:
     raise last
 
 
-def _fetch_once(url: str, ua: str = None) -> str | None:
-    r = requests.get(url, headers={"User-Agent": ua or UA}, timeout=TIMEOUT)
+def _fetch_once(url: str, ua: str = None, timeout: int = None) -> str | None:
+    r = requests.get(url, headers={"User-Agent": ua or UA},
+                     timeout=timeout or TIMEOUT)
     r.raise_for_status()
     m = re.search(r"charset=([\w.-]+)", r.headers.get("content-type", ""), re.I)
     return decode(r.content, m.group(1) if m else "")
@@ -317,7 +319,8 @@ def bls_dates(today: dt.date, why: dict = None) -> list:
     out = []
     for year in (today.year,):                   # 한 장에 앞뒤로 다 들어 있다
         try:
-            doc = fetch(BLS_URL, ua=BROWSER_UA)
+            # 발표일정 페이지는 무겁다. 20초로는 두 번 다 읽다 끊겼다.
+            doc = fetch(BLS_URL, ua=BROWSER_UA, timeout=60)
         except Exception as e:                   # noqa: BLE001
             log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
             if why is not None:

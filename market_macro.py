@@ -90,7 +90,13 @@ GOLD_URL = ("https://finance.naver.com/marketindex/goldDailyQuote.naver"
             "?marketindexCd=CMDT_GC&page={page}")
 
 
-def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
+# 표의 칸 이름에 단위가 적혀 있어야 값을 쓴다. 무엇을 읽는지 모르는 채로
+# 숫자를 내보내지 않는다.
+GOLD_OK = re.compile(r"(원|달러|USD|KRW|종가|매매기준율)")
+
+
+def fetch_gold(start: dt.date, pages: int = 6, why: dict = None,
+               unit: dict = None) -> dict:
     """
     국제 금 시세 — 네이버 금융 시장지표의 날짜별 표.
 
@@ -98,6 +104,7 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
     줄마다 'YYYY.MM.DD' 와 그 뒤 첫 숫자를 짝지어 읽는다.
     """
     out = {}
+    unit = unit if unit is not None else {}
     for page in range(1, pages + 1):
         try:
             r = requests.get(GOLD_URL.format(page=page),
@@ -110,9 +117,20 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
                 why[f"금/{page}쪽"] = f"{type(e).__name__}: {e}"[:140]
             break
         doc = r.content.decode("cp949", "replace")
-        if why is not None and page == 1:
-            why["금/1쪽"] = f"{r.status_code} · {len(doc)}자 · <tr> " \
-                            f"{len(re.findall(r'<tr', doc, re.I))}개"
+        if page == 1:
+            # 어느 칸을 읽고 있는지 확인되기 전에는 숫자를 내보내지 않는다.
+            # 처음 붙였을 때 금값이 185,821.74 '달러' 로 나갔다 — 국제 금
+            # (온스당 3천 달러대)이 아니라 다른 칸을 집은 것이다.
+            heads = [re.sub(r"<[^>]+>", " ", h).strip()
+                     for h in re.findall(r"<th[^>]*>(.*?)</th>", doc, re.I | re.S)]
+            if why is not None:
+                why["금/칸"] = " | ".join(h for h in heads if h)[:160]
+            if not any(GOLD_OK.search(h) for h in heads):
+                if why is not None:
+                    why["금"] = ("칸 이름에서 단위를 확인하지 못해 값을 "
+                                 "내보내지 않습니다 — 위 '금/칸' 을 보고 고칩니다")
+                return {}
+            unit["v"] = "원" if any("원" in h for h in heads) else "달러"
         got = 0
         for row in re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S):
             text = re.sub(r"<[^>]+>", " ", row)
@@ -306,6 +324,19 @@ def changes(points: dict) -> list:
     return out
 
 
+# 창 시작 바로 앞의 휴일·주말까지만 봐 준다. 연휴가 가장 길어야 이 정도다.
+GRACE_DAYS = 7
+
+
+def gap(a: str, b: str) -> int:
+    """두 YYYYMMDD 사이의 날 수. 읽을 수 없으면 아주 큰 값 (= 봐 주지 않음)."""
+    try:
+        return abs((dt.datetime.strptime(b, "%Y%m%d")
+                    - dt.datetime.strptime(a, "%Y%m%d")).days)
+    except ValueError:
+        return 10 ** 6
+
+
 def after_returns(events: list, kospi: dict, spans=AFTER) -> dict:
     """
     사건 뒤 코스피가 어땠는지. **서술만 한다.**
@@ -320,6 +351,18 @@ def after_returns(events: list, kospi: dict, spans=AFTER) -> dict:
     pos = {d: i for i, d in enumerate(days)}
 
     def ret(day: str, n: int):
+        # 지수가 있는 구간 밖의 사건은 **재지 않는다.**
+        #
+        #   'day 이후 첫 거래일'로만 잡아 뒀더니, 창(3년)보다 오래된 사건이
+        #   전부 창의 첫날 하나로 몰렸다. 2016년 인상도 2018년 인상도 같은
+        #   날에서 재게 되어 -4.97% 가 인상·인하·미국·한국 네 칸에 똑같이
+        #   찍혔다. 표본 19회라고 적히지만 실제로는 같은 값 19개다.
+        #   모르는 것은 재지 않는다.
+        #
+        #   다만 창 시작 바로 앞의 휴일·주말은 봐 준다. 결정일이 1월 1일이고
+        #   지수가 1월 2일부터면 그건 같은 사건이다. 며칠까지만 봐 준다.
+        if day < days[0] and gap(day, days[0]) > GRACE_DAYS:
+            return None
         # 사건일이 휴장일 수 있다. 그 다음 거래일을 기준으로 잡는다.
         i = pos.get(day)
         if i is None:
@@ -396,7 +439,11 @@ def collect(years: int = YEARS) -> dict:
         name = spec["name"]
         try:
             if spec.get("naver_gold"):
-                pts = fetch_gold(start, why=why)
+                unit = {}
+                pts = fetch_gold(start, why=why, unit=unit)
+                if unit.get("v"):
+                    spec["unit"] = unit["v"]
+                    spec["note"] = f"{spec['note']} · 단위 {unit['v']}"
             elif "stooq" in spec:
                 syms = spec["stooq"]
                 syms = syms if isinstance(syms, list) else [syms]

@@ -540,7 +540,7 @@ def test_calendar_leaves_meeting_dates_empty_when_it_cannot_fetch():
     """
     import datetime as dt
     orig = mc.fetch
-    mc.fetch = lambda url, tries=2, ua=None: (_ for _ in ()).throw(
+    mc.fetch = lambda url, tries=2, ua=None, timeout=None: (_ for _ in ()).throw(
         RuntimeError("접속 실패"))
     try:
         out = mc.collect(dt.date(2026, 8, 3))
@@ -559,7 +559,7 @@ def test_fomc_takes_the_second_day_of_a_two_day_meeting():
     """
     import datetime as dt
     orig = mc.fetch
-    mc.fetch = lambda url, tries=2, ua=None: (
+    mc.fetch = lambda url, tries=2, ua=None, timeout=None: (
         '<h4>2026 FOMC Meetings</h4>'
         '<div class="panel">January 27-28</div>'
         '<div class="panel">March 17-18</div>')
@@ -584,13 +584,13 @@ def test_bok_ignores_a_stray_date_and_reads_the_table():
     today = dt.date(2026, 8, 3)
     orig = mc.fetch
     try:
-        mc.fetch = lambda url, tries=2, ua=None: (
+        mc.fetch = lambda url, tries=2, ua=None, timeout=None: (
             '<div>최종수정일 2025.11.26</div><h3>2026년 통화정책방향</h3>'
             '<table><tr><td>1월 15일</td></tr><tr><td>8월 27일</td></tr></table>')
         eq([g["date"] for g in mc.bok_dates(today)], ["20260827"],
            "표를 읽고, 200일 지난 1월 회의는 뺀다")
 
-        mc.fetch = lambda url, tries=2, ua=None: '<div>최종수정일 2025.11.26</div><table><tr><td>-</td></tr></table>'
+        mc.fetch = lambda url, tries=2, ua=None, timeout=None: '<div>최종수정일 2025.11.26</div><table><tr><td>-</td></tr></table>'
         eq(mc.bok_dates(today), [], "표를 못 읽으면 빈 목록 — 옛 날짜를 내보내지 않는다")
     finally:
         mc.fetch = orig
@@ -616,7 +616,7 @@ def test_us_indicator_dates_keep_only_the_ones_people_watch():
     CSV 를 잘 주므로 그쪽으로 옮겼다.)
     """
     orig = mc.fetch
-    mc.fetch = lambda url, tries=2, ua=None: BLS_PAGE
+    mc.fetch = lambda url, tries=2, ua=None, timeout=None: BLS_PAGE
     try:
         got = mc.bls_dates(dt.date(2026, 8, 3))
     finally:
@@ -638,7 +638,7 @@ def test_calendar_fetch_tries_again_before_giving_up():
     """
     calls = []
 
-    def flaky(url, ua=None):
+    def flaky(url, ua=None, timeout=None):
         calls.append(url)
         if len(calls) == 1:
             raise RuntimeError("일시 실패")
@@ -722,8 +722,33 @@ def test_after_returns_says_nothing_when_the_sample_is_tiny():
     print("test_after_returns_says_nothing_when_the_sample_is_tiny: OK")
 
 
+def test_after_returns_ignores_events_older_than_the_index():
+    """
+    지수가 있는 구간 밖의 사건은 재지 않는다.
+
+    'day 이후 첫 거래일' 로만 잡아 뒀더니, 창(3년)보다 오래된 사건이 전부
+    창의 첫날 하나로 몰렸다. 2016년 인상도 2018년 인상도 같은 날에서 재게
+    되어 -4.97% 가 인상·인하·미국·한국 네 칸에 똑같이 찍혔다. 표본 19회라고
+    적히지만 실제로는 같은 값 19개다.
+    """
+    days = [f"2024{m:02d}{d:02d}" for m in range(1, 13) for d in (1, 15)]
+    kospi = {d: 100.0 + i for i, d in enumerate(days)}
+    old = [{"date": f"20180{i}01", "dir": "인상", "from": 1, "to": 2}
+           for i in (1, 2, 3)]
+    now = [{"date": days[i], "dir": "인하", "from": 2, "to": 1} for i in (0, 1, 2)]
+    out = mm.after_returns(old + now, kospi, spans=(2,))
+    assert "인상" not in out, f"창 밖 사건은 재지 않는다: {out.get('인상')}"
+    eq(out["인하"]["spans"]["2"]["표본"], 3, "창 안 사건은 그대로 잰다")
+    print("test_after_returns_ignores_events_older_than_the_index: OK")
+
+
 def test_after_returns_handles_a_holiday_decision_date():
-    """결정일이 휴장일일 수 있다. 그 다음 거래일을 기준으로 잡는다."""
+    """
+    결정일이 휴장일일 수 있다. 그 다음 거래일을 기준으로 잡는다.
+
+    창 시작 **바로 앞**의 휴일까지만 봐 준다 (1/1 결정 · 1/2 개장은 같은
+    사건이다). 몇 해 전 사건은 위 테스트대로 아예 재지 않는다.
+    """
     kospi = {"20240102": 100.0, "20240103": 110.0, "20240104": 121.0}
     ev = [{"date": "20240101", "dir": "인하", "from": 1, "to": 0}]   # 휴장
     got = mm.after_returns(ev * 3, kospi, spans=(1,))["인하"]["spans"]["1"]
@@ -1145,6 +1170,7 @@ if __name__ == "__main__":
     test_rate_changes_are_the_events()
     test_after_returns_says_nothing_when_the_sample_is_tiny()
     test_after_returns_handles_a_holiday_decision_date()
+    test_after_returns_ignores_events_older_than_the_index()
     test_fallback_series_is_relabelled_not_disguised()
     test_fallback_is_not_treated_as_a_step_function()
     test_kospi_comes_from_the_file_the_index_step_already_wrote()
