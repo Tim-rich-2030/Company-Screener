@@ -1164,6 +1164,52 @@ def test_unchanged_rank_is_not_written_again():
     print("test_unchanged_rank_is_not_written_again: OK")
 
 
+def test_a_javascript_fragment_is_not_a_headline():
+    """
+    첫 실행에서 1위가 이것이었다:  '" style="display: none;">   (125건)
+
+    네이버 화면 속 자바스크립트가 문자열로 들고 있는 HTML 조각을 <a> 로 읽은
+    것이다. 조각들끼리는 '같은 제목'이라 한 묶음이 되어 125건짜리 1위가 됐다.
+    묶기 전에 제목이 제목인지부터 본다.
+    """
+    for junk in ['\'" style="display: none;">', '<div class="x">기사</div>',
+                 'function(a){ return a; }', '{{ title }}', 'AAPL up 3%']:
+        assert not mh.ok_title(junk), junk
+    assert mh.ok_title('[속보] 한국은행 기준금리 2.75% 동결')
+    print("test_a_javascript_fragment_is_not_a_headline: OK")
+
+
+def test_only_the_biggest_block_on_the_page_is_the_article_list():
+    """
+    한 쪽에는 본문 목록 말고 '많이 본 뉴스' 같은 곁목록이 함께 온다. 문서
+    순서대로 다 집었더니 경제 섹션에서 고깃집 별점 기사가 올라왔다.
+    본문 목록은 언제나 그 쪽에서 가장 큰 덩어리다.
+    """
+    doc = """
+    <ul class="sa_list">
+      <a href="/mnews/article/001/1" title="한국은행 기준금리 동결 결정했다">x</a>
+      <a href="/mnews/article/001/2" title="코스피 외국인 순매도 확대되었다">x</a>
+      <a href="/mnews/article/001/3" title="반도체 수출 규제 추가 발표되었다">x</a>
+    </ul>
+    <div class="ranking_home">
+      <a href="/mnews/article/009/9" title="고깃집 사장 분노 반찬 리필 사건">x</a>
+    </div>"""
+    why = {}
+    rows = mh.parse_list(doc, "https://news.naver.com/section/101", why, "경제")
+    eq([r["key"] for r in rows], ["001/1", "001/2", "001/3"], "본문 목록만")
+    assert "덩어리/경제" in why, why
+    print("test_only_the_biggest_block_on_the_page_is_the_article_list: OK")
+
+
+def test_office_drops_the_portal_that_only_carried_it():
+    """og:article:author 는 '주간동아 | 네이버' 로 온다. 쓴 곳은 네이버가 아니다."""
+    eq(mh.OFFICE_TAIL.sub("", "주간동아 | 네이버").strip(), "주간동아", "꼬리를 뗀다")
+    eq(mh.OFFICE_TAIL.sub("", "연합뉴스 · 네이버 뉴스").strip(), "연합뉴스", "꼬리를 뗀다")
+    eq(mh.OFFICE_TAIL.sub("", "한국경제").strip(), "한국경제", "꼬리가 없으면 그대로")
+    print("test_office_drops_the_portal_that_only_carried_it: OK")
+
+
+
 def test_gold_reads_the_international_column_not_the_first_number():
     """
     날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
@@ -1557,4 +1603,7 @@ if __name__ == "__main__":
     test_longest_body_wins_inside_a_topic()
     test_rank_survives_when_no_body_can_be_read()
     test_unchanged_rank_is_not_written_again()
+    test_a_javascript_fragment_is_not_a_headline()
+    test_only_the_biggest_block_on_the_page_is_the_article_list()
+    test_office_drops_the_portal_that_only_carried_it()
     print("\nALL BOARD TESTS PASSED")

@@ -61,7 +61,16 @@ jobs:
             echo "changed=no" >> "$GITHUB_OUTPUT"
           else
             git commit -m "헤드라인 $(date -u '+%Y-%m-%d %H:%M UTC')"
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            # 하루 한 번 도는 '시장 신호 수집' 이 그 사이에 커밋을 올려 둘 수
+            # 있다. 부딪히면 이번 실행 것을 남긴다 (rebase 중에는 'theirs').
+            if ! git pull --rebase --autostash origin "${GITHUB_REF_NAME}"; then
+              stuck=$(git diff --name-only --diff-filter=U || true)
+              if [ -z "$stuck" ]; then git rebase --abort || true; exit 1; fi
+              echo "부딪힌 파일 — 이번 실행 것을 남깁니다: $stuck"
+              echo "$stuck" | xargs -r git checkout --theirs --
+              echo "$stuck" | xargs -r git add --
+              GIT_EDITOR=true git rebase --continue
+            fi
             git push origin "HEAD:${GITHUB_REF_NAME}"
             echo "changed=yes" >> "$GITHUB_OUTPUT"
           fi
