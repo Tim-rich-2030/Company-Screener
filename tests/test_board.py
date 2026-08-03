@@ -597,37 +597,72 @@ def test_bok_ignores_a_stray_date_and_reads_the_table():
     print("test_bok_ignores_a_stray_date_and_reads_the_table: OK")
 
 
-# FRED 발표일정은 달 이름을 줄여 쓰기도 한다 (Aug 11, 2026).
-BLS_PAGE = """<table><tr><th>Date</th><th>Release</th></tr>
-<tr><td>Aug 11, 2026</td><td>Consumer Price Index</td></tr>
-<tr><td>August 13, 2026</td><td>Producer Price Index</td></tr>
-<tr><td>Sep. 4, 2026</td><td>Employment Situation</td></tr>
-<tr><td>Aug 5, 2026</td><td>Regional Employment and Unemployment</td></tr>
-</table>"""
+FRED_RELEASES = {"releases": [
+    {"id": 10, "name": "Consumer Price Index"},
+    {"id": 46, "name": "Producer Price Index"},
+    {"id": 50, "name": "Employment Situation"},
+    {"id": 192, "name": "Job Openings and Labor Turnover Survey"},
+    {"id": 999, "name": "Regional Employment and Unemployment"},
+]}
+FRED_DATES = {"release_dates": [
+    {"release_id": 50, "date": "2026-09-04"},
+    {"release_id": 10, "date": "2026-08-11"},
+    {"release_id": 10, "date": "2026-08-11"},      # 같은 발표가 두 번
+    {"release_id": 999, "date": "2026-08-05"},     # 우리가 안 고른 것
+    {"release_id": 46, "date": "2026-08-13"},
+    {"release_id": 192, "date": "bad-date"},       # 깨진 날짜
+]}
 
 
 def test_us_indicator_dates_keep_only_the_ones_people_watch():
     """
-    FRED 발표일정에는 한 해 수백 건이 올라온다. 대부분 지역·업종 세부 통계라
-    그대로 넣으면 달력이 그것으로 덮인다. 자주 회자되는 넷만 남긴다.
+    FRED 는 한 해 수백 건을 낸다. 대부분 지역·업종 세부 통계라 그대로 넣으면
+    달력이 그것으로 덮인다. 자주 회자되는 넷만 남긴다.
 
-    (노동통계국을 먼저 봤는데 깃허브 러너에서 403 이다. 브라우저 UA 를 붙여도
-    막혔다 — 자료센터 IP 를 거르는 것으로 보인다. FRED 는 같은 러너에서
-    CSV 를 잘 주므로 그쪽으로 옮겼다.)
+    (노동통계국은 403, FRED 발표일정 **화면**은 60초에도 ReadTimeout 이었다.
+    같은 FRED 라도 API 는 작은 JSON 이라 빠르다.)
     """
-    orig = mc.fetch
-    mc.fetch = lambda url, tries=2, ua=None, timeout=None: BLS_PAGE
+    calls = []
+
+    def fake(path, key, **p):
+        calls.append(path)
+        return FRED_RELEASES if path == "releases" else FRED_DATES
+
+    orig, had = mc._fred, os.environ.get("FRED_API_KEY")
+    mc._fred = fake
+    os.environ["FRED_API_KEY"] = "x" * 32
     try:
         got = mc.bls_dates(dt.date(2026, 8, 3))
     finally:
-        mc.fetch = orig
+        mc._fred = orig
+        if had is None:
+            os.environ.pop("FRED_API_KEY", None)
+        else:
+            os.environ["FRED_API_KEY"] = had
     eq([e["name"] for e in got],
        ["미국 소비자물가(CPI)", "미국 생산자물가(PPI)", "미국 고용보고서"],
        "고른 것만, 날짜순으로")
-    eq(got[0]["date"], "20260811", "'August 11, 2026' 을 날짜로")
+    eq(got[0]["date"], "20260811", "날짜")
     eq(got[0]["dday"], 8, "남은 날")
+    eq(calls, ["releases", "releases/dates"], "두 번만 부른다")
     assert not any("Regional" in e["name"] for e in got), "세부 통계는 안 넣는다"
     print("test_us_indicator_dates_keep_only_the_ones_people_watch: OK")
+
+
+def test_us_indicators_say_when_the_key_is_missing():
+    """
+    키가 없으면 그 칸만 비운다. 왜 비었는지는 파일에 남는다 —
+    '못 받았다' 와 '키가 없다' 는 할 일이 다르다.
+    """
+    had = os.environ.pop("FRED_API_KEY", None)
+    why = {}
+    try:
+        eq(mc.bls_dates(dt.date(2026, 8, 3), why), [], "키가 없으면 빈 목록")
+        assert "비어 있음" in why["FRED"], why["FRED"]
+    finally:
+        if had is not None:
+            os.environ["FRED_API_KEY"] = had
+    print("test_us_indicators_say_when_the_key_is_missing: OK")
 
 
 def test_calendar_fetch_tries_again_before_giving_up():
@@ -838,6 +873,56 @@ def test_kospi_comes_from_the_file_the_index_step_already_wrote():
     finally:
         mm.SIGNAL_PATH = orig
     print("test_kospi_comes_from_the_file_the_index_step_already_wrote: OK")
+
+
+GOLD_PAGE = """<table><thead>
+<tr><th>날짜</th><th>매매기준율</th><th>전일대비</th><th colspan="2">실물 거래</th>
+<th colspan="2">계좌 거래</th><th>기준 국제 금 시세</th><th>기준 원달러 환율</th></tr>
+<tr><th>사실 때</th><th>파실 때</th><th>입금 시</th><th>해지 시</th></tr></thead><tbody>
+<tr><td>2026.08.03</td><td>185,997.00</td><td>1,234.00</td><td>190,000</td><td>182,000</td>
+<td>186,500</td><td>185,500</td><td>3,412.50</td><td>1,460.76</td></tr>
+</tbody></table>"""
+
+
+def _gold(doc, why):
+    class R:
+        status_code = 200
+        content = doc.encode("cp949")
+        def raise_for_status(self): pass
+    orig = mm.requests.get
+    mm.requests.get = lambda *a, **k: R()
+    try:
+        return mm.fetch_gold(dt.date(2026, 1, 1), pages=1, why=why)
+    finally:
+        mm.requests.get = orig
+
+
+def test_gold_reads_the_international_column_not_the_first_number():
+    """
+    날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
+    달러' 를 내보낸 적이 있다. 국제 금은 온스당 3천 달러대다.
+
+    표 머리가 두 줄이라(colspan) '기준 국제 금 시세' 가 몇 번째 칸인지는
+    세어 봐야 안다. 자리를 짐작하지 않고 머리에서 편다.
+    """
+    eq(mm.flat_headers(GOLD_PAGE)[3], "실물 거래 사실 때", "colspan 을 펴서 붙인다")
+    why = {}
+    eq(_gold(GOLD_PAGE, why), {"20260803": 3412.5}, "국제 금 시세 칸을 읽는다")
+    assert "7번째" in why["금/자리"], why["금/자리"]
+    print("test_gold_reads_the_international_column_not_the_first_number: OK")
+
+
+def test_gold_stays_empty_when_the_column_is_gone():
+    """
+    표가 바뀌어 그 칸을 못 찾으면 값을 내보내지 않는다.
+    단위가 틀린 숫자보다 빈 칸이 낫다 — 한 번 그렇게 내보낸 적이 있다.
+    """
+    why = {}
+    eq(_gold(GOLD_PAGE.replace("기준 국제 금 시세", "거래량"), why), {},
+       "칸이 없으면 빈 표")
+    assert "못 찾아" in why["금"], why["금"]
+    assert why["금/칸"], "무엇이 왔는지는 남긴다"
+    print("test_gold_stays_empty_when_the_column_is_gone: OK")
 
 
 # =============================================================================
@@ -1166,6 +1251,7 @@ if __name__ == "__main__":
     test_bok_ignores_a_stray_date_and_reads_the_table()
     test_alert_issues_tries_the_next_url_when_one_404s()
     test_us_indicator_dates_keep_only_the_ones_people_watch()
+    test_us_indicators_say_when_the_key_is_missing()
     test_calendar_fetch_tries_again_before_giving_up()
     test_rate_changes_are_the_events()
     test_after_returns_says_nothing_when_the_sample_is_tiny()
@@ -1179,6 +1265,8 @@ if __name__ == "__main__":
     test_theme_match_prefers_the_longer_fragment()
     test_theme_group_change_is_weighted_by_stock_count()
     test_theme_unmatched_is_counted_not_hidden()
+    test_gold_reads_the_international_column_not_the_first_number()
+    test_gold_stays_empty_when_the_column_is_gone()
     test_strong_drops_stocks_without_a_full_window()
     test_strong_skips_holidays_and_returns_oldest_first()
     test_strong_is_measured_against_that_market_index()
