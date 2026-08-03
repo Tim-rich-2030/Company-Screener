@@ -56,6 +56,17 @@ jobs:
           python market_flags.py || python market_flags.py --dump
           python market_tree.py
 
+      # --themes 는 테마 정의(themes.json)의 이름 조각이 실제 ETF 이름에
+      # 걸리는지 보여준다. 비어 있는 소분류가 곧 고쳐야 할 곳이다.
+      - name: ETF 수집 + 테마 매칭 점검
+        continue-on-error: true
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+        run: |
+          python market_etf.py
+          python market_etf.py --themes
+
       # 갈래 하나라도 비면 0 이 아닌 값을 돌려준다. 그때 곧바로 --dump 를 돌려
       # 실제로 뭐가 내려왔는지 로그에 남긴다 — 다음 실행까지 기다릴 이유가 없다.
       - name: 뉴스 수집 (네이버 금융)
@@ -71,6 +82,7 @@ jobs:
           # 스테이징되지 않는다 — 뉴스 수집이 실패한 날 지수까지 커밋을 놓친다.
           for f in store/market_signal.json docs/market_signal.json \
                    store/market_tree.json  docs/market_tree.json \
+                   store/market_etf.json   docs/market_etf.json \
                    store/market_news.json  docs/market_news.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done

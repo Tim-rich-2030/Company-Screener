@@ -164,6 +164,12 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div class="rule-line" id="tree-why"></div>
   </section>
 
+  <section id="etf">
+    <h2>ETF<span class="note" id="etf-note"></span></h2>
+    <div class="tabs sm" id="etf-tabs"></div>
+    <div id="etf-list"></div>
+  </section>
+
   <section id="news">
     <h2>주요 뉴스<span class="note" id="news-note"></span></h2>
     <div class="tabs sm" id="news-tabs"></div>
@@ -562,6 +568,42 @@ $('tree-tabs').addEventListener('click', function(e){
 });
 
 // =============================================================================
+// ETF — 거래대금순 / 거래량순
+//
+// '많이 사는 순'은 아직 못 만든다. 거래대금은 사고판 것을 합친 값이라
+// 순매수와 다르다. 여기서는 있는 그대로 '거래대금순'이라고 적는다.
+// =============================================================================
+var ETF = null, ETF_VIEW = null;
+
+function etfViews(){ return ['거래대금순', '거래량순']; }
+
+function renderEtf(){
+  if (!ETF) return;
+  $('etf-tabs').innerHTML = etfViews().map(function(n){
+    return '<button class="tab' + (n === ETF_VIEW ? ' on' : '') +
+      '" data-v="' + esc(n) + '">' + esc(n) + '</button>'; }).join('');
+  var rows = ETF[ETF_VIEW] || [];
+  if (!rows.length){
+    $('etf-list').innerHTML = '<div class="miss">ETF 자료를 받지 못했습니다.</div>';
+    return;
+  }
+  var big = ETF_VIEW === '거래대금순';
+  $('etf-note').textContent = (ETF.counted ? ETF.counted['전체'] + '종목 중 거래된 '
+    + ETF.counted['거래된 것'] + '개에서' : '') + ' 상위 ' + Math.min(rows.length, 10);
+  $('etf-list').innerHTML = rows.slice(0, 10).map(function(e){
+    var amt = big ? (e.val / 1e8).toLocaleString('ko-KR', {maximumFractionDigits:0}) + '억'
+                  : (e.vol / 1e4).toLocaleString('ko-KR', {maximumFractionDigits:0}) + '만주';
+    return '<div class="pick"><span class="nm">' + esc(e.name) + '</span>' +
+      '<span class="vals"><span class="num ' + cls(e.chg) + '">' +
+      signed(e.chg, 2) + '%</span><span class="num">' + amt + '</span></span></div>';
+  }).join('');
+}
+$('etf-tabs').addEventListener('click', function(e){
+  var b = e.target.closest('.tab');
+  if (b && b.dataset.v !== ETF_VIEW){ ETF_VIEW = b.dataset.v; renderEtf(); }
+});
+
+// =============================================================================
 // 주요 뉴스
 // =============================================================================
 var NEWS = null, NEWS_VIEW = 0;
@@ -631,6 +673,14 @@ grab('market_tree.json').then(function(p){
 }).catch(function(){
   $('map').style.height = 'auto';
   $('map').innerHTML = '<div class="miss">시장 지도를 불러오지 못했습니다 — ' +
+    '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
+});
+
+grab('market_etf.json').then(function(p){
+  ETF = p; ETF_VIEW = etfViews()[0]; renderEtf();
+}).catch(function(){
+  $('etf-list').innerHTML =
+    '<div class="miss">ETF 자료를 불러오지 못했습니다 — ' +
     '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
 });
 

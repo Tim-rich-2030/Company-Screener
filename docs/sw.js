@@ -18,8 +18,8 @@ const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
 // 첫 화면이 읽는 데이터 파일들. 숫자라서 페이지와 같이 다뤄야 한다 —
 // 캐시 우선으로 두면 어제 값을 오늘처럼 보여주고, 아예 안 담으면 오프라인에서
 // 화면이 통째로 빈다.
-const DATA_FILES = ['market_signal.json', 'screen.json',
-                    'market_tree.json', 'market_news.json'];
+const DATA_FILES = ['market_signal.json', 'screen.json', 'market_tree.json',
+                    'market_etf.json', 'market_news.json'];
 const SHELL = ['./', './index.html', './stocks.html']
                 .concat(DATA_FILES.map(f => './' + f));
 
