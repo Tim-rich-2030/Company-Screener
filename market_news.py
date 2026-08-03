@@ -135,6 +135,37 @@ def article_id(url: str) -> str:
     return url
 
 
+def blocks(doc: str, limit: int = 12) -> list:
+    """
+    기사 링크가 어느 덩어리(class/id)에 몇 개 들어 있는지.
+
+    지금은 문서에 나오는 순서대로 기사를 집는데, 그러면 '실시간 속보' 목록에
+    섞인 보도자료가 주요뉴스 자리에 올라온다 (코인원 바우처 출시, 증권사 룰렛
+    이벤트 같은 것들). 어느 덩어리가 진짜 주요뉴스인지 알아야 고칠 수 있다.
+
+    이 결과를 store/ 에 함께 남긴다. 로그를 뒤지는 것보다 저장된 파일을 보는
+    편이 확실하다 — 로그는 길어지면 앞부분이 묻힌다.
+    """
+    marks = [(m.start(), m.group(2)) for m in MARKER.finditer(doc)]
+    agg = {}
+    for a in ANCHOR.finditer(doc):
+        h = HREF.search(a.group(1))
+        if not h or not ARTICLE_HREF.search(h.group(2)):
+            continue
+        owner = "?"
+        for mp, mv in marks:
+            if mp < a.start():
+                owner = mv
+            else:
+                break
+        e = agg.setdefault(owner, {"marker": owner, "n": 0, "first": ""})
+        e["n"] += 1
+        if not e["first"]:
+            t = TITLE_ATTR.search(a.group(1))
+            e["first"] = (clean(t.group(2)) if t else clean(a.group(2)))[:45]
+    return sorted(agg.values(), key=lambda x: -x["n"])[:limit]
+
+
 def parse(doc: str, limit: int = LIMIT, exclude: set = None) -> list:
     """
     기사 링크를 순서대로 뽑는다.
@@ -189,8 +220,11 @@ def collect(limit: int = LIMIT) -> dict:
                     f"(python market_news.py --dump 로 확인)")
                 failed.append(name)
         taken |= {i["id"] for i in items}
+        blks = blocks(doc) if doc else []
         log(f"  {name}: {len(items)}건 ({info})")
-        groups.append({"name": name, "url": url, "items": items})
+        for b in blks[:6]:
+            log(f"      덩어리 {b['n']:3}건  {b['marker'][:44]:44} {b['first'][:30]}")
+        groups.append({"name": name, "url": url, "items": items, "blocks": blks})
 
     return {
         "fetched_at": dt.datetime.now(dt.timezone.utc)
@@ -202,11 +236,22 @@ def collect(limit: int = LIMIT) -> dict:
 
 
 def save(payload: dict) -> None:
-    for path in (STORE_PATH, DOCS_PATH):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    log(f"[저장] {STORE_PATH}, {DOCS_PATH}")
+    """
+    store/ 에는 진단(blocks)까지, docs/ 에는 화면이 쓸 것만.
+
+    폰이 매번 내려받는 파일에 진단 자료를 실을 이유가 없다.
+    """
+    os.makedirs(os.path.dirname(STORE_PATH) or ".", exist_ok=True)
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+
+    slim = dict(payload)
+    slim["groups"] = [{k: v for k, v in g.items() if k != "blocks"}
+                      for g in payload["groups"]]
+    os.makedirs(os.path.dirname(DOCS_PATH) or ".", exist_ok=True)
+    with open(DOCS_PATH, "w", encoding="utf-8") as f:
+        json.dump(slim, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"[저장] {STORE_PATH} (진단 포함), {DOCS_PATH} (화면용)")
 
 
 def dump() -> int:
