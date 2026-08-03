@@ -77,7 +77,7 @@ SERIES = [
     # 주지만 최신값이 없어 머리에 띄우면 몇 년 전 값이 오늘 시세로 읽힌다.
     # 그래서 stooq 의 XAU/USD 를 먼저 보고, 안 되면 FRED 로 물러선다.
     {"key": "gold", "name": "금", "unit": "달러", "step": False,
-     "stooq": "xauusd", "note": "국제 금 현물 (트로이온스)",
+     "stooq": ["xauusd", "gc.f"], "note": "국제 금 현물 (트로이온스)",
      "fallback": {"name": "금(옛 자료)", "step": False,
                   "note": "stooq 를 못 받아 FRED 런던금으로 대신함 — "
                           "2023년에 끊긴 계열이라 최신값이 아닐 수 있다",
@@ -87,11 +87,20 @@ SERIES = [
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d"
 
 
-def fetch_stooq(sym: str, start: dt.date) -> dict:
-    """stooq 도 키 없이 CSV 를 준다. Date,Open,High,Low,Close 로 온다."""
+def fetch_stooq(sym: str, start: dt.date, why: dict = None) -> dict:
+    """
+    stooq 도 키 없이 CSV 를 준다. Date,Open,High,Low,Close 로 온다.
+
+    다만 심볼이 없거나 하루 한도를 넘기면 200 을 주면서 본문에 'No data' 나
+    'Exceeded the daily hits limit' 만 적어 보낸다. 그러면 0건이 나오는데,
+    왜 0건인지는 본문을 봐야 안다 — 앞머리를 진단에 남긴다.
+    """
     r = requests.get(STOOQ_CSV.format(sym=sym),
                      headers={"User-Agent": UA}, timeout=TIMEOUT)
     r.raise_for_status()
+    head = " ".join(r.text.splitlines()[:2])[:120]
+    if why is not None:
+        why[f"stooq/{sym}"] = f"{r.status_code} · {len(r.text)}자 · {head}"
     out = {}
     for row in csv.DictReader(io.StringIO(r.text)):
         try:
@@ -144,13 +153,23 @@ def fetch_fred(series_id: str, start: dt.date) -> dict:
     return out
 
 
-def fetch_ecos(spec: dict, start: dt.date, end: dt.date) -> dict:
-    """한국은행 ECOS. 키가 없으면 빈 dict — 그 지표만 빠진다."""
+def fetch_ecos(spec: dict, start: dt.date, end: dt.date,
+               why: dict = None) -> dict:
+    """
+    한국은행 ECOS. 키가 없으면 빈 dict — 그 지표만 빠진다.
+
+    **키가 없는 것과, 키는 있는데 응답이 비는 것을 갈라 적는다.** 둘 다
+    '대용을 씁니다'로 끝나서 화면만 봐서는 구분이 안 됐다.
+    """
     key = os.environ.get("ECOS_KEY", "").strip()
     if not key:
         log("::warning::ECOS_KEY 가 없습니다 — 한국 기준금리는 비웁니다. "
             "발급: https://ecos.bok.or.kr/api  →  저장소 Secrets 에 ECOS_KEY")
+        if why is not None:
+            why["ECOS"] = "ECOS_KEY 환경변수가 비어 있음 (Secrets 이름 확인)"
         return {}
+    if why is not None:
+        why["ECOS"] = f"키 있음 (길이 {len(key)})"
     url = ECOS_URL.format(key=key, stat=spec["stat"], cycle=spec["cycle"],
                           start=start.strftime("%Y%m%d"),
                           end=end.strftime("%Y%m%d"), item=spec["item"])
@@ -160,6 +179,8 @@ def fetch_ecos(spec: dict, start: dt.date, end: dt.date) -> dict:
     if "StatisticSearch" not in body:
         # ECOS 는 오류도 200 으로 준다. 키가 틀렸거나 통계표 코드가 틀린 경우다.
         log(f"::warning::ECOS 응답에 자료가 없습니다: {str(body)[:200]}")
+        if why is not None:
+            why["ECOS"] = f"키는 있는데 자료가 없음: {str(body)[:180]}"
         return {}
     out = {}
     for row in body["StatisticSearch"].get("row", []):
@@ -196,7 +217,10 @@ def fetch_kospi(years: int = YEARS, diag: dict = None) -> dict:
         a = dt.date(y, 1, 1).strftime("%Y%m%d")
         b = min(dt.date(y, 12, 31), end).strftime("%Y%m%d")
         try:
-            df = stock.get_index_ohlcv_by_date(a, b, "1001")
+            # name_display=False. 켜 두면 pykrx 가 지수 이름을 찾다가
+            # KeyError: '지수명' 으로 터진다 — 11년치가 통째로 그렇게 비었다.
+            # 우리는 이름을 안 쓴다.
+            df = stock.get_index_ohlcv_by_date(a, b, "1001", name_display=False)
         except Exception as e:                   # noqa: BLE001
             log(f"  코스피 {y}년 실패 ({type(e).__name__}: {e})")
             if diag is not None:
@@ -336,11 +360,18 @@ def collect(years: int = YEARS) -> dict:
         name = spec["name"]
         try:
             if "stooq" in spec:
-                pts = fetch_stooq(spec["stooq"], start)
+                syms = spec["stooq"]
+                syms = syms if isinstance(syms, list) else [syms]
+                pts = {}
+                for sym in syms:
+                    pts = fetch_stooq(sym, start, why)
+                    if pts:
+                        spec["note"] = f"{spec['note']} (stooq {sym})"
+                        break
             elif "fred" in spec:
                 pts = fetch_fred(spec["fred"], start)
             else:
-                pts = fetch_ecos(spec["ecos"], start, end)
+                pts = fetch_ecos(spec["ecos"], start, end, why)
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
             why[name] = f"{type(e).__name__}: {e}"[:160]
