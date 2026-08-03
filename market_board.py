@@ -95,7 +95,8 @@ NIGHT = [
     # 정규장을 보여 주는 하나의 최근월물 시세이고, 우리는 밤에만 본다는 것을
     # 아직 확인하지 못했다. 확인한 것만 적는다 — 코스피200 선물이다.
     {"key": "k200_fut", "name": "코스피200 선물", "market": "KR_FUT",
-     "syms": ["FUT"], "note": "코스피200 최근월물 (네이버 국내선물)"},
+     "syms": ["FUT"], "daily": True,
+     "note": "코스피200 최근월물 (네이버 국내선물)"},
     # 코스닥150 선물은 **뺐다.**
     #
     #   네이버 국내지수 코드에 코스닥 선물이 없다 (위 여섯 개가 전부다).
@@ -130,6 +131,26 @@ DIFF_KEYS = ("compareToPreviousClosePrice", "changeValue", "cv", "change",
 RATE_KEYS = ("fluctuationsRatio", "changeRate", "cr", "fluctuationRate",
              "compareRatio")
 AT_KEYS = ("localTradedAt", "tradeDate", "localTradedDate", "dt", "aq")
+
+# 장 사이 시간에는 실시간 시세가 등락을 0 으로 준다.
+#
+#   코스피200 선물 992.35 · 등락 0.00 · at 07:44 KST
+#   야간장은 05:00 에 끝났고 정규장은 09:00 에 시작한다. 그 사이라 '이번 장'
+#   에서 움직인 폭이 0 인 것이다. 네이버가 틀린 것이 아니라, 우리가 물은 것이
+#   '이번 장' 이었다. 우리가 알고 싶은 것은 **당일 등락** 이다.
+#
+# 그건 일별 시세로 답한다 — 어제 종가와 오늘 종가는 둘 다 사실이고, 그 차이를
+# 내는 것은 지어내는 것이 아니다. 실시간이 등락을 주면 그쪽을 쓰고, 0 으로
+# 줄 때만 일별로 채운다. 값과 등락을 같은 출처에서 가져와야 서로 어긋나지 않는다.
+DAILY_URL = ("https://api.finance.naver.com/siseJson.naver"
+             "?symbol={sym}&requestType=1&startTime={start}&endTime={end}"
+             "&timeframe=day")
+# 응답은 JSON 이 아니라 작은따옴표가 섞인 배열 글이다. 줄 모양만 집는다.
+#   ['날짜','시가','고가','저가','종가','거래량','외국인소진율']
+#   ["20260803", 992.35, 1000.10, 985.00, 992.35, 123456, 0.00]
+DAILY_ROW = re.compile(
+    r'\[\s*["\']?(\d{8})["\']?\s*,\s*([\d.]+)\s*,\s*([\d.]+)'
+    r'\s*,\s*([\d.]+)\s*,\s*([\d.]+)')
 
 # =============================================================================
 # 주요 지표 추세
@@ -221,6 +242,41 @@ def quote_of(body) -> dict:
                 "at": None if at is None else str(at)[:32],
                 "keys": ",".join(list(d)[:24])}
     return {}
+
+
+def fetch_daily(sym: str, why: dict = None, name: str = "") -> list:
+    """
+    일별 종가. [(YYYYMMDD, 종가), ...] 를 날짜순으로.
+
+    실시간 시세가 '이번 장' 기준이라 장 사이에는 등락이 0 이다. 당일 등락은
+    어제 종가와 오늘 종가로 낸다 — 둘 다 사실이고, 그 차이를 내는 것은
+    지어내는 것이 아니다.
+    """
+    end = dt.date.today()
+    start = end - dt.timedelta(days=30)
+    url = DAILY_URL.format(sym=sym, start=start.strftime("%Y%m%d"),
+                           end=end.strftime("%Y%m%d"))
+    try:
+        r = requests.get(url, headers={"User-Agent": UA,
+                                       "Referer": "https://finance.naver.com/"},
+                         timeout=TIMEOUT)
+        r.raise_for_status()
+    except Exception as e:                               # noqa: BLE001
+        if why is not None:
+            why[f"{name}/일별"] = f"{type(e).__name__}: {e}"[:140]
+        return []
+    rows = []
+    for day, _o, _h, _l, close in DAILY_ROW.findall(r.text):
+        try:
+            v = float(close)
+        except ValueError:
+            continue
+        if v > 0:
+            rows.append((day, v))
+    rows.sort()
+    if why is not None and not rows:
+        why[f"{name}/일별"] = f"{r.status_code} · {len(r.text)}자 · 줄을 못 읽음"
+    return rows
 
 
 def fetch_quote(spec: dict, why: dict) -> dict:
@@ -378,6 +434,18 @@ def collect(days: int = DAYS) -> dict:
                "in_board": spec.get("in_board", True),
                "last": q.get("last"), "diff": q.get("diff"),
                "rate": q.get("rate"), "at": q.get("at")}
+
+        # 장 사이라 등락이 0 으로 온 줄은 일별 종가로 채운다. **값과 등락을
+        # 같은 출처에서 가져온다** — 실시간 값에 일별 등락을 붙이면 992.35 가
+        # 왜 -5% 인지 설명할 수 없는 줄이 된다.
+        if spec.get("daily") and row["last"] is not None and not row["rate"]:
+            days = fetch_daily(spec["syms"][0], why, spec["name"])
+            if len(days) >= 2:
+                (pd, pv), (ld, lv) = days[-2], days[-1]
+                row.update({"last": lv, "diff": round(lv - pv, 2),
+                            "rate": round((lv / pv - 1) * 100, 2) if pv else None,
+                            "at": ld})
+                why[f"{spec['name']}/일별"] = f"{ld} {lv} ← {pd} {pv}"
         if row["last"] is None:
             failed.append(spec["name"])
             if spec.get("drop_if_missing"):

@@ -1077,6 +1077,92 @@ def test_a_zero_move_keeps_the_raw_answer_for_next_time():
 
 
 
+_DAILY = """[['날짜','시가','고가','저가','종가','거래량','외국인소진율'],
+["20260731", 1048.20, 1052.00, 1040.10, 1049.55, 120000, 0.00],
+["20260803", 1045.00, 1046.00, 985.00, 992.35, 250000, 0.00]]"""
+
+
+class _Resp:
+    status_code = 200
+
+    def __init__(self, text, js=None):
+        self.text = text
+        self.content = text.encode()
+        self._js = js
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        if self._js is None:
+            raise ValueError("no json")
+        return self._js
+
+
+def _run_fut(rate, daily=_DAILY):
+    """코스피200 선물 한 줄만 돌린다. 실시간 등락과 일별 응답을 갈아 끼운다."""
+    def fake(url, **kw):
+        if "siseJson" in url:
+            return _Resp(daily)
+        return _Resp("{}", {"datas": [{"itemCode": "FUT",
+                                       "closePrice": "992.35",
+                                       "fluctuationsRatio": rate}]})
+    keep = (mb.requests.get, mb.NIGHT, mb.TREND)
+    mb.requests.get = fake
+    mb.NIGHT = [d for d in keep[1] if d["key"] == "k200_fut"]
+    mb.TREND = []
+    try:
+        out = mb.collect(days=5)
+    finally:
+        mb.requests.get, mb.NIGHT, mb.TREND = keep
+    return out["night"][0], out["why"]
+
+
+def test_between_sessions_the_day_move_comes_from_daily_closes():
+    """
+    장 사이에는 실시간 시세가 등락을 0 으로 준다 — '이번 장' 에서 움직인 폭이
+    0 이기 때문이다. 네이버가 틀린 것이 아니라 우리가 물은 것이 '이번 장'
+    이었다. 우리가 알고 싶은 것은 당일 등락이고, 그건 어제 종가와 오늘
+    종가로 낸다. 둘 다 사실이므로 그 차이를 내는 것은 지어내는 것이 아니다.
+    """
+    row, why = _run_fut("0.00")
+    eq(row["diff"], -57.2, "992.35 - 1049.55")
+    eq(row["rate"], -5.45, "당일 등락")
+    eq(row["at"], "20260803", "일별의 마지막 날")
+    assert "코스피200 선물/일별" in why, why
+    print("test_between_sessions_the_day_move_comes_from_daily_closes: OK")
+
+
+def test_the_value_and_its_move_come_from_one_source():
+    """
+    실시간 값에 일별 등락을 붙이면 '992.35 인데 왜 -5% 인지' 설명할 수 없는
+    줄이 된다. 채울 때는 값도 같이 일별 것으로 간다.
+    """
+    row, _ = _run_fut("0.00")
+    eq(row["last"], 992.35, "일별의 마지막 종가")
+    # 일별의 마지막 종가와 등락의 기준이 같은 표에서 나왔는지
+    eq(round(row["last"] - row["diff"], 2), 1049.55, "기준이 어제 종가")
+    print("test_the_value_and_its_move_come_from_one_source: OK")
+
+
+def test_a_live_move_is_not_overwritten_by_the_daily_table():
+    """장중에는 실시간이 맞다. 일별을 부르지도 않는다."""
+    row, why = _run_fut("1.25")
+    eq(row["rate"], 1.25, "실시간 등락 그대로")
+    assert "코스피200 선물/일별" not in why, why
+    print("test_a_live_move_is_not_overwritten_by_the_daily_table: OK")
+
+
+def test_when_the_daily_table_is_unreadable_nothing_is_invented():
+    """일별을 못 읽으면 0 인 채로 둔다. 없는 숫자를 만들지 않는다."""
+    row, why = _run_fut("0.00", daily="<html>없음</html>")
+    eq(row["last"], 992.35, "실시간 값은 그대로")
+    eq(row["rate"], 0.0, "등락은 받은 그대로")
+    assert "줄을 못 읽음" in why.get("코스피200 선물/일별", ""), why
+    print("test_when_the_daily_table_is_unreadable_nothing_is_invented: OK")
+
+
+
 def test_fx_reads_the_base_rate_column_by_name():
     """
     환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
@@ -1784,6 +1870,10 @@ if __name__ == "__main__":
     test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so()
     test_polling_time_is_kept_when_the_quote_has_none()
     test_a_zero_move_keeps_the_raw_answer_for_next_time()
+    test_between_sessions_the_day_move_comes_from_daily_closes()
+    test_the_value_and_its_move_come_from_one_source()
+    test_a_live_move_is_not_overwritten_by_the_daily_table()
+    test_when_the_daily_table_is_unreadable_nothing_is_invented()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()
