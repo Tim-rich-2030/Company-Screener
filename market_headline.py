@@ -35,7 +35,8 @@ from urllib.parse import urljoin
 
 import requests
 
-from market_news import decode, clean, ANCHOR, HREF, TITLE_ATTR, ARTICLE_HREF
+from market_news import (decode, clean, ANCHOR, HREF, TITLE_ATTR, ARTICLE_HREF,
+                         MARKER, owner_of)
 
 STORE_PATH = os.path.join("store", "market_headline.json")
 DOCS_PATH = os.path.join("docs", "market_headline.json")
@@ -75,6 +76,18 @@ OFFICE = [
     re.compile(r'"officeName"\s*:\s*"([^"]+)"'),
 ]
 AT = re.compile(r'data-date-time=["\']([\d\-: ]+)', re.I)
+# 언론사 이름 뒤에 '| 네이버' 가 붙어 온다. 기사를 쓴 곳은 네이버가 아니다.
+OFFICE_TAIL = re.compile(r"\s*[|·\-–]\s*(?:네이버(?:\s*뉴스)?|Naver).*$", re.I)
+
+# 제목으로 받아들이지 않을 것.
+#
+#   첫 실행에서 1위가 이것이었다:  '" style="display: none;">   (125건)
+#   네이버 화면 안의 자바스크립트가 문자열로 들고 있는 HTML 조각을 <a> 로
+#   읽은 것이다. 조각들끼리는 '같은 제목'이라 한 묶음이 되어 125건짜리
+#   1위가 됐다. 묶기 전에 **제목이 제목인지** 부터 본다.
+BAD_TITLE = re.compile(r"[<>]|style\s*=|display\s*:|function\s*\(|\{\{|\}\}|&#")
+HANGUL = re.compile(r"[가-힣]")
+MIN_HANGUL = 4          # 한국어 기사 제목이면 이만큼은 있다
 
 # 조사와 흔한 말. 이것들이 겹친다고 같은 주제가 아니다.
 STOP = set("""
@@ -159,11 +172,25 @@ def article_key(url: str) -> str:
     return url
 
 
-def parse_list(doc: str, base: str) -> list:
-    """목록에서 기사 제목과 주소만. 어느 덩어리인지는 여기서 따지지 않는다 —
-    여러 목록을 합쳐 발행 수를 세는 것이 목적이라 폭이 넓을수록 좋다."""
-    out, seen = [], set()
-    for a in ANCHOR.finditer(doc or ""):
+def ok_title(t: str) -> bool:
+    """제목처럼 생겼는가. 아니면 묶기 전에 버린다."""
+    return (len(t) >= MIN_TITLE and not BAD_TITLE.search(t)
+            and len(HANGUL.findall(t)) >= MIN_HANGUL)
+
+
+def parse_list(doc: str, base: str, why: dict = None, name: str = "") -> list:
+    """
+    목록에서 기사 제목과 주소를, **가장 큰 덩어리 안에서만** 집는다.
+
+    한 페이지에는 본문 목록 말고도 '많이 본 뉴스' 같은 곁목록이 함께 온다.
+    문서 순서대로 다 집었더니 경제 섹션에서 고깃집 별점 기사와 재판 기사가
+    올라왔다. 본문 목록은 언제나 그 페이지에서 가장 큰 덩어리다 — 곁목록은
+    대여섯 건뿐이라 개수로 갈리고, class 이름을 못박지 않아도 된다.
+    """
+    doc = doc or ""
+    marks = [(m.start(), m.group(2)) for m in MARKER.finditer(doc)]
+    hits = []
+    for a in ANCHOR.finditer(doc):
         m = HREF.search(a.group(1))
         if not m:
             continue
@@ -172,16 +199,33 @@ def parse_list(doc: str, base: str) -> list:
             continue
         t = TITLE_ATTR.search(a.group(1))
         title = clean(t.group(2)) if t else ""
-        if len(title) < MIN_TITLE:
+        if not ok_title(title):
             title = clean(a.group(2))
-        if len(title) < MIN_TITLE:
+        if not ok_title(title):
             continue
         url = urljoin(base, href)
         key = article_key(url)
-        if key in seen or "/" not in key:
+        if "/" not in key:
             continue
-        seen.add(key)
-        out.append({"key": key, "title": title, "url": url})
+        hits.append({"key": key, "title": title, "url": url,
+                     "block": owner_of(a.start(), marks)})
+
+    if not hits:
+        return []
+    counts = {}
+    for h in hits:
+        counts[h["block"]] = counts.get(h["block"], 0) + 1
+    best = max(counts, key=lambda k: counts[k])
+    if why is not None and name:
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
+        why[f"덩어리/{name}"] = " · ".join(f"{v}건 {k[:28]}" for k, v in top)
+
+    out, seen = [], set()
+    for h in hits:
+        if h["block"] != best or h["key"] in seen:
+            continue
+        seen.add(h["key"])
+        out.append({k: h[k] for k in ("key", "title", "url")})
     return out
 
 
@@ -191,7 +235,7 @@ def gather(why: dict) -> list:
     for name, url in FEEDS:
         try:
             doc = fetch(url)
-            items = parse_list(doc, url)
+            items = parse_list(doc, url, why, name)
         except Exception as e:                           # noqa: BLE001
             why[f"목록/{name}"] = f"{type(e).__name__}: {e}"[:140]
             log(f"  {name}: 실패 ({type(e).__name__})")
@@ -251,7 +295,9 @@ def read_article(key: str, why: dict = None) -> dict:
     for pat in OFFICE:
         m = pat.search(doc)
         if m:
-            office = html.unescape(m.group(1)).strip()
+            # og:article:author 는 '주간동아 | 네이버' 처럼 온다. 기사를 쓴
+            # 곳은 네이버가 아니다 — 뒤에 붙는 것을 뗀다.
+            office = OFFICE_TAIL.sub("", html.unescape(m.group(1))).strip()
             break
     at = AT.search(doc)
     return {"chars": len(body), "office": office,

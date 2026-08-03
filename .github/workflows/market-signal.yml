@@ -82,12 +82,13 @@ jobs:
         continue-on-error: true
         run: python market_board.py
 
-      # 헤드라인은 5분마다 도는 별도 워크플로(headline.yml)가 갱신한다.
-      # 여기서도 한 번 돌려 두는 이유는, 그 워크플로가 아직 안 돌았거나
-      # 순위가 오래 안 바뀐 날에도 1면이 비어 있지 않게 하려는 것이다.
-      - name: 헤드라인 뉴스 (주제별 발행 수)
-        continue-on-error: true
-        run: python market_headline.py
+      # 헤드라인(market_headline.json)은 **여기서 만들지 않는다.**
+      #
+      #   1면이 비어 있지 않게 하려고 여기서도 한 번 돌려 뒀더니, 5분마다 도는
+      #   headline.yml 이 같은 파일을 같은 시각에 새로 만들어 놓는 바람에
+      #   git pull --rebase 가 add/add 충돌로 멈췄다. 커밋도 배포도 못 하고
+      #   그날 받은 지수·종목·현황판이 전부 날아갔다 — 헤드라인 한 칸 때문에.
+      #   한 파일의 주인은 하나여야 한다. 헤드라인은 headline.yml 것이다.
 
       # --themes 는 테마 정의(themes.json)의 이름 조각이 실제 ETF 이름에
       # 걸리는지 보여준다. 비어 있는 소분류가 곧 고쳐야 할 곳이다.
@@ -166,7 +167,6 @@ jobs:
                    store/market_world.json  docs/market_world.json \
                    store/market_stocknews.json docs/market_stocknews.json \
                    store/market_board.json docs/market_board.json \
-                   store/market_headline.json docs/market_headline.json \
                    docs/market_px.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
@@ -174,7 +174,17 @@ jobs:
             echo "변경 없음 — 같은 영업일을 다시 받았을 수 있습니다"
           else
             git commit -m "시장 신호 $(date -u '+%Y-%m-%d %H:%M UTC')"
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            # 5분마다 도는 헤드라인 워크플로가 그 사이에 커밋을 올려 둘 수 있다.
+            # 데이터 파일이 부딪히면 **이번 실행이 만든 것**을 남긴다 —
+            # 방금 받아 온 값이 최신이다. rebase 중에는 우리 쪽이 'theirs' 다.
+            if ! git pull --rebase --autostash origin "${GITHUB_REF_NAME}"; then
+              stuck=$(git diff --name-only --diff-filter=U || true)
+              if [ -z "$stuck" ]; then git rebase --abort || true; exit 1; fi
+              echo "부딪힌 파일 — 이번 실행 것을 남깁니다: $stuck"
+              echo "$stuck" | xargs -r git checkout --theirs --
+              echo "$stuck" | xargs -r git add --
+              GIT_EDITOR=true git rebase --continue
+            fi
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
