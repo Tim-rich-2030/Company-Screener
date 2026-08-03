@@ -81,8 +81,13 @@ SERIES = [
     # 금은 갈 곳이 마땅치 않다. FRED 의 런던금 두 계열은 404 로 없어졌고,
     # stooq 는 CSV 대신 봇 벽(noindex/noscript, 796자)을 준다. 네이버 금융의
     # 시장지표는 국제 금 시세를 날짜별로 표에 적어 둔다.
-    {"key": "gold", "name": "금", "unit": "달러", "step": False,
-     "naver_gold": True, "note": "국제 금 (네이버 금융 시장지표)"},
+    # 칸 이름을 확인하고 나서 이름표를 달았다. 표는 이렇게 온다.
+    #   날짜 | 매매기준율 | 전일대비 | 실물 거래 | 계좌 거래 |
+    #   기준 국제 금 시세 | 기준 원달러 환율 | 사실 때 | 파실 때 | …
+    # 우리가 읽는 첫 숫자는 **매매기준율**, 곧 1그램 값(원)이다. 온스당
+    # 달러가 아니다. 처음엔 그걸 '185,821.74 달러' 라고 내보냈다.
+    {"key": "gold", "name": "금 1g", "unit": "원", "step": False,
+     "naver_gold": True, "note": "1그램 매매기준율 (네이버 금융 시장지표)"},
 ]
 
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d"
@@ -92,11 +97,10 @@ GOLD_URL = ("https://finance.naver.com/marketindex/goldDailyQuote.naver"
 
 # 표의 칸 이름에 단위가 적혀 있어야 값을 쓴다. 무엇을 읽는지 모르는 채로
 # 숫자를 내보내지 않는다.
-GOLD_OK = re.compile(r"(원|달러|USD|KRW|종가|매매기준율)")
+GOLD_OK = re.compile(r"매매기준율")
 
 
-def fetch_gold(start: dt.date, pages: int = 6, why: dict = None,
-               unit: dict = None) -> dict:
+def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
     """
     국제 금 시세 — 네이버 금융 시장지표의 날짜별 표.
 
@@ -104,7 +108,6 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None,
     줄마다 'YYYY.MM.DD' 와 그 뒤 첫 숫자를 짝지어 읽는다.
     """
     out = {}
-    unit = unit if unit is not None else {}
     for page in range(1, pages + 1):
         try:
             r = requests.get(GOLD_URL.format(page=page),
@@ -125,12 +128,14 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None,
                      for h in re.findall(r"<th[^>]*>(.*?)</th>", doc, re.I | re.S)]
             if why is not None:
                 why["금/칸"] = " | ".join(h for h in heads if h)[:160]
-            if not any(GOLD_OK.search(h) for h in heads):
+            # 표가 바뀌면 우리가 읽는 첫 숫자가 다른 칸이 된다. 그때는
+            # 값을 내보내지 않는다 — 단위가 틀린 숫자보다 빈 칸이 낫다.
+            if not (heads and GOLD_OK.search(heads[1] if len(heads) > 1
+                                             else "")):
                 if why is not None:
-                    why["금"] = ("칸 이름에서 단위를 확인하지 못해 값을 "
-                                 "내보내지 않습니다 — 위 '금/칸' 을 보고 고칩니다")
+                    why["금"] = ("두 번째 칸이 매매기준율이 아닙니다 — "
+                                 "위 '금/칸' 을 보고 고칩니다")
                 return {}
-            unit["v"] = "원" if any("원" in h for h in heads) else "달러"
         got = 0
         for row in re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S):
             text = re.sub(r"<[^>]+>", " ", row)
@@ -439,11 +444,7 @@ def collect(years: int = YEARS) -> dict:
         name = spec["name"]
         try:
             if spec.get("naver_gold"):
-                unit = {}
-                pts = fetch_gold(start, why=why, unit=unit)
-                if unit.get("v"):
-                    spec["unit"] = unit["v"]
-                    spec["note"] = f"{spec['note']} · 단위 {unit['v']}"
+                pts = fetch_gold(start, why=why)
             elif "stooq" in spec:
                 syms = spec["stooq"]
                 syms = syms if isinstance(syms, list) else [syms]
