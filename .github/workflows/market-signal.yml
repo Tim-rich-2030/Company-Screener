@@ -93,6 +93,13 @@ jobs:
           python market_calendar.py >/dev/null || python market_calendar.py --dump
           python market_macro.py    >/dev/null || python market_macro.py --dump
 
+      # 수집이 아니라 확인이다. 테마 자료를 어디서 받을 수 있는지 응답만 보고
+      # store/theme_probe.json 에 적어 둔다. 짐작으로 긁기 전에 무엇이 있는지
+      # 먼저 본다 — 이 저장소에서 짐작으로 긁다가 여러 번 헛돌았다.
+      - name: 테마 자료 출처 확인 (수집 아님)
+        continue-on-error: true
+        run: python theme_probe.py
+
       - name: 변경분 커밋
         run: |
           set -euo pipefail
@@ -105,7 +112,8 @@ jobs:
                    store/market_calendar.json docs/market_calendar.json \
                    store/market_macro.json docs/market_macro.json \
                    store/market_etf.json   docs/market_etf.json \
-                   store/market_news.json  docs/market_news.json; do
+                   store/market_news.json  docs/market_news.json \
+                   store/theme_probe.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --staged --quiet; then
