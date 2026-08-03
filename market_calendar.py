@@ -212,13 +212,29 @@ def bok_dates(today: dt.date) -> list:
     if not doc:
         log("::warning::금통위 페이지를 글자로 풀지 못했습니다")
         return []
-    text = strip_tags(doc)
+    # 날짜는 표 안에 있다. 페이지 전체를 훑으면 주소·전화번호 같은 숫자가 섞이니
+    # <td> 안만 본다. 첫 시도에서 'YYYY.M.D' 하나만 찾다가 0건이 나왔는데,
+    # 표는 9행이 멀쩡히 있었다 — 형식이 달랐다는 뜻이다. 그래서 세 가지를 본다.
+    cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", doc, re.I | re.S)
+    text = " ".join(strip_tags(c) for c in cells) or strip_tags(doc)
+
+    # 표에 연도가 없고 'M월 D일' 만 있는 경우를 위해 제목·본문에서 연도를 찾는다.
+    ctx = re.search(r"(20\d{2})\s*년", strip_tags(doc))
+    ctx_year = int(ctx.group(1)) if ctx else today.year
+
     out = set()
-    for m in re.finditer(r"(20\d{2})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})", text):
+    for m in re.finditer(r"(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})",
+                         text):
         try:
             out.add(dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
         except ValueError:
             continue
+    if not out:
+        for m in re.finditer(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", text):
+            try:
+                out.add(dt.date(ctx_year, int(m.group(1)), int(m.group(2))))
+            except ValueError:
+                continue
     return [{"date": d.strftime("%Y%m%d"), "name": "한은 금통위",
              "dday": (d - today).days} for d in sorted(out)]
 
@@ -285,8 +301,18 @@ def dump() -> int:
         log(f"  'YYYY.M.D' 꼴 {len(ymd)}개 · 영문 월 이름 {len(mon)}개")
         if ymd:
             log(f"    표본: {ymd[:8]}")
-        log("  본문 앞 600자:")
-        log("    " + text[:600])
+        # 표가 있으면 표를 보여준다. 본문 앞부분은 대개 메뉴라 쓸모가 없었다 —
+        # 금통위 페이지가 정확히 그랬다 (표 9행이 멀쩡히 있는데 메뉴만 찍혔다).
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S)
+        if rows:
+            log(f"  표 {len(rows)}행 중 앞 8행:")
+            for r in rows[:8]:
+                cells = [strip_tags(c) for c in
+                         re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, re.I | re.S)]
+                log(f"    {[c[:30] for c in cells][:6]}")
+        else:
+            log("  본문 앞 600자:")
+            log("    " + text[:600])
     return 0
 
 

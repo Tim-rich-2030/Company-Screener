@@ -45,22 +45,17 @@ jobs:
       # 아래 둘은 실패해도 워크플로를 세우지 않는다. 지수는 이미 받아 뒀고,
       # 시장 지도나 뉴스 하나 때문에 그것까지 못 배포하면 손해가 더 크다.
       # 실패하면 화면의 그 칸만 빈다.
-      # 관리종목·환기종목 목록을 못 받으면 그 조건은 걸러지지 않는다. 그러면
-      # 곧바로 --dump 를 돌려 원본 구조를 로그에 남긴다.
       - name: 시장 지도 수집 (전 종목 등락·업종·제외목록)
         continue-on-error: true
         env:
           KRX_ID: ${{ secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_PW }}
-        run: |
-          python market_flags.py || python market_flags.py --dump
-          python market_tree.py
+        run: python market_tree.py
 
-      # 실적 마감은 계산이라 늘 나온다. FOMC·금통위는 받아와야 하므로,
-      # 못 받으면 곧바로 --dump 로 원본 구조를 로그에 남긴다.
+      # 실적 마감은 계산이라 늘 나온다. FOMC·금통위는 받아와야 한다.
       - name: 캘린더 수집 (실적 마감 · FOMC · 금통위)
         continue-on-error: true
-        run: python market_calendar.py || python market_calendar.py --dump
+        run: python market_calendar.py
 
       # --themes 는 테마 정의(themes.json)의 이름 조각이 실제 ETF 이름에
       # 걸리는지 보여준다. 비어 있는 소분류가 곧 고쳐야 할 곳이다.
@@ -78,6 +73,15 @@ jobs:
       - name: 뉴스 수집 (네이버 금융)
         continue-on-error: true
         run: python market_news.py || python market_news.py --dump
+
+      # 받아오는 목록들의 원본 구조를 찍는다. 앞 단계에 섞어 두면 로그가 길어
+      # 뒤로 밀린 진단이 안 보인다 — 실제로 금통위 표 9행이 로그에 있었는데도
+      # 메뉴만 찍혀 원인을 한 번 더 돌려야 알았다. 실패한 것만 찍는다.
+      - name: 진단 (못 받은 목록의 원본 구조)
+        continue-on-error: true
+        run: |
+          python market_flags.py    >/dev/null || python market_flags.py --dump
+          python market_calendar.py >/dev/null || python market_calendar.py --dump
 
       - name: 변경분 커밋
         run: |
