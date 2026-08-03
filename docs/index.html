@@ -514,11 +514,16 @@ function renderTree(){
     }).join('');
   }
 
+  // 후보 160개에서 한 번에 10%씩 줄이면 폰에서는 반복 한도에 먼저 걸린다.
+  // (실제로 'DL이앤씨'가 잘린 채로 남았다.) 넓이로 대충 몇 개가 들어갈지
+  // 어림잡아 그 근처에서 시작하고, 거기서부터 다듬는다.
+  var n = Math.max(MIN_TILES,
+                   Math.min(rows.length, Math.floor(W * H / 2600)));
+  var guard = 0, bad;
+  paint(n);
   // 줄인 뒤에는 반드시 그 개수로 다시 그린다. 그리기 전에 반복이 끝나면
   // 화면의 타일 수와 위에 적은 숫자가 어긋난다.
-  var n = rows.length, guard = 0, bad;
-  paint(n);
-  while ((bad = truncated()) && n > MIN_TILES && guard++ < 16){
+  while ((bad = truncated()) && n > MIN_TILES && guard++ < 40){
     // 많이 잘렸으면 크게, 조금 잘렸으면 조금 줄인다.
     n = Math.max(MIN_TILES,
                  n - Math.max(1, Math.round(n * (bad > n / 3 ? 0.3 : 0.1))));
@@ -669,6 +674,9 @@ grab('market_tree.json').then(function(p){
   TREE = p;
   TREE_VIEW = treeViews()[0];
   renderTreeTabs(); renderTree();
+  // 웹폰트가 늦게 오면 글자 폭이 바뀐다. 대체 폰트로 잰 결과로 개수를 정해두면
+  // 폰트가 바뀐 뒤 이름이 잘린 채 남는다 — 실제로 코스피 탭에서 하나 남았다.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderTree);
   if (window.ResizeObserver) new ResizeObserver(renderTree).observe($('map'));
 }).catch(function(){
   $('map').style.height = 'auto';
