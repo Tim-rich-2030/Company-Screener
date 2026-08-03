@@ -645,6 +645,71 @@ def test_fallback_series_is_relabelled_not_disguised():
     print("test_fallback_series_is_relabelled_not_disguised: OK")
 
 
+def test_fallback_is_not_treated_as_a_step_function():
+    """
+    대용(콜금리)은 계단이 아니다. 시장금리라 매일 조금씩 움직인다.
+
+    기준금리처럼 '값이 바뀐 날 = 결정일'로 보면 2.541 → 2.527 같은 미세 변동이
+    전부 '인하'로 찍힌다. 실제로 그렇게 24건이 배포됐다.
+    """
+    o_fred, o_ecos, o_kospi = mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi
+    mm.fetch_fred = lambda fid, start: (
+        {"20260301": 2.541, "20260401": 2.527, "20260501": 2.537}
+        if fid == "IRSTCI01KRM156N" else {})
+    mm.fetch_ecos = lambda spec, a, b: {}
+    mm.fetch_kospi = lambda years=10: {}
+    try:
+        kr = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
+    finally:
+        mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi = o_fred, o_ecos, o_kospi
+    eq(kr["events"], [], "대용은 사건을 잡지 않는다")
+    assert kr["points"], "그래도 선은 그린다"
+    print("test_fallback_is_not_treated_as_a_step_function: OK")
+
+
+def test_kospi_is_fetched_year_by_year():
+    """
+    10년을 한 번에 달라고 했더니 빈 표가 왔다 (실제로 0일치가 나와 이후 기록이
+    통째로 비었다). 해마다 나눠 받고, 한 해가 터지거나 비어도 나머지는 남긴다.
+    """
+    import types
+
+    class Idx:
+        def __init__(self, s): self.s = s
+        def strftime(self, f): return self.s
+
+    class DF:
+        def __init__(self, rows): self.rows = rows; self.empty = not rows
+        def iterrows(self):
+            return iter([(Idx(d), {"종가": v}) for d, v in self.rows])
+
+    calls = []
+
+    class Stock:
+        def get_index_ohlcv_by_date(self, a, b, t):
+            calls.append(a[:4])
+            y = a[:4]
+            if y == "2024":
+                return DF([])                       # 빈 해
+            if y == "2023":
+                raise RuntimeError("KRX 오류")       # 터진 해
+            return DF([(f"{y}0102", 2000.0), (f"{y}0103", 2010.0)])
+
+    saved = sys.modules.get("pykrx")
+    fake = types.ModuleType("pykrx"); fake.stock = Stock()
+    sys.modules["pykrx"] = fake
+    try:
+        got = mm.fetch_kospi(3)
+    finally:
+        if saved is not None:
+            sys.modules["pykrx"] = saved
+        else:
+            del sys.modules["pykrx"]
+    eq(len(calls), 4, "해마다 한 번씩 부른다")
+    eq(len(got), 4, "터진 해·빈 해를 빼고 나머지는 남는다")
+    print("test_kospi_is_fetched_year_by_year: OK")
+
+
 if __name__ == "__main__":
     test_screen_all_conditions_must_hold()
     test_screen_drops_unknown_values()
@@ -674,4 +739,6 @@ if __name__ == "__main__":
     test_after_returns_says_nothing_when_the_sample_is_tiny()
     test_after_returns_handles_a_holiday_decision_date()
     test_fallback_series_is_relabelled_not_disguised()
+    test_fallback_is_not_treated_as_a_step_function()
+    test_kospi_is_fetched_year_by_year()
     print("\nALL BOARD TESTS PASSED")
