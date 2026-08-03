@@ -747,14 +747,14 @@ def test_fallback_series_is_relabelled_not_disguised():
     o_fred, o_ecos, o_kospi = mm.fetch_fred, mm.fetch_ecos, mm.fetch_kospi
     mm.fetch_fred, mm.fetch_kospi = fake_fred, (lambda *a, **k: {})
     try:
-        mm.fetch_ecos = lambda spec, s, e: {}          # ECOS 안 됨
+        mm.fetch_ecos = lambda spec, s, e, why=None: {}          # ECOS 안 됨
         kr = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
         eq(kr["name"], "한국 단기금리", "대용이면 이름이 바뀐다")
         assert "대용" in kr["note"] and "IR3TIB01KRM156N" in kr["note"], kr["note"]
         assert kr["points"], "두 번째 후보에서 받아왔어야 한다"
 
         calls.clear()
-        mm.fetch_ecos = lambda spec, s, e: {"20240101": 3.5, "20240301": 3.25}
+        mm.fetch_ecos = lambda spec, s, e, why=None: {"20240101": 3.5, "20240301": 3.25}
         kr2 = [x for x in mm.collect(10)["series"] if x["key"] == "kr_rate"][0]
         eq(kr2["name"], "한국 기준금리", "원본이 되면 이름 그대로")
         assert "대용" not in kr2["note"]
@@ -805,7 +805,10 @@ def test_kospi_is_fetched_year_by_year():
     calls = []
 
     class Stock:
-        def get_index_ohlcv_by_date(self, a, b, t):
+        # name_display 를 안 받으면 TypeError 가 나는데, 그걸 '해마다 실패'로
+        # 삼켜 버린다. 가짜도 실제 서명대로 받는다.
+        def get_index_ohlcv_by_date(self, a, b, t, name_display=True):
+            assert name_display is False, "지수 이름은 안 쓴다 — 켜면 KeyError 가 난다"
             calls.append(a[:4])
             y = a[:4]
             if y == "2024":

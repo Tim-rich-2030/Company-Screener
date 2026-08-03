@@ -297,7 +297,7 @@ US_DATE = re.compile(
     r"November|December)\s+(\d{1,2}),?\s+(20\d{2})", re.I)
 
 
-def bls_dates(today: dt.date) -> list:
+def bls_dates(today: dt.date, why: dict = None) -> list:
     """
     미국 지표 발표일 — 소비자물가·생산자물가·고용보고서·구인이직.
 
@@ -314,9 +314,20 @@ def bls_dates(today: dt.date) -> list:
             doc = fetch(BLS_URL.format(year=year), ua=BROWSER_UA)
         except Exception as e:                   # noqa: BLE001
             log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
+            if why is not None:
+                why[f"BLS/{year}"] = f"{type(e).__name__}: {e}"[:180]
             continue
         if not doc:
+            if why is not None:
+                why[f"BLS/{year}"] = "글자로 풀지 못함"
             continue
+        if why is not None:
+            # 열리기는 했는데 0건이면 표 모양이 다른 것이다. 그 모양을 남긴다.
+            t = re.search(r"<title[^>]*>(.*?)</title>", doc, re.I | re.S)
+            why[f"BLS/{year}"] = (
+                f"{len(doc)}자 · <title>{strip_tags(t.group(1))[:60] if t else '없음'}"
+                f"</title> · <tr> {len(re.findall(r'<tr', doc, re.I))}개 · "
+                f"본문 앞 {strip_tags(doc)[:160]}")
         rows = re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S) or [doc]
         for row in rows:
             text = strip_tags(row)
@@ -362,7 +373,8 @@ def collect(today: dt.date = None) -> dict:
 
     fomc = fomc_dates(today)
     bok = bok_dates(today)
-    bls = bls_dates(today)
+    why = {}
+    bls = bls_dates(today, why)
     failed = []
     if not fomc:
         failed.append("FOMC")
@@ -382,16 +394,21 @@ def collect(today: dt.date = None) -> dict:
         "실적": rows,
         "일정": events,
         "failed": failed,
+        "why": why,
         "note": "실적은 법정 제출기한입니다. 회사가 알린 발표일이 아닙니다.",
     }
 
 
 def save(payload: dict) -> None:
-    for path in (STORE_PATH, DOCS_PATH):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    log(f"[저장] {STORE_PATH}, {DOCS_PATH}")
+    os.makedirs(os.path.dirname(STORE_PATH) or ".", exist_ok=True)
+    with open(STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    # 진단은 store/ 에만. 화면이 읽을 이유가 없다.
+    slim = {k: v for k, v in payload.items() if k != "why"}
+    os.makedirs(os.path.dirname(DOCS_PATH) or ".", exist_ok=True)
+    with open(DOCS_PATH, "w", encoding="utf-8") as f:
+        json.dump(slim, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"[저장] {STORE_PATH} (진단 포함), {DOCS_PATH}")
 
 
 def dump() -> int:
