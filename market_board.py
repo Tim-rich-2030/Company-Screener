@@ -25,9 +25,10 @@
 
 못 받은 지표는 값을 비운다. 틀린 데이터가 없는 데이터보다 위험하다.
 
-    python market_board.py            # 수집·저장
+    python market_board.py            # 전부 수집·저장 (하루 한 번)
+    python market_board.py --quick    # 시세만. 추세는 지난 판 그대로 (15분마다)
     python market_board.py --dump     # 후보 주소를 두드려 본 결과만 출력
-    python market_board.py --probe    # 야간선물 심볼 찾기 → store/board_probe.json
+    python market_board.py --probe    # 선물 심볼 찾기 → store/board_probe.json
 """
 from __future__ import annotations
 
@@ -427,7 +428,24 @@ def fetch_btc(start: dt.date, why: dict = None) -> dict:
     return out
 
 
-def collect(days: int = DAYS) -> dict:
+def load_prev(path: str = DOCS_PATH) -> dict:
+    """지난 판. --quick 이 추세를 그대로 물려받을 때 쓴다."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def collect(days: int = DAYS, quick: bool = False) -> dict:
+    """
+    quick=True 면 **시세만** 새로 받고 추세는 지난 판을 그대로 쓴다.
+
+    추세는 일별 값이라 15분마다 다시 받을 이유가 없다. 그런데 그 한 번이
+    금 15쪽 + 환율 30쪽 + FRED + 업비트로 쉰 번쯤 두드린다. 15분마다 그러면
+    하루에 네이버를 오천 번 두드리게 된다 — 우리가 필요해서가 아니라
+    코드가 그렇게 생겨서. 자주 도는 판은 시세 다섯 줄만 받는다.
+    """
     today = dt.date.today()
     start = today - dt.timedelta(days=days)
     why, failed = {}, []
@@ -462,6 +480,17 @@ def collect(days: int = DAYS) -> dict:
             log(f"  {spec['name']}: {row['last']} "
                 f"({row['diff']}, {row['rate']}%)")
         night.append(row)
+
+    if quick:
+        prev = load_prev()
+        trend = prev.get("trend", [])
+        why["추세"] = f"지난 판 그대로 ({len(trend)}개, --quick)"
+        log(f"  추세: 지난 판 그대로 {len(trend)}개")
+        return {"as_of": today.strftime("%Y%m%d"),
+                "fetched_at": dt.datetime.now(dt.timezone.utc)
+                                .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "days": prev.get("days", days), "night": night, "trend": trend,
+                "failed": failed, "why": why}
 
     trend = []
     for spec in TREND:
@@ -611,6 +640,8 @@ def probe() -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="증시 현황판 — 간밤의 증시·주요 지표")
     p.add_argument("--days", type=int, default=DAYS)
+    p.add_argument("--quick", action="store_true",
+                   help="시세만 받고 추세는 지난 판 그대로 (자주 도는 판)")
     p.add_argument("--dump", action="store_true")
     p.add_argument("--probe", action="store_true",
                    help="야간선물 심볼을 찾는다 (저장하지 않음)")
@@ -620,7 +651,7 @@ def main(argv=None) -> int:
     if a.probe:
         return probe()
 
-    payload = collect(a.days)
+    payload = collect(a.days, quick=a.quick)
     save(payload)
     if payload["failed"]:
         log(f"::warning::받지 못한 것: {', '.join(payload['failed'])} "

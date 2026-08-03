@@ -1163,6 +1163,40 @@ def test_when_the_daily_table_is_unreadable_nothing_is_invented():
 
 
 
+def test_quick_run_keeps_the_trend_it_already_has():
+    """
+    추세는 일별 값이라 15분마다 다시 받을 이유가 없다. 그런데 그 한 번이
+    금 15쪽 + 환율 30쪽 + FRED + 업비트로 쉰 번쯤 두드린다 — 15분마다 그러면
+    하루에 네이버를 오천 번 두드리게 된다. 우리가 필요해서가 아니라 코드가
+    그렇게 생겨서. 자주 도는 판은 시세만 받고 추세는 지난 판을 물려받는다.
+    """
+    class R:
+        status_code = 200
+        content = b"{}"
+        def raise_for_status(self): pass
+        def json(self):
+            return {"datas": [{"closePrice": "100", "fluctuationsRatio": "1.5"}]}
+
+    keep = (mb.requests.get, mb.load_prev, mb.NIGHT)
+    hits = []
+    mb.requests.get = lambda url, **kw: (hits.append(url), R())[1]
+    mb.load_prev = lambda path=None: {"days": 180, "trend": [
+        {"key": "usdkrw", "points": [["20260101", 1400]]}]}
+    mb.NIGHT = [d for d in keep[2] if d["key"] == "nasdaq"]
+    try:
+        out = mb.collect(quick=True)
+    finally:
+        mb.requests.get, mb.load_prev, mb.NIGHT = keep
+
+    eq(len(out["trend"]), 1, "지난 판의 추세를 그대로")
+    eq(out["trend"][0]["points"], [["20260101", 1400]], "손대지 않는다")
+    # 시세 한 줄 말고는 아무 데도 두드리지 않았어야 한다
+    assert not [u for u in hits if "marketindex" in u or "stlouisfed" in u
+                or "upbit" in u], hits
+    print("test_quick_run_keeps_the_trend_it_already_has: OK")
+
+
+
 def test_fx_reads_the_base_rate_column_by_name():
     """
     환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
@@ -1874,6 +1908,7 @@ if __name__ == "__main__":
     test_the_value_and_its_move_come_from_one_source()
     test_a_live_move_is_not_overwritten_by_the_daily_table()
     test_when_the_daily_table_is_unreadable_nothing_is_invented()
+    test_quick_run_keeps_the_trend_it_already_has()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()

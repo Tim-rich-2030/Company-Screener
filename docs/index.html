@@ -1868,6 +1868,34 @@ function grab(file){
   return fetch(file, {cache:'no-store'}).then(function(r){
     if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 }
+
+/*
+ * 현황판은 15분마다 새로 받는다. 그런데 Pages 배포를 그렇게 자주 돌릴 수는
+ * 없고, 이 저장소의 예약 실행은 다섯 시간씩 늦는다 (08:30 예약이 17:01 에
+ * 왔다). 그래서 자주 바뀌는 파일만 **live 가지에서 직접** 읽는다 —
+ * raw.githubusercontent 가 CORS 를 열어 주므로 배포 없이 커밋만으로 바뀐다.
+ *
+ * 순서가 중요하다.
+ *   1) 저장소 안의 사본을 먼저 그린다 — 빠르고, 오프라인에서도 나온다
+ *   2) 그 다음 live 를 확인해서 **더 새것일 때만** 갈아 끼운다
+ * 반대로 하면 비행기 안에서 첫 화면이 빈 채로 남는다.
+ */
+var LIVE = 'https://raw.githubusercontent.com/' +
+           'Tim-rich-2030/Company-Screener/live/docs/';
+
+function newer(cur, next){
+  if (!next || !next.fetched_at) return false;
+  if (!cur || !cur.fetched_at) return true;
+  return String(next.fetched_at) > String(cur.fetched_at);
+}
+
+/* 실패하면 조용히 넘어간다 — 저장소 사본이 이미 화면에 있다. */
+function live(file, cur, apply){
+  fetch(LIVE + file, {cache:'no-store'})
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(p){ if (newer(cur, p)) apply(p); })
+    .catch(function(){});
+}
 /*
  * 아직 못 받은 칸은 **접는다.** 대신 무엇이 비었는지 맨 아래에 적는다.
  *
@@ -1926,18 +1954,30 @@ grab('market_signal.json').then(function(p){
 
 // 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 15분마다 따로 갱신되므로
 // 파일도 따로 받는다. 한쪽이 늦어도 다른 쪽은 그대로 나온다.
-grab('market_board.json').then(function(p){
+function useBoard(p){
   BOARD = p; renderBoard();
   // 띠의 해외 지수 값이 현황판 것으로 바뀐다 — 다시 그려야 반영된다.
   if (DATA) renderStrip();
+}
+function useHead(p){ HEAD = p; renderHead(); }
+
+grab('market_board.json').then(function(p){
+  useBoard(p);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawTrend);
+  live('market_board.json', p, useBoard);
 }).catch(function(){
   $('night').innerHTML = '<div class="miss">간밤의 증시를 아직 받지 못했습니다.</div>';
   $('trend').innerHTML = '<div class="miss">주요 지표를 아직 받지 못했습니다.</div>';
+  live('market_board.json', null, useBoard);
 });
 
-grab('market_headline.json').then(function(p){ HEAD = p; renderHead(); })
-  .catch(function(){ HEAD = {rank: []}; renderHead(); });
+grab('market_headline.json').then(function(p){
+  useHead(p);
+  live('market_headline.json', p, useHead);
+}).catch(function(){
+  useHead({rank: []});
+  live('market_headline.json', null, useHead);
+});
 
 grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');

@@ -555,7 +555,12 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  const path = new URL(req.url).pathname;
+  const url = new URL(req.url);
+  // 바깥 주소는 건드리지 않는다. 현황판이 live 가지(raw.githubusercontent)를
+  // 볼 때 파일 이름이 우리 것과 같아서, 걸러내지 않으면 그 응답까지 우리
+  // 캐시에 들어가고 실패했을 때 index.html 을 JSON 이라고 돌려주게 된다.
+  if (url.origin !== self.location.origin) return;
+  const path = url.pathname;
   // 지수 요약도 페이지와 같이 다룬다. 캐시 우선으로 두면 어제 숫자를 오늘 값처럼
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
