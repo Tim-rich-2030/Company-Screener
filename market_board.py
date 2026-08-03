@@ -83,16 +83,25 @@ NIGHT = [
     # 띠에 쓸 값만 여기서 함께 받아 둔다.
     {"key": "dow", "name": "다우", "market": "US", "in_board": False,
      "syms": [".DJI", "DJI@DJI"], "note": "다우존스 산업평균"},
-    {"key": "k200_night", "name": "코스피200 야간선물", "market": "KR_NIGHT",
-     "syms": ["KOSPI200F_NIGHT", "CME_KOSPI200", "KPI200F", "K200F"],
-     "note": "코스피200 야간선물"},
-    # 못 받으면 **줄째로 뺀다.** 코스피200 야간선물은 값이 없어도 '–' 로 남겨
-    # 둔다 — 있어야 할 자리가 비어 있다는 것 자체가 정보다. 코스닥150 쪽은
-    # 그런 상품이 있는지부터 확실하지 않아, 빈 줄을 자리만 차지하게 두느니
-    # 없는 채로 두기로 했다. 못 받은 사실은 store/ 의 why 에 그대로 남는다.
-    {"key": "kq150_night", "name": "코스닥150 야간선물", "market": "KR_NIGHT",
-     "syms": ["KOSDAQ150F_NIGHT", "KQ150F", "KOSDAQ150F"],
-     "drop_if_missing": True, "note": "코스닥150 야간선물"},
+    # 심볼은 **FUT** 이다. 지어낸 이름을 열 개 두드려도 안 나왔는데,
+    # 네이버 KPI200 화면이 쓰는 코드를 그대로 긁으니 한 줄에 있었다.
+    #
+    #   FUT, KOSDAQ, KOSPI, KPI100, KPI200, KVALUE
+    #
+    # 같은 시각에 KPI200(현물)은 986.72(-5.74%), FUT 는 993.40(+0.11%) 이었다.
+    # 값이 따로 논다 — 현물 종가를 선물이라고 적는 것이 아니라는 뜻이다.
+    #
+    # 이름은 '야간선물' 이라고 달지 않는다. 이 심볼이 밤에는 야간장을, 낮에는
+    # 정규장을 보여 주는 하나의 최근월물 시세이고, 우리는 밤에만 본다는 것을
+    # 아직 확인하지 못했다. 확인한 것만 적는다 — 코스피200 선물이다.
+    {"key": "k200_fut", "name": "코스피200 선물", "market": "KR_FUT",
+     "syms": ["FUT"], "note": "코스피200 최근월물 (네이버 국내선물)"},
+    # 코스닥150 선물은 **뺐다.**
+    #
+    #   네이버 국내지수 코드에 코스닥 선물이 없다 (위 여섯 개가 전부다).
+    #   후보를 세 개 두드려 봤지만 넷 다 빈 답이었다. 없는 것을 매번 열두 번씩
+    #   두드릴 이유가 없고, 빈 줄이 자리만 차지할 이유도 없다.
+    #   기록은 store/board_probe.json 에 남아 있다 — 나중에 생기면 그때 넣는다.
 ]
 
 # 야간선물을 어디서 받을 수 있는지는 아직 모른다. 첫 실행이 알려준 것:
@@ -245,6 +254,10 @@ def fetch_quote(spec: dict, why: dict) -> dict:
                 tried.append(f"{short} → 200 인데 시세 열쇠 없음 "
                              f"({str(body)[:60]})")
                 continue
+            # 시각이 시세 안에 없는 응답이 있다. polling 쪽은 바깥에 time 으로
+            # 붙여 보낸다 — 어느 장의 값인지 아는 유일한 실마리라 챙긴다.
+            if not q.get("at") and isinstance(body, dict) and body.get("time"):
+                q["at"] = str(body["time"])[:32]
             why[f"{spec['name']}/출처"] = f"{short} · 열쇠 {q.pop('keys', '')}"
             return q
     why[spec["name"]] = " | ".join(tried[:6])[:400]

@@ -9,7 +9,7 @@
 
 **어떻게 묶는가.** 제목에서 뜻을 지닌 낱말만 남기고(조사·흔한 말은 버린다),
 낱말이 겹치면 같은 주제로 본다. 형태소 분석기를 쓰지 않는다 — 헤드라인은
-고유명사가 그대로 반복되므로 겹침만으로 충분하고, 사전 없이 돌아야 5분마다
+고유명사가 그대로 반복되므로 겹침만으로 충분하고, 사전 없이 돌아야 15분마다
 가볍게 돌 수 있다.
 
 **무엇을 보여주는가.** 묶음에서 **본문이 가장 긴 기사**. 같은 사건이라도
@@ -42,7 +42,7 @@ STORE_PATH = os.path.join("store", "market_headline.json")
 DOCS_PATH = os.path.join("docs", "market_headline.json")
 
 TOP = 5              # 화면에 내보낼 순위
-BODY_PER_TOPIC = 6   # 묶음마다 본문을 재 볼 기사 수 (전부 재면 5분을 넘긴다)
+BODY_PER_TOPIC = 6   # 묶음마다 본문을 재 볼 기사 수 (전부 재면 한 판이 너무 길어진다)
 MIN_TITLE = 10
 TIMEOUT = 15
 PAUSE = 0.12
@@ -166,6 +166,43 @@ def same_topic(seed: set, other: set) -> bool:
     if len(both) < 2:
         return False
     return len(both) / len(seed | other) >= 0.22
+
+
+def linked(a: set, b: set) -> int:
+    """
+    두 낱말 뭉치가 몇 군데서 만나는가.
+
+    **띄어쓰기만 다른 것을 같은 낱말로 본다.** 실제로 이런 일이 있었다.
+
+        1위  중동 긴장완화 기대에 상승 마감      (4곳)
+        3위  중동 긴장 완화 기대에 상승 마감      (4곳)
+        5위  미-이란 대화 재개에 다우 사상 최고   (3곳)
+
+    같은 사건인데 '긴장완화' 와 '긴장 완화' 가 다른 낱말로 쪼개져 셋으로
+    갈렸다. 다섯 자리 중 셋을 한 사건이 차지하면 '오늘 주목받는 다섯 가지'가
+    아니게 된다. 한쪽이 다른 쪽을 품고 있으면 만난 것으로 센다.
+    """
+    hit = 0
+    for x in a:
+        for y in b:
+            if x == y or (len(x) >= 2 and len(y) >= 2 and (x in y or y in x)):
+                hit += 1
+                break
+    return hit
+
+
+def core(items: list) -> set:
+    """
+    묶음의 중심 낱말 — **두 건 이상에 나온 것.**
+
+    한 건에만 있는 낱말은 그 기사의 곁가지다 ('동상이몽', '월가월부').
+    묶음끼리 견줄 때 그런 것까지 세면 우연히 스친 것이 만난 것이 된다.
+    """
+    cnt = {}
+    for it in items:
+        for t in tokens(it["title"]):
+            cnt[t] = cnt.get(t, 0) + 1
+    return {t for t, c in cnt.items() if c >= 2}
 
 
 def fetch(url: str) -> str:
@@ -300,8 +337,25 @@ def cluster(pool: list) -> list:
                 break
         else:
             groups.append({"seed": tok, "items": [it]})
-    groups.sort(key=lambda g: -len(g["items"]))
-    return groups
+
+    # 두 번째 판 — **묶음끼리 다시 본다.**
+    #
+    # 첫 판은 씨앗과만 견주므로 그물이 안 커지는 대신, 같은 사건이 씨앗의
+    # 말투에 따라 둘셋으로 갈린다. 여기서는 갈린 것을 도로 붙인다. 견주는
+    # 것은 씨앗이 아니라 묶음의 중심 낱말이라, 첫 판처럼 끝없이 커지지 않는다.
+    merged = []
+    for g in groups:
+        g["core"] = core(g["items"]) or g["seed"]
+        for m in merged:
+            if linked(m["core"], g["core"]) >= 2:
+                m["items"].extend(g["items"])
+                m["core"] = core(m["items"]) or m["core"]
+                break
+        else:
+            merged.append(g)
+
+    merged.sort(key=lambda g: -len(g["items"]))
+    return merged
 
 
 def read_article(key: str, why: dict = None) -> dict:
@@ -336,7 +390,7 @@ def build(pool: list, top: int = TOP, why: dict = None) -> list:
     """
     묶음을 순위대로. 묶음마다 **본문이 가장 긴 기사**를 대표로 세운다.
 
-    본문은 상위 묶음만 잰다. 전체를 재면 5분 안에 못 끝난다 — 순위에 못 든
+    본문은 상위 묶음만 잰다. 전체를 재면 한 판이 몇 분씩 걸린다 — 순위에 못 든
     묶음의 본문 길이는 화면에 쓰이지 않는다.
     """
     groups = cluster(pool)
@@ -390,10 +444,11 @@ def unchanged(rank: list, path: str = DOCS_PATH) -> bool:
     """
     지난번과 순위가 같은가.
 
-    5분마다 도는데 매번 파일을 새로 쓰면 fetched_at 하나 때문에 늘 달라지고,
-    하루 288번 커밋·배포가 된다. **순위가 그대로면 아무것도 쓰지 않는다.**
-    그러면 화면에 적히는 집계 시각도 '마지막으로 순위가 바뀐 때'가 되어,
-    5분 전에 받았지만 어제와 같은 순위인 것보다 오히려 사실에 가깝다.
+    15분마다 도는데 매번 파일을 새로 쓰면 fetched_at 하나 때문에 늘 달라지고,
+    순위가 안 바뀐 날에도 하루 96번 커밋·배포가 된다. **순위가 그대로면
+    아무것도 쓰지 않는다.** 그러면 화면에 적히는 집계 시각도 '마지막으로
+    순위가 바뀐 때'가 되어, 방금 받았지만 어제와 같은 순위인 것보다 오히려
+    사실에 가깝다.
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -407,7 +462,7 @@ def save(payload: dict) -> None:
     os.makedirs(os.path.dirname(STORE_PATH) or ".", exist_ok=True)
     with open(STORE_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    # 화면에는 묶인 제목 목록(titles)과 진단을 보내지 않는다. 5분마다 받는
+    # 화면에는 묶인 제목 목록(titles)과 진단을 보내지 않는다. 자주 받는
     # 파일이라 가벼워야 하고, 묶음 검산은 store/ 에서 한다.
     slim = {k: v for k, v in payload.items() if k != "why"}
     slim["rank"] = [{k: v for k, v in r.items() if k != "titles"}

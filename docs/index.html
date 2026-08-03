@@ -678,12 +678,16 @@ function isOpen(market){
       if (t.wd === 'Sat' || t.wd === 'Sun') return false;
       return t.min >= 570 && t.min < 960;          // 09:30 ~ 16:00
     }
-    if (market === 'KR_NIGHT'){
+    // 코스피200 선물 — 정규장 09:00~15:45, 야간 18:00~이튿날 05:00.
+    // 한 심볼이 두 장을 오가므로 둘 중 하나라도 열려 있으면 장중이다.
+    if (market === 'KR_FUT'){
       var k = tzNow('Asia/Seoul');
       if (k.wd === 'Sun') return false;
       if (k.wd === 'Sat') return k.min < 300;      // 금요일 밤의 꼬리
-      if (k.wd === 'Mon') return k.min >= 1080;    // 월요일 새벽은 없다
-      return k.min >= 1080 || k.min < 300;         // 18:00 ~ 이튿날 05:00
+      var day = k.min >= 540 && k.min < 945;       // 09:00 ~ 15:45
+      var night = k.wd === 'Mon' ? k.min >= 1080   // 월요일 새벽은 없다
+                                 : (k.min >= 1080 || k.min < 300);
+      return day || night;
     }
   } catch (e){ return null; }
   return null;
@@ -1915,7 +1919,7 @@ grab('market_signal.json').then(function(p){
     '지수를 불러오지 못했습니다 (' + esc(e.message) + ')</div>';
 });
 
-// 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 5분마다 따로 갱신되므로
+// 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 15분마다 따로 갱신되므로
 // 파일도 따로 받는다. 한쪽이 늦어도 다른 쪽은 그대로 나온다.
 grab('market_board.json').then(function(p){
   BOARD = p; renderBoard();

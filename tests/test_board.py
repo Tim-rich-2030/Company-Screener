@@ -1022,6 +1022,31 @@ def test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so():
 
 
 
+def test_polling_time_is_kept_when_the_quote_has_none():
+    """
+    polling 응답은 시각을 시세 바깥에 time 으로 붙여 보낸다. 그게 어느 장의
+    값인지 아는 유일한 실마리라 챙긴다 — 코스피200 선물은 낮에는 정규장,
+    밤에는 야간장을 같은 심볼로 준다.
+    """
+    class R:
+        status_code = 200
+        content = b"{}"
+        def json(self):
+            return {"pollingInterval": 70000, "time": "20260804073012",
+                    "datas": [{"nv": 99340, "cr": 0.11}]}
+    orig = mb.requests.get
+    mb.requests.get = lambda *a, **k: R()
+    try:
+        why = {}
+        q = mb.fetch_quote({"name": "코스피200 선물", "syms": ["FUT"]}, why)
+    finally:
+        mb.requests.get = orig
+    eq(q["at"], "20260804073012", "바깥의 time 을 챙긴다")
+    assert "코스피200 선물/출처" in why, why
+    print("test_polling_time_is_kept_when_the_quote_has_none: OK")
+
+
+
 def test_fx_reads_the_base_rate_column_by_name():
     """
     환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
@@ -1142,6 +1167,86 @@ def test_cluster_compares_against_the_seed_not_the_whole_group():
     eq(len(groups[0]["items"]), 2, "씨앗과 겹치는 둘만")
     eq(len(groups), 2, "나머지는 따로")
     print("test_cluster_compares_against_the_seed_not_the_whole_group: OK")
+
+
+def test_the_same_event_split_by_spacing_gets_put_back_together():
+    """
+    실제로 다섯 자리 중 셋을 한 사건이 차지했다.
+
+        1위  중동 긴장완화 기대에 상승 마감   (4곳)
+        3위  중동 긴장 완화 기대에 상승 마감   (4곳)
+
+    '긴장완화' 와 '긴장 완화' 가 다른 낱말로 쪼개진 탓이다. 그러면 '오늘
+    주목받는 다섯 가지'가 아니라 '한 가지와 두 가지'가 된다. 두 번째 판에서
+    묶음끼리 다시 견주어 도로 붙인다.
+    """
+    same = [
+        "[오늘의 증시]중동 긴장완화…코스피 반발 매수세 유입되나",
+        "뉴욕 증시, 중동 긴장완화 기대에 상승 마감···다우 1.32%↑ 사상 최고 경신",
+        "유럽 증시, 중동 긴장완화 기대에 상승 마감…독일 사상 최고치 경신",
+        "뉴욕증시, 중동 긴장 완화 기대에 상승 마감···나스닥 2% ↑",
+        "중동 긴장 완화 기대감에 나스닥↑유가↓…美 3대 지수 1% 이상 상승",
+        "중동 긴장 완화에 안도 랠리…다우 사상 최고·나스닥 2%↑·유가 5% 급락",
+    ]
+    other = [
+        "상반기 주식·회사채 발행 15% 줄고 단기사채 발행 68%↑…자금조달 부담 커졌다",
+        "빚투 늘더니 '깜짝'…상반기 단기사채 990조 발행 역대최대",
+        "올해 상반기 기업 단기사채 발행, 지난해보다 90%↑",
+    ]
+    pool = [{"key": f"1/{i}", "title": t, "url": ""}
+            for i, t in enumerate(same + other)]
+    groups = mh.cluster(pool)
+    eq(len(groups[0]["items"]), len(same), "띄어쓰기만 다른 것은 한 묶음으로")
+    eq(len(groups[1]["items"]), len(other), "다른 사건은 그대로 따로")
+    eq(len(groups), 2, "둘뿐")
+    print("test_the_same_event_split_by_spacing_gets_put_back_together: OK")
+
+
+def test_a_synonym_we_do_not_know_still_makes_its_own_topic():
+    """
+    **여기까지가 한계다.** 낱말이 겹쳐야 붙일 수 있으므로, 같은 사건을
+    다른 말로 쓴 기사는 못 붙인다.
+
+        중동 긴장 완화에 다우 사상 최고
+        미-이란 대화 재개에 다우 사상 최고
+
+    사람은 같은 일이라고 안다. 우리는 '중동' 과 '이란' 이 같은 것을 가리키는
+    줄 모른다 — 사전이 있어야 아는 일이다. 억지로 붙이려고 문턱을 낮추면
+    상관없는 것까지 붙는다. 못 붙이는 편이 낫다. 이 테스트는 그 한계를
+    **알고 남겨 둔 것**임을 적어 둔다.
+    """
+    pool = [{"key": f"1/{i}", "title": t, "url": ""} for i, t in enumerate([
+        "뉴욕 증시, 중동 긴장완화 기대에 상승 마감···다우 1.32%↑ 사상 최고 경신",
+        "유럽 증시, 중동 긴장완화 기대에 상승 마감…독일 사상 최고치 경신",
+        "美 증시, 미-이란 대화 재개에 나란히 상승…다우 '사상 최고치'",
+        "이란 대화 낙관론에 3대 지수 일제 상승…다우 사상 최고치[뉴욕마감]",
+    ])]
+    eq(len(mh.cluster(pool)), 2, "말이 다르면 아직 못 붙인다")
+    print("test_a_synonym_we_do_not_know_still_makes_its_own_topic: OK")
+
+
+def test_spacing_match_does_not_glue_unrelated_topics():
+    """
+    품고 있으면 같은 낱말로 보는 규칙이 아무거나 붙이면 안 된다. 겹치는
+    자리가 둘 이상이어야 하고, 중심 낱말(두 건 이상에 나온 것)로만 견준다.
+    """
+    a = mh.tokens("한국은행 기준금리 동결 결정")
+    b = mh.tokens("삼성전자 갤럭시 신제품 공개 행사")
+    eq(mh.linked(a, b), 0, "겹치는 자리가 없다")
+    eq(mh.linked({"긴장완화", "중동"}, {"긴장", "완화", "중동"}), 2,
+       "띄어쓰기만 다른 것은 만난 것으로")
+    print("test_spacing_match_does_not_glue_unrelated_topics: OK")
+
+
+def test_core_ignores_words_that_appear_only_once():
+    """한 건에만 있는 낱말은 그 기사의 곁가지다. 묶음의 중심이 아니다."""
+    items = [{"title": "중동 긴장완화 기대에 코스피 반발"},
+             {"title": "중동 긴장완화 기대에 나스닥 상승"}]
+    got = mh.core(items)
+    assert "중동" in got and "긴장완화" in got, got
+    assert "코스피" not in got and "나스닥" not in got, got
+    print("test_core_ignores_words_that_appear_only_once: OK")
+
 
 
 def test_longest_body_wins_inside_a_topic():
@@ -1647,6 +1752,7 @@ if __name__ == "__main__":
     test_quote_ignores_a_dict_without_a_price()
     test_night_row_stays_empty_when_nothing_answers()
     test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so()
+    test_polling_time_is_kept_when_the_quote_has_none()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()
@@ -1655,6 +1761,10 @@ if __name__ == "__main__":
     test_one_shared_word_is_not_a_topic()
     test_clusters_are_ranked_by_how_many_papers_wrote_it()
     test_cluster_compares_against_the_seed_not_the_whole_group()
+    test_the_same_event_split_by_spacing_gets_put_back_together()
+    test_a_synonym_we_do_not_know_still_makes_its_own_topic()
+    test_spacing_match_does_not_glue_unrelated_topics()
+    test_core_ignores_words_that_appear_only_once()
     test_longest_body_wins_inside_a_topic()
     test_rank_survives_when_no_body_can_be_read()
     test_unchanged_rank_is_not_written_again()
