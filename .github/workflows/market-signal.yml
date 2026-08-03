@@ -56,6 +56,12 @@ jobs:
           python market_flags.py || python market_flags.py --dump
           python market_tree.py
 
+      # 실적 마감은 계산이라 늘 나온다. FOMC·금통위는 받아와야 하므로,
+      # 못 받으면 곧바로 --dump 로 원본 구조를 로그에 남긴다.
+      - name: 캘린더 수집 (실적 마감 · FOMC · 금통위)
+        continue-on-error: true
+        run: python market_calendar.py || python market_calendar.py --dump
+
       # --themes 는 테마 정의(themes.json)의 이름 조각이 실제 ETF 이름에
       # 걸리는지 보여준다. 비어 있는 소분류가 곧 고쳐야 할 곳이다.
       - name: ETF 수집 + 테마 매칭 점검
@@ -82,6 +88,7 @@ jobs:
           # 스테이징되지 않는다 — 뉴스 수집이 실패한 날 지수까지 커밋을 놓친다.
           for f in store/market_signal.json docs/market_signal.json \
                    store/market_tree.json  docs/market_tree.json \
+                   store/market_calendar.json docs/market_calendar.json \
                    store/market_etf.json   docs/market_etf.json \
                    store/market_news.json  docs/market_news.json; do
             if [ -f "$f" ]; then git add "$f"; fi

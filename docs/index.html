@@ -156,6 +156,12 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
     <div id="picks-list"></div>
   </section>
 
+  <section id="cal">
+    <h2>캘린더<span class="note" id="cal-note"></span></h2>
+    <div id="cal-list"></div>
+    <div class="rule-line" id="cal-why"></div>
+  </section>
+
   <section id="tree">
     <h2>시장 지도<span class="note" id="tree-note"></span></h2>
     <div class="tabs sm" id="tree-tabs"></div>
@@ -350,6 +356,53 @@ function renderPicks(p){
 }
 
 // =============================================================================
+// 캘린더 — 실적 마감과 통화정책 회의
+// =============================================================================
+function dday(n){
+  return n === 0 ? '오늘' : n > 0 ? 'D-' + n : 'D+' + (-n);
+}
+function ymd(s){
+  return s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8);
+}
+
+function renderCal(c){
+  var rows = [];
+  (c['실적'] || []).forEach(function(r){
+    // 마감이 이미 지났고 대부분 제출했으면 그 시즌은 끝난 것이다. 굳이 안 띄운다.
+    if (r.dday < 0 && r.total && r.filed / r.total > 0.9) return;
+    // '0/292곳' 만 있으면 무엇이 0 인지 알 수 없다. 무엇을 센 숫자인지 붙인다.
+    var done = r.total ? r.filed + '/' + r.total + '곳 수집' : '';
+    rows.push({d: r.deadline, k: r.period + ' 마감', v: done, n: r.dday});
+  });
+  (c['일정'] || []).forEach(function(e){
+    rows.push({d: e.date, k: e.name, v: '', n: e.dday});
+  });
+  rows.sort(function(a, b){ return a.d < b.d ? -1 : 1; });
+
+  if (!rows.length){
+    $('cal-list').innerHTML = '<div class="miss">일정을 받지 못했습니다.</div>';
+    return;
+  }
+  $('cal-list').innerHTML = rows.map(function(r){
+    // 다가온 것일수록 진하게. 지난 것은 흐리게 둔다.
+    var soon = r.n >= 0 && r.n <= 7;
+    return '<div class="pick"' + (r.n < 0 ? ' style="opacity:.55"' : '') + '>' +
+      '<span class="nm">' + esc(r.k) + '</span>' +
+      '<span class="cd num">' + ymd(r.d) + '</span>' +
+      '<span class="vals">' + (r.v ? '<span class="num">' + r.v + '</span>' : '') +
+      '<span class="num"' + (soon ? ' style="color:var(--accent)"' : '') + '>' +
+      dday(r.n) + '</span></span></div>';
+  }).join('');
+
+  $('cal-note').textContent = c.as_of ? ymd(c.as_of) + ' 기준' : '';
+  var why = c.note || '';
+  if (c.failed && c.failed.length){
+    why += ' · ' + c.failed.join(', ') + ' 일정은 받지 못해 비어 있습니다.';
+  }
+  $('cal-why').textContent = why;
+}
+
+// =============================================================================
 // 시장 지도 (트리맵)
 // =============================================================================
 var TREE = null, TREE_VIEW = null;   // 첫 탭은 데이터가 오면 정한다
@@ -514,11 +567,16 @@ function renderTree(){
     }).join('');
   }
 
+  // 후보 160개에서 한 번에 10%씩 줄이면 폰에서는 반복 한도에 먼저 걸린다.
+  // (실제로 'DL이앤씨'가 잘린 채로 남았다.) 넓이로 대충 몇 개가 들어갈지
+  // 어림잡아 그 근처에서 시작하고, 거기서부터 다듬는다.
+  var n = Math.max(MIN_TILES,
+                   Math.min(rows.length, Math.floor(W * H / 2600)));
+  var guard = 0, bad;
+  paint(n);
   // 줄인 뒤에는 반드시 그 개수로 다시 그린다. 그리기 전에 반복이 끝나면
   // 화면의 타일 수와 위에 적은 숫자가 어긋난다.
-  var n = rows.length, guard = 0, bad;
-  paint(n);
-  while ((bad = truncated()) && n > MIN_TILES && guard++ < 16){
+  while ((bad = truncated()) && n > MIN_TILES && guard++ < 40){
     // 많이 잘렸으면 크게, 조금 잘렸으면 조금 줄인다.
     n = Math.max(MIN_TILES,
                  n - Math.max(1, Math.round(n * (bad > n / 3 ? 0.3 : 0.1))));
@@ -665,10 +723,19 @@ grab('screen.json').then(renderPicks).catch(function(){
   drop('picks', '조건 목록을 불러오지 못했습니다 — 실적 갱신이 한 번 돌면 채워집니다.');
 });
 
+grab('market_calendar.json').then(renderCal).catch(function(){
+  $('cal-list').innerHTML =
+    '<div class="miss">캘린더를 불러오지 못했습니다 — ' +
+    '수집 워크플로가 아직 돌지 않았을 수 있습니다.</div>';
+});
+
 grab('market_tree.json').then(function(p){
   TREE = p;
   TREE_VIEW = treeViews()[0];
   renderTreeTabs(); renderTree();
+  // 웹폰트가 늦게 오면 글자 폭이 바뀐다. 대체 폰트로 잰 결과로 개수를 정해두면
+  // 폰트가 바뀐 뒤 이름이 잘린 채 남는다 — 실제로 코스피 탭에서 하나 남았다.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderTree);
   if (window.ResizeObserver) new ResizeObserver(renderTree).observe($('map'));
 }).catch(function(){
   $('map').style.height = 'auto';
