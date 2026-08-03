@@ -331,48 +331,50 @@ def _article(n, title=None):
             f'{title or f"기사 제목 {n} 입니다"}</a>')
 
 
-def test_news_second_group_skips_what_the_first_took():
+def test_news_takes_only_the_named_block():
     """
-    '많이 본 뉴스' 페이지에도 상단에 주요뉴스 블록이 통째로 들어 있다.
-    앞에서부터 세면 두 갈래가 똑같은 목록이 되므로, 앞 갈래가 가져간 기사는
-    건너뛰고 그 아래에 있는 것을 집는다.
+    두 페이지가 **같은 사이드바**를 공유한다. 문서 순서대로 집으면 거기 실린
+    보도자료가 주요뉴스 자리에 올라온다 — 실제로 '코인원 바우처 출시',
+    '증권사 룰렛 이벤트'가 그렇게 배포됐다.
+
+    실제 구조 (2026-08-03 확인):
+        mainnews.naver        newsList 40건 · sub_tit_ticker 10 · right_list_1_2 8
+        news_list.naver?RANK  simpleNewsList 25 · sub_tit_ticker 10 · right_list_1_2 8
     """
-    first = _article(1) + _article(2)
-    second = _article(1) + _article(2) + _article(7) + _article(8)
-    docs = {"a": first, "b": second}
-    orig_fetch, orig_feeds = mn.fetch, mn.FEEDS
-    mn.fetch = lambda url: (docs[url], "테스트")
-    mn.FEEDS = [("주요뉴스", "a"), ("많이 본 뉴스", "b")]
+    main_doc = ('<div class="newsList">' + _article(1, "삼성전자 이사회 압박 본격화") +
+                _article(2, "코스피 6300선 위태 개인 순매수") + '</div>'
+                '<div class="sub_tit_ticker">' +
+                _article(9, "코인원 바우처 서비스 출시") + '</div>'
+                '<ul class="right_list_1_2">' +
+                _article(8, "증권사 룰렛 이벤트 안내") + '</ul>')
+    got = mn.parse(main_doc, block="newsList")
+    eq([g["id"] for g in got], ["2/1", "2/2"], "가운데 목록만")
+    assert not any("코인원" in g["title"] or "룰렛" in g["title"] for g in got), got
+
+    eq(mn.parse(main_doc, block="newsList_v2"), [],
+       "덩어리를 못 찾으면 빈 목록 — 엉뚱한 목록을 내보내지 않는다")
+    print("test_news_takes_only_the_named_block: OK")
+
+
+def test_news_keeps_an_article_that_appears_in_both_feeds():
+    """
+    많이 본 기사가 주요뉴스이기도 한 것은 자연스럽다. 예전에는 사이드바 때문에
+    겹쳤던 것을 갈래끼리 빼서 가렸는데, 이제 덩어리가 갈리니 그럴 이유가 없다.
+    """
+    docs = {"a": '<div class="newsList">' + _article(1, "같은 기사 제목입니다") + '</div>',
+            "b": '<div class="simpleNewsList">' + _article(1, "같은 기사 제목입니다") + '</div>'}
+    of, ofeed = mn.fetch, mn.FEEDS
+    mn.fetch = lambda u: (docs[u], "테스트")
+    mn.FEEDS = [("주요뉴스", "a", "newsList"),
+                ("많이 본 뉴스", "b", "simpleNewsList")]
     try:
         out = mn.collect()
     finally:
-        mn.fetch, mn.FEEDS = orig_fetch, orig_feeds
-    eq([i["id"] for i in out["groups"][0]["items"]], ["2/1", "2/2"], "앞 갈래")
-    eq([i["id"] for i in out["groups"][1]["items"]], ["2/7", "2/8"],
-       "뒤 갈래는 겹치지 않는 것만")
-    eq(out["failed"], [], "둘 다 채워졌다")
-    print("test_news_second_group_skips_what_the_first_took: OK")
-
-
-def test_news_blanks_a_group_that_is_purely_a_duplicate():
-    """
-    겹치는 것을 빼고 나서 아무것도 안 남으면 그 갈래는 빈다.
-
-    같은 목록에 서로 다른 이름표를 붙이는 것은 빈 칸보다 나쁘다 — 빈 칸은
-    고장으로 보이지만 같은 목록은 진짜 두 갈래로 읽힌다.
-    """
-    same = _article(1) + _article(2)
-    orig_fetch, orig_feeds = mn.fetch, mn.FEEDS
-    mn.fetch = lambda url: (same, "테스트")
-    mn.FEEDS = [("주요뉴스", "a"), ("많이 본 뉴스", "b")]
-    try:
-        out = mn.collect()
-    finally:
-        mn.fetch, mn.FEEDS = orig_fetch, orig_feeds
-    eq(len(out["groups"][0]["items"]), 2, "앞쪽은 남는다")
-    eq(out["groups"][1]["items"], [], "뒤쪽은 빈다")
-    eq(out["failed"], ["많이 본 뉴스"], "빈 갈래를 기록한다")
-    print("test_news_blanks_a_group_that_is_purely_a_duplicate: OK")
+        mn.fetch, mn.FEEDS = of, ofeed
+    eq([[i["id"] for i in g["items"]] for g in out["groups"]],
+       [["2/1"], ["2/1"]], "겹쳐도 둘 다 남는다")
+    eq(out["failed"], [], "겹침은 실패가 아니다")
+    print("test_news_keeps_an_article_that_appears_in_both_feeds: OK")
 
 
 def test_news_title_keeps_apostrophes():
@@ -659,8 +661,8 @@ if __name__ == "__main__":
     test_news_decoding_ignores_a_lying_charset()
     test_news_prefers_the_title_attribute()
     test_news_title_keeps_apostrophes()
-    test_news_second_group_skips_what_the_first_took()
-    test_news_blanks_a_group_that_is_purely_a_duplicate()
+    test_news_takes_only_the_named_block()
+    test_news_keeps_an_article_that_appears_in_both_feeds()
     test_tree_backs_off_to_the_last_trading_day()
     test_report_deadlines_follow_the_law()
     test_quarter_label_matches_the_store_keys()
