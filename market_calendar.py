@@ -38,8 +38,12 @@ DOCS_PATH = os.path.join("docs", "market_calendar.json")
 FACTS_DIR = os.path.join("store", "facts")
 
 FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
-# 미국 지표 발표일. 노동통계국이 한 해 일정을 한 장에 다 적어 둔다.
-BLS_URL = "https://www.bls.gov/schedule/news_release/{year}_sched.htm"
+# 미국 지표 발표일.
+#
+#   처음엔 노동통계국(bls.gov)을 봤는데 403 이다. 브라우저 UA 를 붙여도
+#   막혔다 — 자료센터 IP 를 거르는 것으로 보인다 (깃허브 러너에서 두 해 모두
+#   403). FRED 는 같은 러너에서 CSV 를 잘 주므로 그쪽 발표일정을 본다.
+BLS_URL = "https://fred.stlouisfed.org/releases/calendar"
 
 # 이 넷만 가져온다. 노동통계국은 한 해 200건 넘게 내는데 대부분 지역·업종
 # 세부 통계라 캘린더가 그것으로 덮인다. 자주 회자되는 것만 남긴다.
@@ -67,6 +71,7 @@ ALIAS = {"euc-kr": "cp949", "ks_c_5601-1987": "cp949", "euckr": "cp949"}
 MONTHS = {m: i + 1 for i, m in enumerate(
     ["January", "February", "March", "April", "May", "June", "July",
      "August", "September", "October", "November", "December"])}
+MONTHS3 = {m[:3].lower(): i for m, i in MONTHS.items()}
 
 
 def log(msg: str) -> None:
@@ -292,9 +297,10 @@ def bok_dates(today: dt.date) -> list:
              "dday": (d - today).days} for d in keep]
 
 
+# FRED 발표일정은 'Aug 11, 2026' 처럼 줄여 쓰기도 한다. 둘 다 받는다.
 US_DATE = re.compile(
-    r"(January|February|March|April|May|June|July|August|September|October|"
-    r"November|December)\s+(\d{1,2}),?\s+(20\d{2})", re.I)
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+"
+    r"(\d{1,2}),?\s+(20\d{2})", re.I)
 
 
 def bls_dates(today: dt.date, why: dict = None) -> list:
@@ -309,9 +315,9 @@ def bls_dates(today: dt.date, why: dict = None) -> list:
     옮기면 시차를 잘못 적을 수 있어 날짜만 쓴다.
     """
     out = []
-    for year in (today.year, today.year + 1):
+    for year in (today.year,):                   # 한 장에 앞뒤로 다 들어 있다
         try:
-            doc = fetch(BLS_URL.format(year=year), ua=BROWSER_UA)
+            doc = fetch(BLS_URL, ua=BROWSER_UA)
         except Exception as e:                   # noqa: BLE001
             log(f"  미국 지표 {year} 실패 ({type(e).__name__}: {e})")
             if why is not None:
@@ -339,7 +345,7 @@ def bls_dates(today: dt.date, why: dict = None) -> list:
             if not m:
                 continue
             try:
-                d = dt.date(int(m.group(3)), MONTHS[m.group(1).capitalize()],
+                d = dt.date(int(m.group(3)), MONTHS3[m.group(1).lower()[:3]],
                             int(m.group(2)))
             except (ValueError, KeyError):
                 continue
