@@ -82,6 +82,14 @@ jobs:
         continue-on-error: true
         run: python market_board.py
 
+      # 코스피200 야간선물 심볼을 아직 못 찾았다. 주소는 살아 있고(409 는
+      # '그런 심볼이 없다'는 뜻이다) 이름만 모른다. 아는 심볼로 답이 오는
+      # 모양을 확인하고 네이버 화면이 쓰는 코드를 긁어 store/board_probe.json
+      # 에 남긴다. 찾으면 이 단계는 뺀다 — 계속 둘 이유가 없다.
+      - name: 야간선물 심볼 찾기 (저장만, 화면과 무관)
+        continue-on-error: true
+        run: python market_board.py --probe
+
       # 헤드라인(market_headline.json)은 **여기서 만들지 않는다.**
       #
       #   1면이 비어 있지 않게 하려고 여기서도 한 번 돌려 뒀더니, 5분마다 도는
@@ -167,6 +175,7 @@ jobs:
                    store/market_world.json  docs/market_world.json \
                    store/market_stocknews.json docs/market_stocknews.json \
                    store/market_board.json docs/market_board.json \
+                   store/board_probe.json \
                    docs/market_px.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done

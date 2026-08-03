@@ -988,6 +988,40 @@ def test_night_row_stays_empty_when_nothing_answers():
     print("test_night_row_stays_empty_when_nothing_answers: OK")
 
 
+def test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so():
+    """
+    코스피200 야간선물은 값이 없어도 '–' 로 남긴다 — 있어야 할 자리가 비어
+    있다는 것 자체가 정보다. 코스닥150 쪽은 그런 상품이 있는지부터 확실하지
+    않아, 빈 줄이 자리만 차지하게 두지 않고 줄째로 뺀다.
+
+    **빼도 못 받은 사실은 남는다** — failed 와 why 에 그대로 적힌다.
+    조용히 사라지면 다음에 찾아볼 근거가 없어진다.
+    """
+    class Dead:
+        status_code = 409
+        content = b""
+        def json(self): raise ValueError("no json")
+
+    keep = {"key": "a", "name": "남길 것", "market": "KR_NIGHT",
+            "syms": ["X"], "note": ""}
+    drop = {"key": "b", "name": "뺄 것", "market": "KR_NIGHT",
+            "syms": ["Y"], "drop_if_missing": True, "note": ""}
+    orig_get, orig_night, orig_trend = mb.requests.get, mb.NIGHT, mb.TREND
+    mb.requests.get = lambda *a, **k: Dead()
+    mb.NIGHT, mb.TREND = [keep, drop], []
+    try:
+        out = mb.collect(days=5)
+    finally:
+        mb.requests.get, mb.NIGHT, mb.TREND = orig_get, orig_night, orig_trend
+
+    eq([r["name"] for r in out["night"]], ["남길 것"], "뺄 것은 줄째로 빠진다")
+    eq(out["night"][0]["last"], None, "남긴 줄은 값이 빈다")
+    assert "뺄 것" in out["failed"], out["failed"]
+    assert "뺄 것" in out["why"], out["why"]
+    print("test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so: OK")
+
+
+
 def test_fx_reads_the_base_rate_column_by_name():
     """
     환율 표도 머리가 두 줄이다. 칸 자리를 짐작하면 '현찰 사실 때'를
@@ -1612,6 +1646,7 @@ if __name__ == "__main__":
     test_quote_fills_in_the_missing_half()
     test_quote_ignores_a_dict_without_a_price()
     test_night_row_stays_empty_when_nothing_answers()
+    test_a_row_we_cannot_source_is_dropped_when_it_is_marked_so()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()

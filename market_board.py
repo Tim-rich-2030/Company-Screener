@@ -27,6 +27,7 @@
 
     python market_board.py            # 수집·저장
     python market_board.py --dump     # 후보 주소를 두드려 본 결과만 출력
+    python market_board.py --probe    # 야간선물 심볼 찾기 → store/board_probe.json
 """
 from __future__ import annotations
 
@@ -45,6 +46,8 @@ from market_macro import (UA, TIMEOUT, flat_headers, fetch_fred, fetch_gold,
 
 STORE_PATH = os.path.join("store", "market_board.json")
 DOCS_PATH = os.path.join("docs", "market_board.json")
+# 야간선물 심볼을 찾는 기록. 로그는 다른 단계 출력에 묻힌다 (theme_probe.json 과 같은 자리).
+PROBE_PATH = os.path.join("store", "board_probe.json")
 
 DAYS = 180          # 추세 창(달력일). 폰에서 반년이면 흐름이 보인다
 PAUSE = 0.2
@@ -83,9 +86,13 @@ NIGHT = [
     {"key": "k200_night", "name": "코스피200 야간선물", "market": "KR_NIGHT",
      "syms": ["KOSPI200F_NIGHT", "CME_KOSPI200", "KPI200F", "K200F"],
      "note": "코스피200 야간선물"},
+    # 못 받으면 **줄째로 뺀다.** 코스피200 야간선물은 값이 없어도 '–' 로 남겨
+    # 둔다 — 있어야 할 자리가 비어 있다는 것 자체가 정보다. 코스닥150 쪽은
+    # 그런 상품이 있는지부터 확실하지 않아, 빈 줄을 자리만 차지하게 두느니
+    # 없는 채로 두기로 했다. 못 받은 사실은 store/ 의 why 에 그대로 남는다.
     {"key": "kq150_night", "name": "코스닥150 야간선물", "market": "KR_NIGHT",
      "syms": ["KOSDAQ150F_NIGHT", "KQ150F", "KOSDAQ150F"],
-     "note": "코스닥150 야간선물"},
+     "drop_if_missing": True, "note": "코스닥150 야간선물"},
 ]
 
 # 야간선물을 어디서 받을 수 있는지는 아직 모른다. 첫 실행이 알려준 것:
@@ -349,6 +356,9 @@ def collect(days: int = DAYS) -> dict:
                "rate": q.get("rate"), "at": q.get("at")}
         if row["last"] is None:
             failed.append(spec["name"])
+            if spec.get("drop_if_missing"):
+                log(f"  {spec['name']}: 없음 — 줄째로 뺍니다")
+                continue
             log(f"  {spec['name']}: 없음")
         else:
             log(f"  {spec['name']}: {row['last']} "
@@ -442,16 +452,19 @@ def probe() -> int:
       2. 네이버 화면이 쓰는 코드를 페이지에서 그대로 긁는다. 우리가 상상한
          이름이 아니라 네이버가 쓰는 이름이어야 한다.
     """
+    found, tried = {}, []
     log("===== 1. 후보 심볼")
     for sym in PROBE_SYMS:
         for tpl in IDX_URLS:
             url = tpl.format(sym=sym)
+            short = url.split("//")[-1][:56]
             try:
                 r = requests.get(url, headers={"User-Agent": UA,
                                                "Referer": "https://m.stock.naver.com/"},
                                  timeout=TIMEOUT)
             except Exception as e:                       # noqa: BLE001
-                log(f"  {sym:18} {url.split('//')[-1][:56]:56} {type(e).__name__}")
+                tried.append(f"{sym} · {short} · {type(e).__name__}")
+                log(f"  {sym:18} {short:56} {type(e).__name__}")
                 continue
             body, mark = None, ""
             try:
@@ -460,25 +473,40 @@ def probe() -> int:
                 mark = "JSON 아님"
             if body is not None:
                 q = quote_of(body)
-                mark = f"시세 {q['last']}" if q else f"빈 답 {str(body)[:60]}"
-            log(f"  {sym:18} {url.split('//')[-1][:56]:56} {r.status_code} {mark}")
+                if q:
+                    mark = f"시세 {q['last']}"
+                    found.setdefault(sym, []).append({"url": short,
+                                                      "last": q["last"],
+                                                      "rate": q.get("rate")})
+                else:
+                    mark = f"빈 답 {str(body)[:60]}"
+            tried.append(f"{sym} · {short} · {r.status_code} {mark}")
+            log(f"  {sym:18} {short:56} {r.status_code} {mark}")
             time.sleep(PAUSE)
 
     log("\n===== 2. 네이버 화면이 쓰는 코드")
+    pages = {}
     for page in PROBE_PAGES:
         try:
             r = requests.get(page, headers={"User-Agent": UA}, timeout=TIMEOUT)
             doc = r.content.decode("cp949", "replace")
         except Exception as e:                           # noqa: BLE001
+            pages[page] = {"오류": f"{type(e).__name__}: {e}"[:120]}
             log(f"  {page} → {type(e).__name__}")
             continue
         codes = sorted(set(CODE_TOKEN.findall(doc)))
-        log(f"  {page} → {r.status_code} · 코드 {len(codes)}개")
-        log("      " + ", ".join(codes[:60]))
         # 선물·야간이라는 낱말이 실제로 이 화면에 있는지도 함께 본다.
-        for word in ("야간", "선물", "F_NIGHT", "futures"):
-            if word in doc:
-                log(f"      '{word}' 있음")
+        words = [w for w in ("야간", "선물", "F_NIGHT", "futures") if w in doc]
+        pages[page] = {"status": r.status_code, "코드": codes[:80], "낱말": words}
+        log(f"  {page} → {r.status_code} · 코드 {len(codes)}개 · 낱말 {words}")
+        log("      " + ", ".join(codes[:60]))
+
+    # 로그는 다른 단계 출력에 묻힌다. 답은 파일로 남긴다.
+    os.makedirs(os.path.dirname(PROBE_PATH) or ".", exist_ok=True)
+    with open(PROBE_PATH, "w", encoding="utf-8") as f:
+        json.dump({"찾은 심볼": found, "두드린 것": tried, "화면": pages},
+                  f, ensure_ascii=False, indent=1)
+    log(f"\n[저장] {PROBE_PATH} — 시세가 온 심볼 {len(found)}개")
     return 0
 
 
