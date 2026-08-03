@@ -9,9 +9,15 @@
 본문은 가져오지 않는다. 제목과 링크, 언론사만 옮기고 읽는 것은 원문에서 한다.
 요약을 만들면 그 순간 앱이 판단을 하게 된다.
 
-**파싱 원칙**: class 이름이 아니라 링크 모양으로 찾는다. 네이버가 화면을 고치면
-class 는 매번 바뀌지만 기사 링크 주소는 잘 안 바뀐다. 그래도 못 찾으면 그 칸을
-비운다 — 엉뚱한 글을 뉴스라고 내보내는 것보다 빈 칸이 낫다.
+**파싱 원칙**: 기사는 링크 모양으로 찾되, **어느 덩어리 안인지까지 본다.**
+
+  처음엔 class 를 아예 안 보고 링크 모양만으로 찾았다. 화면 구조가 바뀌어도
+  안 깨지는 대신, 어디서 집는지를 포기한 셈이었다. 그 대가로 두 페이지가
+  공유하는 사이드바의 보도자료가 주요뉴스 자리에 올라왔다 — '코인원 바우처
+  출시', '증권사 룰렛 이벤트' 같은 것들이 배포까지 됐다.
+
+  이제 갈래마다 덩어리를 지정한다. class 이름이 바뀌면 그 칸은 빈다.
+  엉뚱한 목록을 주요뉴스라고 내보내는 것보다 빈 칸이 낫다.
 
     python market_news.py            # 받아서 저장
     python market_news.py --dump     # 파싱이 깨졌을 때 원본 구조를 들여다본다
@@ -28,9 +34,20 @@ import datetime as dt
 
 import requests
 
+# (이름, 주소, 기사를 담은 덩어리의 class)
+#
+# 덩어리를 지정하지 않고 문서 순서대로 집었더니, 두 페이지가 **같은 사이드바**를
+# 공유하는 바람에 보도자료가 주요뉴스 자리에 올라왔다. 실제 구조는 이랬다.
+#
+#   mainnews.naver         newsList 40건 · sub_tit_ticker 10 · right_list_1_2 8
+#   news_list.naver?RANK   simpleNewsList 25 · sub_tit_ticker 10 · right_list_1_2 8
+#
+# 가운데 목록만 집는다. class 이름이 바뀌면 그 칸은 빈다 — 엉뚱한 목록을
+# 주요뉴스라고 내보내는 것보다 낫다.
 FEEDS = [
-    ("주요뉴스", "https://finance.naver.com/news/mainnews.naver"),
-    ("많이 본 뉴스", "https://finance.naver.com/news/news_list.naver?mode=RANK"),
+    ("주요뉴스", "https://finance.naver.com/news/mainnews.naver", "newsList"),
+    ("많이 본 뉴스", "https://finance.naver.com/news/news_list.naver?mode=RANK",
+     "simpleNewsList"),
 ]
 
 LIMIT = 8            # 갈래당 보여줄 기사 수
@@ -152,12 +169,7 @@ def blocks(doc: str, limit: int = 12) -> list:
         h = HREF.search(a.group(1))
         if not h or not ARTICLE_HREF.search(h.group(2)):
             continue
-        owner = "?"
-        for mp, mv in marks:
-            if mp < a.start():
-                owner = mv
-            else:
-                break
+        owner = owner_of(a.start(), marks)
         e = agg.setdefault(owner, {"marker": owner, "n": 0, "first": ""})
         e["n"] += 1
         if not e["first"]:
@@ -166,7 +178,19 @@ def blocks(doc: str, limit: int = 12) -> list:
     return sorted(agg.values(), key=lambda x: -x["n"])[:limit]
 
 
-def parse(doc: str, limit: int = LIMIT, exclude: set = None) -> list:
+def owner_of(pos: int, marks: list) -> str:
+    """이 위치보다 앞에 있는 가장 가까운 표지(class/id)."""
+    out = "?"
+    for mp, mv in marks:
+        if mp < pos:
+            out = mv
+        else:
+            break
+    return out
+
+
+def parse(doc: str, limit: int = LIMIT, exclude: set = None,
+          block: str = None) -> list:
     """
     기사 링크를 순서대로 뽑는다.
 
@@ -175,13 +199,20 @@ def parse(doc: str, limit: int = LIMIT, exclude: set = None) -> list:
 
     제목은 title 속성을 먼저 본다. 목록에 보이는 글자는 네이버가 미리 잘라
     '…' 을 붙여 두는데, title 속성에는 원래 제목이 통째로 들어 있다.
+
+    block 을 주면 **그 덩어리 안의 기사만** 집는다. 안 주면 문서 순서대로
+    집는데, 그러면 사이드바의 보도자료가 섞인다.
     """
     if not doc:
         return []
+    marks = [(m.start(), m.group(2)) for m in MARKER.finditer(doc)] if block else []
     out, seen = [], set(exclude or ())
-    for attrs, inner in ANCHOR.findall(doc):
+    for a in ANCHOR.finditer(doc):
+        attrs, inner = a.group(1), a.group(2)
         m = HREF.search(attrs)
         if not m or not ARTICLE_HREF.search(m.group(2)):
+            continue
+        if block and owner_of(a.start(), marks) != block:
             continue
         t = TITLE_ATTR.search(attrs)
         title = clean(t.group(2)) if t else ""
@@ -201,25 +232,28 @@ def parse(doc: str, limit: int = LIMIT, exclude: set = None) -> list:
 
 
 def collect(limit: int = LIMIT) -> dict:
-    groups, failed, taken = [], [], set()
-    for name, url in FEEDS:
-        info = ""
+    """
+    갈래마다 **지정한 덩어리 안에서만** 집는다.
+
+    두 갈래에 같은 기사가 겹칠 수 있는데, 그건 그대로 둔다. 많이 본 기사가
+    주요뉴스이기도 한 것은 자연스럽다 — 예전에는 사이드바 때문에 겹쳤던 것을
+    갈래끼리 빼서 가렸는데, 이제 덩어리가 갈리니 그럴 이유가 없다.
+    """
+    groups, failed = [], []
+    for name, url, block in FEEDS:
+        info, doc = "", None
         try:
             doc, info = fetch(url)
-            # 앞 갈래가 이미 가져간 기사는 건너뛴다. '많이 본 뉴스' 페이지에도
-            # 상단에 주요뉴스 블록이 통째로 들어 있어서, 앞에서부터 세면 두
-            # 갈래가 똑같은 목록이 된다. 그래도 비면 아래에서 비운다.
-            items = parse(doc, limit, exclude=taken)
+            items = parse(doc, limit, block=block)
         except Exception as e:                   # noqa: BLE001
             log(f"::warning::{name} 실패 ({type(e).__name__}: {e})")
             items, failed = [], failed + [name]
         else:
             if not items:
-                log(f"::warning::{name}: 남는 기사가 없습니다 — 앞 갈래와 같은 "
-                    f"목록이거나 화면 구조가 바뀐 것입니다 "
-                    f"(python market_news.py --dump 로 확인)")
+                log(f"::warning::{name}: '{block}' 덩어리에서 기사를 찾지 "
+                    f"못했습니다 — class 이름이 바뀐 것으로 보입니다. "
+                    f"엉뚱한 목록을 내보내지 않으려고 이 칸은 비웁니다")
                 failed.append(name)
-        taken |= {i["id"] for i in items}
         blks = blocks(doc) if doc else []
         log(f"  {name}: {len(items)}건 ({info})")
         for b in blks[:6]:
@@ -256,8 +290,8 @@ def save(payload: dict) -> None:
 
 def dump() -> int:
     """파싱이 깨졌을 때 쓴다. 실제로 뭐가 내려오는지 눈으로 본다."""
-    for name, url in FEEDS:
-        log(f"\n===== {name} {url} =====")
+    for name, url, block in FEEDS:
+        log(f"\n===== {name} {url}  (덩어리: {block}) =====")
         try:
             doc, info = fetch(url)
         except Exception as e:                   # noqa: BLE001

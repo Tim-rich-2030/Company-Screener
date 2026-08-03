@@ -60,8 +60,13 @@ SERIES = [
     {"key": "kr_rate", "name": "한국 기준금리", "unit": "%", "step": True,
      "ecos": {"stat": "722Y001", "cycle": "D", "item": "0101000"},
      "note": "한국은행 기준금리",
-     "fallback": {"name": "한국 단기금리", "note": "기준금리 대용 — ECOS 키가 없어 "
-                                            "FRED 의 한국 콜/단기금리로 대신함",
+     # 대용은 **계단이 아니다.** 콜금리는 시장에서 매일 조금씩 움직이는 값이라,
+     # 기준금리처럼 '값이 바뀐 날 = 결정일'로 보면 2.541 → 2.527 같은 미세 변동이
+     # 전부 '인하'로 찍힌다. 실제로 그렇게 24건이 나왔다. 대용일 때는 선으로만
+     # 그리고 사건을 잡지 않는다.
+     "fallback": {"name": "한국 단기금리", "step": False,
+                  "note": "기준금리 대용 — ECOS 키가 없어 FRED 의 한국 "
+                          "콜/단기금리로 대신함. 시장금리라 매일 조금씩 움직인다",
                   "fred": ["IRSTCI01KRM156N", "IR3TIB01KRM156N",
                            "INTDSRKRM193N"]}},
     {"key": "usdkrw", "name": "원/달러", "unit": "원", "step": False,
@@ -149,22 +154,33 @@ def fetch_kospi(years: int = YEARS) -> dict:
     except Exception as e:                       # noqa: BLE001
         log(f"::warning::pykrx 를 쓸 수 없습니다 ({type(e).__name__}: {e})")
         return {}
+    # 10년을 한 번에 달라고 했더니 빈 표가 왔다 (실제로 0일치가 나왔다).
+    # KRX 가 긴 구간을 잘라 버리는 것으로 보여, 해마다 나눠 받아 붙인다.
+    # 한 해가 비어도 나머지는 남는다.
     end = dt.date.today()
-    start = end - dt.timedelta(days=int(365.25 * years) + 10)
-    try:
-        df = stock.get_index_ohlcv_by_date(start.strftime("%Y%m%d"),
-                                           end.strftime("%Y%m%d"), "1001")
-    except Exception as e:                       # noqa: BLE001
-        log(f"::warning::코스피 시세 실패 ({type(e).__name__}: {e})")
-        return {}
-    out = {}
-    for idx, row in df.iterrows():
+    out, empty = {}, []
+    for y in range(end.year - years, end.year + 1):
+        a = dt.date(y, 1, 1).strftime("%Y%m%d")
+        b = min(dt.date(y, 12, 31), end).strftime("%Y%m%d")
         try:
-            close = float(row["종가"])
-        except (KeyError, TypeError, ValueError):
+            df = stock.get_index_ohlcv_by_date(a, b, "1001")
+        except Exception as e:                   # noqa: BLE001
+            log(f"  코스피 {y}년 실패 ({type(e).__name__}: {e})")
             continue
-        if close > 0:
-            out[idx.strftime("%Y%m%d")] = close
+        if df is None or df.empty:
+            empty.append(str(y))
+            continue
+        for idx, row in df.iterrows():
+            try:
+                close = float(row["종가"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if close > 0:
+                out[idx.strftime("%Y%m%d")] = close
+    if empty:
+        log(f"  코스피 빈 해: {', '.join(empty)}")
+    if not out:
+        log("::warning::코스피를 하나도 받지 못했습니다 — 이후 기록이 비게 됩니다")
     return out
 
 
@@ -299,6 +315,7 @@ def collect(years: int = YEARS) -> dict:
                 if pts:
                     spec["name"] = name = fb["name"]
                     spec["note"] = f"{fb['note']} ({fid})"
+                    spec["step"] = fb.get("step", spec["step"])
                     log(f"::warning::{name} — 원본 대신 대용을 씁니다: {fid}")
                     break
 
