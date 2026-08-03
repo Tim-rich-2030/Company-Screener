@@ -86,33 +86,79 @@ SERIES = [
     #   기준 국제 금 시세 | 기준 원달러 환율 | 사실 때 | 파실 때 | …
     # 우리가 읽는 첫 숫자는 **매매기준율**, 곧 1그램 값(원)이다. 온스당
     # 달러가 아니다. 처음엔 그걸 '185,821.74 달러' 라고 내보냈다.
-    {"key": "gold", "name": "금 1g", "unit": "원", "step": False,
-     "naver_gold": True, "note": "1그램 매매기준율 (네이버 금융 시장지표)"},
+    {"key": "gold", "name": "금", "unit": "달러", "step": False,
+     "naver_gold": True, "note": "국제 금 시세 (네이버 금융 시장지표)"},
 ]
 
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d"
 GOLD_URL = ("https://finance.naver.com/marketindex/goldDailyQuote.naver"
             "?marketindexCd=CMDT_GC&page={page}")
 
+# 금 표의 머리는 두 줄이다. 첫 줄에 colspan 이 걸려 있고 둘째 줄이 그 아래를
+# 채운다. 실제로 이렇게 온다.
+#
+#   1줄: 날짜 | 매매기준율 | 전일대비 | 실물 거래(2) | 계좌 거래(2) |
+#        기준 국제 금 시세 | 기준 원달러 환율
+#   2줄: 사실 때 | 파실 때 | 입금 시 | 해지 시
+#
+# '기준 국제 금 시세' 가 데이터 줄의 몇 번째 칸인지는 세어 봐야 안다.
+# 처음엔 날짜 뒤 첫 숫자를 집었는데 그건 매매기준율(1그램 원)이었고, 그걸
+# '185,821.74 달러' 라고 내보냈다. 위치를 짐작하지 않고 머리에서 센다.
+GOLD_COL = re.compile(r"국제\s*금")
+TH = re.compile(r"<th([^>]*)>(.*?)</th>", re.I | re.S)
+TD = re.compile(r"<td[^>]*>(.*?)</td>", re.I | re.S)
+COLSPAN = re.compile(r'colspan\s*=\s*["\']?(\d+)', re.I)
 
-# 표의 칸 이름에 단위가 적혀 있어야 값을 쓴다. 무엇을 읽는지 모르는 채로
-# 숫자를 내보내지 않는다.
-GOLD_OK = re.compile(r"매매기준율")
+
+def _txt(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s)).strip()
+
+
+def flat_headers(doc: str) -> list:
+    """
+    두 줄짜리 머리를 데이터 칸 순서대로 편다.
+
+    첫 줄의 colspan 이 n 이면 둘째 줄에서 이름 n 개를 가져다 채운다.
+    """
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S)
+    heads = [r for r in rows if "<th" in r.lower()][:2]
+    if not heads:
+        return []
+
+    def cells(row):
+        out = []
+        for attr, txt in TH.findall(row):
+            m = COLSPAN.search(attr)
+            out.append((int(m.group(1)) if m else 1, _txt(txt)))
+        return out
+
+    top = cells(heads[0])
+    sub = [t for _, t in cells(heads[1])] if len(heads) > 1 else []
+    flat, k = [], 0
+    for span, name in top:
+        if span > 1:
+            for i in range(span):
+                flat.append(f"{name} {sub[k + i]}" if k + i < len(sub) else name)
+            k += span
+        else:
+            flat.append(name)
+    return flat
 
 
 def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
     """
-    국제 금 시세 — 네이버 금융 시장지표의 날짜별 표.
+    국제 금 시세 — 네이버 금융 시장지표 표의 '기준 국제 금 시세' 칸.
 
-    한 쪽에 열흘쯤 들어 있어 몇 쪽을 이어 받는다. 표 구조를 짐작하지 않고
-    줄마다 'YYYY.MM.DD' 와 그 뒤 첫 숫자를 짝지어 읽는다.
+    한 쪽에 열흘쯤 들어 있어 몇 쪽을 이어 받는다. 어느 칸을 읽을지는 머리에서
+    세어 정하고, 못 찾으면 **값을 내보내지 않는다** — 단위가 틀린 숫자보다
+    빈 칸이 낫다.
     """
-    out = {}
+    out, col = {}, None
     for page in range(1, pages + 1):
         try:
             r = requests.get(GOLD_URL.format(page=page),
-                             headers={"User-Agent": UA,
-                                      "Referer": "https://finance.naver.com/marketindex/"},
+                             headers={"User-Agent": UA, "Referer":
+                                      "https://finance.naver.com/marketindex/"},
                              timeout=TIMEOUT)
             r.raise_for_status()
         except Exception as e:                   # noqa: BLE001
@@ -120,30 +166,29 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
                 why[f"금/{page}쪽"] = f"{type(e).__name__}: {e}"[:140]
             break
         doc = r.content.decode("cp949", "replace")
-        if page == 1:
-            # 어느 칸을 읽고 있는지 확인되기 전에는 숫자를 내보내지 않는다.
-            # 처음 붙였을 때 금값이 185,821.74 '달러' 로 나갔다 — 국제 금
-            # (온스당 3천 달러대)이 아니라 다른 칸을 집은 것이다.
-            heads = [re.sub(r"<[^>]+>", " ", h).strip()
-                     for h in re.findall(r"<th[^>]*>(.*?)</th>", doc, re.I | re.S)]
+
+        if col is None:
+            heads = flat_headers(doc)
+            hit = [i for i, h in enumerate(heads) if GOLD_COL.search(h)]
             if why is not None:
-                why["금/칸"] = " | ".join(h for h in heads if h)[:160]
-            # 표가 바뀌면 우리가 읽는 첫 숫자가 다른 칸이 된다. 그때는
-            # 값을 내보내지 않는다 — 단위가 틀린 숫자보다 빈 칸이 낫다.
-            if not (heads and GOLD_OK.search(heads[1] if len(heads) > 1
-                                             else "")):
+                why["금/칸"] = " | ".join(heads)[:200]
+            if not hit:
                 if why is not None:
-                    why["금"] = ("두 번째 칸이 매매기준율이 아닙니다 — "
-                                 "위 '금/칸' 을 보고 고칩니다")
+                    why["금"] = ("'기준 국제 금 시세' 칸을 못 찾아 값을 "
+                                 "내보내지 않습니다 — 위 '금/칸' 을 보고 고칩니다")
                 return {}
+            col = hit[0]
+            if why is not None:
+                why["금/자리"] = f"{col}번째 칸 ({heads[col]})"
+
         got = 0
         for row in re.findall(r"<tr[^>]*>(.*?)</tr>", doc, re.I | re.S):
-            text = re.sub(r"<[^>]+>", " ", row)
-            m = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", text)
-            if not m:
+            tds = [_txt(t) for t in TD.findall(row)]
+            if len(tds) <= col:
                 continue
-            v = re.search(r"([\d,]+\.\d+)", text[m.end():])
-            if not v:
+            m = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", tds[0])
+            v = re.search(r"([\d,]+(?:\.\d+)?)", tds[col])
+            if not m or not v:
                 continue
             try:
                 d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -153,9 +198,12 @@ def fetch_gold(start: dt.date, pages: int = 6, why: dict = None) -> dict:
             if d >= start and val > 0:
                 out[d.strftime("%Y%m%d")] = val
                 got += 1
+        if why is not None and page == 1:
+            why["금/첫쪽"] = f"{got}건"
         if not got:                              # 더 볼 쪽이 없다
             break
     return out
+
 
 
 def fetch_stooq(sym: str, start: dt.date, why: dict = None) -> dict:

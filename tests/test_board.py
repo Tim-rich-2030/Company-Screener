@@ -875,6 +875,56 @@ def test_kospi_comes_from_the_file_the_index_step_already_wrote():
     print("test_kospi_comes_from_the_file_the_index_step_already_wrote: OK")
 
 
+GOLD_PAGE = """<table><thead>
+<tr><th>날짜</th><th>매매기준율</th><th>전일대비</th><th colspan="2">실물 거래</th>
+<th colspan="2">계좌 거래</th><th>기준 국제 금 시세</th><th>기준 원달러 환율</th></tr>
+<tr><th>사실 때</th><th>파실 때</th><th>입금 시</th><th>해지 시</th></tr></thead><tbody>
+<tr><td>2026.08.03</td><td>185,997.00</td><td>1,234.00</td><td>190,000</td><td>182,000</td>
+<td>186,500</td><td>185,500</td><td>3,412.50</td><td>1,460.76</td></tr>
+</tbody></table>"""
+
+
+def _gold(doc, why):
+    class R:
+        status_code = 200
+        content = doc.encode("cp949")
+        def raise_for_status(self): pass
+    orig = mm.requests.get
+    mm.requests.get = lambda *a, **k: R()
+    try:
+        return mm.fetch_gold(dt.date(2026, 1, 1), pages=1, why=why)
+    finally:
+        mm.requests.get = orig
+
+
+def test_gold_reads_the_international_column_not_the_first_number():
+    """
+    날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
+    달러' 를 내보낸 적이 있다. 국제 금은 온스당 3천 달러대다.
+
+    표 머리가 두 줄이라(colspan) '기준 국제 금 시세' 가 몇 번째 칸인지는
+    세어 봐야 안다. 자리를 짐작하지 않고 머리에서 편다.
+    """
+    eq(mm.flat_headers(GOLD_PAGE)[3], "실물 거래 사실 때", "colspan 을 펴서 붙인다")
+    why = {}
+    eq(_gold(GOLD_PAGE, why), {"20260803": 3412.5}, "국제 금 시세 칸을 읽는다")
+    assert "7번째" in why["금/자리"], why["금/자리"]
+    print("test_gold_reads_the_international_column_not_the_first_number: OK")
+
+
+def test_gold_stays_empty_when_the_column_is_gone():
+    """
+    표가 바뀌어 그 칸을 못 찾으면 값을 내보내지 않는다.
+    단위가 틀린 숫자보다 빈 칸이 낫다 — 한 번 그렇게 내보낸 적이 있다.
+    """
+    why = {}
+    eq(_gold(GOLD_PAGE.replace("기준 국제 금 시세", "거래량"), why), {},
+       "칸이 없으면 빈 표")
+    assert "못 찾아" in why["금"], why["금"]
+    assert why["금/칸"], "무엇이 왔는지는 남긴다"
+    print("test_gold_stays_empty_when_the_column_is_gone: OK")
+
+
 # =============================================================================
 # 지수보다 강한 종목
 # =============================================================================
@@ -1215,6 +1265,8 @@ if __name__ == "__main__":
     test_theme_match_prefers_the_longer_fragment()
     test_theme_group_change_is_weighted_by_stock_count()
     test_theme_unmatched_is_counted_not_hidden()
+    test_gold_reads_the_international_column_not_the_first_number()
+    test_gold_stays_empty_when_the_column_is_gone()
     test_strong_drops_stocks_without_a_full_window()
     test_strong_skips_holidays_and_returns_oldest_first()
     test_strong_is_measured_against_that_market_index()
