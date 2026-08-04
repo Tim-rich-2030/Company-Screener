@@ -224,6 +224,13 @@ def build(raw: dict, top_n: int = TOP_N) -> dict:
         tiles[m] = top
     return {
         "date": raw["date"],
+        # 언제 받은 것인지 **시각까지** 남긴다.
+        #
+        #   날짜만 있으면 장중에 15분마다 다시 받아도 값이 "20260804" 로
+        #   똑같아서, 화면이 새것인지 옛것인지 가릴 수가 없다. 실제로 화면은
+        #   날짜만 보고 '같은 것' 이라 판단해 새로 받은 지도를 계속 버렸다.
+        "fetched_at": dt.datetime.now(dt.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": raw["source"],
         "universe": {"seen": raw["seen"], "kept": len(items),
                      "cut": raw["cut"], "flags": raw["flags"]},

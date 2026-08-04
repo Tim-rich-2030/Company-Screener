@@ -9,6 +9,7 @@
 """
 import os
 import sys
+import re
 import json
 import tempfile
 import datetime as dt
@@ -1649,6 +1650,67 @@ def test_intraday_index_disparity_is_measured_at_the_same_moment():
 
 
 
+# =============================================================================
+# 배선 — 만든 것이 도는 자리까지 갔는가
+# =============================================================================
+
+_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+
+def test_what_the_loop_pushes_is_what_the_screen_reads():
+    """
+    오늘 같은 실수를 네 번 했다. 전부 '파이썬은 맞는데 그게 도는 자리가
+    안 맞는' 것이었다.
+
+      · 워크플로가 market_strong.py 를 아예 안 불렀다
+      · store/strong_base.json 을 만들고 커밋 목록에 안 넣었다
+      · live 판에 pykrx 를 안 깔았다
+      · 지도를 live 가지에 밀면서 화면은 그걸 안 읽었다
+
+    사람이 눈으로 대조하니 계속 빠뜨린다. 기계가 대조하게 한다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    block = re.search(r"for f in (.*?); do", wf, re.S)
+    assert block, "live 가지에 올릴 파일 목록을 못 찾았습니다"
+    pushed = set(re.findall(r"docs/(market_\w+\.json)", block.group(1)))
+    read = set(re.findall(r"live\('(market_\w+\.json)'", idx))
+
+    assert pushed, "미는 파일이 하나도 없습니다"
+    eq(pushed, read, "미는 것과 읽는 것이 어긋납니다")
+    print("test_what_the_loop_pushes_is_what_the_screen_reads: OK")
+
+
+def test_every_live_file_carries_a_time_not_just_a_date():
+    """
+    날짜만 남기면 장중에 15분마다 다시 받아도 "20260804" 로 똑같아서, 화면이
+    새것인지 가릴 수가 없다. 실제로 지도가 그래서 계속 버려졌다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    block = re.search(r"for f in (.*?); do", wf, re.S).group(1)
+    for name in sorted(set(re.findall(r"docs/(market_\w+)\.json", block))):
+        src = open(os.path.join(_ROOT, name + ".py"), encoding="utf-8").read()
+        assert '"fetched_at"' in src or '"intraday_at"' in src, \
+            f"{name}.py 가 시각을 남기지 않습니다 — 날짜만으로는 못 가립니다"
+    print("test_every_live_file_carries_a_time_not_just_a_date: OK")
+
+
+def test_the_loop_installs_what_its_steps_need():
+    """
+    단계를 늘릴 때 그 단계가 무엇을 필요로 하는지 같이 봐야 한다. pykrx 를
+    안 깔아서 종목 다시 세기가 매번 그 자리에서 멈춘 적이 있다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    assert "pip install -q -r requirements.txt" in wf, \
+        "부품 목록을 따로 적지 말고 requirements.txt 를 그대로 쓴다"
+    print("test_the_loop_installs_what_its_steps_need: OK")
+
+
+
 def test_gold_reads_the_international_column_not_the_first_number():
     """
     날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
@@ -1753,16 +1815,18 @@ def test_strong_is_measured_against_that_market_index():
     """
     '강하다'는 지수 이격도보다 위라는 뜻이다. 등락률이 아니라 이격도로 잰다.
 
-    정렬은 1차 이격도, 2차 거래대금. 이격이 같으면 거래가 실린 쪽이 앞이다.
+    **목록에 드는 자와 줄을 세우는 자가 다르다.** 드는 조건은 이격도(지수보다
+    위), 세우는 순서는 등락률이다. 이격도로 세우면 20일 평균에서 멀어진
+    종목이 며칠째 위에 남아, 오늘 무엇이 움직였는지가 안 보인다.
     """
-    rows = [_r("A", 5.0, BIG), _r("B", 5.0, BIG * 9), _r("C", -1.0),
+    rows = [_r("A", 5.0, BIG, chg=1.0), _r("B", 5.0, BIG * 9, chg=7.0),
+            _r("C", -1.0),
             _r("D", 12.0, market="코스닥", chg=30.0),
             _r("E", -9.0, market="코스닥", chg=-30.0)]
     out = mst.build(rows, {"코스피": 0.0, "코스닥": 20.0}, top=10)
 
     k = out["markets"]["코스피"]
-    eq([x["code"] for x in k["strong"]], ["B", "A"],
-       "이격이 같으면 거래대금이 큰 쪽이 앞")
+    eq([x["code"] for x in k["strong"]], ["B", "A"], "오늘 더 오른 쪽이 앞")
     eq(k["strong_total"], 2, "지수(0.00%)보다 아래인 C 는 빠진다")
     eq(out["markets"]["코스닥"]["strong"], [],
        "지수가 +20% 인 날은 +12% 도 강한 게 아니다")
@@ -1796,6 +1860,40 @@ def test_strong_drops_stocks_you_cannot_actually_trade():
     eq(out["spread"]["코스피"]["1000억 이상"], 3, "분포를 남겨 문턱을 다시 잰다")
     eq(out["spread"]["코스피"]["3000억 이상"], 0, "그 위 눈금도 함께 남긴다")
     print("test_strong_drops_stocks_you_cannot_actually_trade: OK")
+
+
+def test_strong_list_is_ordered_by_todays_move():
+    """
+    목록에 드는 조건은 이격도지만(지수보다 위), **줄을 세우는 자는 등락률**이다.
+    이격도는 '20일 평균에서 얼마나 떨어져 있나' 라 며칠째 같은 종목이 위에
+    남는다. 오늘 무엇이 움직였는지를 보려고 만든 목록이다.
+    """
+    def row(code, chg, disp, value=10 ** 11):
+        return {"code": code, "name": code, "market": "코스피", "sector": "전기",
+                "cap": 10 ** 12, "themes": [], "sma20": 100.0,
+                "disparity": disp, "chg": chg, "close": 10000, "open": 10000,
+                "high": 10000, "low": 10000, "volume": 10 ** 6, "value": value}
+    rows = [row("A", chg=2.0, disp=30.0), row("B", chg=9.0, disp=11.0),
+            row("C", chg=5.0, disp=20.0)]
+    out = mst.build(rows, {"코스피": 0.0}, top=5)
+    eq([r["code"] for r in out["markets"]["코스피"]["strong"]], ["B", "C", "A"],
+       "등락률이 큰 순")
+    print("test_strong_list_is_ordered_by_todays_move: OK")
+
+
+def test_a_tie_on_move_is_broken_by_disparity():
+    """등락률이 같으면 20일선에서 더 멀리 간 쪽을 앞에 둔다."""
+    def row(code, disp):
+        return {"code": code, "name": code, "market": "코스피", "sector": "전기",
+                "cap": 10 ** 12, "themes": [], "sma20": 100.0,
+                "disparity": disp, "chg": 3.0, "close": 10000, "open": 10000,
+                "high": 10000, "low": 10000, "volume": 10 ** 6,
+                "value": 10 ** 11}
+    out = mst.build([row("A", 5.0), row("B", 12.0)], {"코스피": 0.0}, top=5)
+    eq([r["code"] for r in out["markets"]["코스피"]["strong"]], ["B", "A"],
+       "같은 등락률이면 이격이 큰 쪽")
+    print("test_a_tie_on_move_is_broken_by_disparity: OK")
+
 
 
 def test_strong_leaves_the_list_empty_when_the_index_is_unknown():
@@ -2023,6 +2121,8 @@ if __name__ == "__main__":
     test_strong_drops_stocks_without_a_full_window()
     test_strong_skips_holidays_and_returns_oldest_first()
     test_strong_is_measured_against_that_market_index()
+    test_strong_list_is_ordered_by_todays_move()
+    test_a_tie_on_move_is_broken_by_disparity()
     test_strong_drops_stocks_you_cannot_actually_trade()
     test_strong_leaves_the_list_empty_when_the_index_is_unknown()
     test_strong_tags_themes_but_only_two()
@@ -2043,6 +2143,9 @@ if __name__ == "__main__":
     test_a_live_move_is_not_overwritten_by_the_daily_table()
     test_when_the_daily_table_is_unreadable_nothing_is_invented()
     test_quick_run_keeps_the_trend_it_already_has()
+    test_what_the_loop_pushes_is_what_the_screen_reads()
+    test_every_live_file_carries_a_time_not_just_a_date()
+    test_the_loop_installs_what_its_steps_need()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()

@@ -1441,7 +1441,7 @@ function renderStrong(){
         '<span class="px num">' + num(r.close, 0) + '</span>' +
         '<span class="mv num ' + cls(r.chg) + '">' +
         (won === null ? '' : (won > 0 ? '+' : '') + num(won, 0) + ' ') +
-        signed(r.chg, 2) + '%</span>' +
+        '(' + signed(r.chg, 2) + '%)</span>' +
         '<span class="gap num ' + cls(r.disparity) + '">' +
         '<i>이격</i>' + signed(r.disparity, 2) + '%</span>' +
         '</span></button>';
@@ -1456,7 +1456,7 @@ function renderStrong(){
   if (mk){
     why.push(mk.index_disparity === null ? '지수 이격도를 못 읽었습니다'
       : '20일선 이격도가 ' + SV + ' 지수(' + signed(mk.index_disparity, 2) +
-        '%)보다 높은 종목 · 이격도순');
+        '%)보다 높은 종목 · 등락률순');
   } else {
     why.push('등락률 ' + (SV === '급상승' ? '상위' : '하위'));
   }
@@ -1963,6 +1963,7 @@ function livePoll(){
   live('market_board.json', BOARD, useBoard);
   live('market_headline.json', HEAD, useHead);
   live('market_strong.json', STRONG, useStrong);
+  live('market_tree.json', TREE, useTree);
 }
 
 function startLive(){
@@ -2077,16 +2078,24 @@ grab('market_world.json').then(function(p){
   WORLD = p; renderStrip();
 }).catch(function(){});
 
-grab('market_tree.json').then(function(p){
+/* 보고 있던 탭은 그대로 둔다. 15분마다 코스피 탭으로 되돌아가면
+   코스닥을 보던 사람은 지도를 읽을 수가 없다. */
+function useTree(p){
   TREE = p;
-  TREE_VIEW = treeViews()[0];
+  if (!TREE_VIEW) TREE_VIEW = treeViews()[0];
   renderTreeTabs(); renderTree();
+}
+
+grab('market_tree.json').then(function(p){
+  useTree(p);
   // 웹폰트가 늦게 오면 글자 폭이 바뀐다. 대체 폰트로 잰 결과로 개수를 정해두면
   // 폰트가 바뀐 뒤 이름이 잘린 채 남는다 — 실제로 코스피 탭에서 하나 남았다.
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(renderTree);
   if (window.ResizeObserver) new ResizeObserver(renderTree).observe($('map'));
+  live('market_tree.json', p, useTree);
 }).catch(function(){
   hide('tree', '시장 지도');
+  live('market_tree.json', null, useTree);
 });
 
 grab('market_macro.json').then(function(p){
