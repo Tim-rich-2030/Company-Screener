@@ -231,11 +231,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .lst .sub{display:block;font-size:11.5px;color:var(--ink-muted);margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lst .rt{flex:0 0 auto;text-align:right}
-.lst .gap{display:block;font-size:14px}
-.lst .amt{display:block}
+/* 오른쪽에 세 줄 — 값 · 등락(원, %) · 20일선 이격.
+   정렬 기준인 이격을 맨 아래 두어 눈이 값에서 시작해 이격으로 내려가게 한다. */
+.lst .px{display:block;font-size:14.5px}
+.lst .mv{display:block;font-size:11.5px;margin-top:2px}
+.lst .gap{display:block;font-size:12.5px;margin-top:2px}
 .lst .gap i{font-style:normal;font-size:10px;color:var(--ink-muted);
   margin-right:3px}
-.lst .amt{font-size:11.5px;color:var(--ink-muted);margin-top:3px}
 /* 테마 뱃지 — 상자가 아니라 괘선 하나로 두른다. */
 .tag{display:inline-block;font-size:10.5px;line-height:1.5;padding:0 5px;
   margin-right:4px;color:var(--ink-muted);border:1px solid var(--rule);
@@ -1379,6 +1381,15 @@ var STRONG = null, SV = null;
 // 스물다섯 줄을 처음부터 펼치면 첫 화면 다음이 통째로 목록이 된다.
 var STEPS = [6, 12, 0], SHOW = 0;
 
+/* 오른(내린) 폭을 원으로. 등락률과 지금 값에서 낸다 —
+   12,450원이 +5.8% 라면 어제는 11,767원이었고 683원 오른 것이다. */
+function wonMove(close, chg){
+  if (close == null || chg == null) return null;
+  var prev = close / (1 + chg / 100);
+  if (!isFinite(prev) || prev <= 0) return null;
+  return Math.round(close - prev);
+}
+
 function money(v){
   if (v === null || v === undefined) return '–';
   var a = Math.abs(v);
@@ -1417,17 +1428,23 @@ function renderStrong(){
   } else {
     var cut = STEPS[SHOW] || rows.length;
     $('strong-list').innerHTML = rows.slice(0, cut).map(function(r, i){
-      var tags = (r.themes || []).map(function(t){
-        return '<i class="tag">' + esc(t.sub) + '</i>'; }).join('');
+      // 줄에 두는 것은 넷뿐이다 — 값 · 오른 폭(원) · 등락률 · 20일선 이격.
+      // 거래대금과 테마는 뺐다. 문턱을 넘은 것만 목록에 오르므로 거래대금은
+      // 이미 걸러진 조건이고, 줄마다 다시 적으면 읽을 것만 늘어난다.
+      var won = wonMove(r.close, r.chg);
       return '<button class="r" data-c="' + esc(r.code) + '">' +
         '<span class="no num">' + (i + 1) + '</span><span class="mid">' +
         '<span class="nm">' + esc(r.name) + '</span>' +
-        '<span class="sub">' + tags + esc(r.sector || '') + '</span></span>' +
-        '<span class="rt"><span class="gap num ' + cls(r.disparity) + '">' +
-        '<i>이격</i>' + signed(r.disparity, 1) + '%</span>' +
-        '<span class="amt num">' + num(r.close, 0) + ' · ' +
-        '<em style="font-style:normal" class="' + cls(r.chg) + '">' +
-        signed(r.chg, 1) + '%</em> · ' + money(r.value) + '</span></span></button>';
+        // 분류는 **KRX 업종**이다. 우리가 손으로 묶은 테마가 아니다.
+        '<span class="sub">' + esc(r.sector || '') + '</span></span>' +
+        '<span class="rt">' +
+        '<span class="px num">' + num(r.close, 0) + '</span>' +
+        '<span class="mv num ' + cls(r.chg) + '">' +
+        (won === null ? '' : (won > 0 ? '+' : '') + num(won, 0) + ' ') +
+        signed(r.chg, 2) + '%</span>' +
+        '<span class="gap num ' + cls(r.disparity) + '">' +
+        '<i>이격</i>' + signed(r.disparity, 2) + '%</span>' +
+        '</span></button>';
     }).join('') + (cut < rows.length
       ? '<button class="more mid" id="strong-more">종목 더 보기 ' +
         '<span aria-hidden="true">▾</span></button>' : '');
@@ -1663,10 +1680,9 @@ function openSheet(code){
     kv('외국인 지분', f.foreign === undefined ? '–' : f.foreign.toFixed(2) + '%') +
     kv('업종', esc(r.sector || '–')) + '</div>' +
 
-    ((r.themes || []).length ? '<h3>테마</h3><div class="why">' +
-      r.themes.map(function(t){
-        return '<i class="tag">' + esc(t.group) + ' · ' + esc(t.sub) + '</i>';
-      }).join('') + '</div>' : '') +
+    // 테마 구역은 뺐다. 우리가 손으로 묶은 18개 분류라 KRX 업종과 겹쳐서
+    // 같은 종목에 '전기·전자' 와 '반도체 / HBM·메모리' 가 나란히 붙었다.
+    // 분류는 하나면 된다 — 공식 분류인 KRX 업종을 쓴다 (위 투자 지표에 있다).
 
     '<h3>뉴스</h3><div id="sheet-news">' + sheetNews() + '</div>' +
 
@@ -1892,18 +1908,69 @@ function grab(file){
 var LIVE = 'https://raw.githubusercontent.com/' +
            'Tim-rich-2030/Company-Screener/live/docs/';
 
+/*
+ * 어느 쪽이 더 새것인가.
+ *
+ *   파일마다 시각을 적는 이름이 다르다.
+ *     market_board / market_headline  →  fetched_at  "2026-08-04T04:46:15Z"
+ *     market_strong                   →  intraday_at (장중) 또는 date "20260804"
+ *
+ *   fetched_at 만 보게 해 뒀더니 종목 파일에는 그 이름이 없어서, live 것이
+ *   아무리 새것이어도 늘 버려졌다. 화면이 한 번 바뀌고 그대로였던 이유다.
+ *
+ *   글자로 바로 견주면 안 된다 — "2026-08-04T…" 와 "20260804" 는 네 번째
+ *   글자에서 '-' 가 '0' 보다 작아 옛것이 새것을 이긴다. 숫자만 남겨 견준다.
+ *     "2026-08-04T04:46:15Z" → 20260804044615
+ *     "20260804"             → 20260804          (앞이 같으면 긴 쪽이 새것)
+ */
+function stamp(p){
+  if (!p) return '';
+  var v = p.fetched_at || p.intraday_at || p.date || '';
+  return String(v).replace(/[^0-9]/g, '').slice(0, 14);
+}
 function newer(cur, next){
-  if (!next || !next.fetched_at) return false;
-  if (!cur || !cur.fetched_at) return true;
-  return String(next.fetched_at) > String(cur.fetched_at);
+  var b = stamp(next);
+  return b !== '' && b > stamp(cur);
 }
 
 /* 실패하면 조용히 넘어간다 — 저장소 사본이 이미 화면에 있다. */
 function live(file, cur, apply){
-  fetch(LIVE + file, {cache:'no-store'})
+  return fetch(LIVE + file, {cache:'no-store'})
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(p){ if (newer(cur, p)) apply(p); })
-    .catch(function(){});
+    .then(function(p){ if (newer(cur, p)){ apply(p); return p; } return cur; })
+    .catch(function(){ return cur; });
+}
+
+/*
+ * **한 번 받고 끝내면 안 된다.**
+ *
+ *   처음엔 화면을 열 때 한 번만 live 를 봤다. 그래서 열자마자 한 번 새
+ *   값으로 바뀌고, 그 뒤로는 창을 열어 둔 채 아무리 기다려도 그대로였다.
+ *   수집은 15분마다 도는데 화면이 안 물어보니 소용이 없었다.
+ *
+ *   그래서 되풀이해서 묻는다. 다만 raw 는 5분간 같은 답을 주므로(CDN)
+ *   그보다 자주 물어도 얻는 것이 없다 — 2분마다면 충분하다.
+ *
+ *   그리고 **탭이 안 보이는 동안에는 묻지 않는다.** 주머니 속 폰이 밤새
+ *   2분마다 요청을 날릴 이유가 없다. 다시 보일 때 곧바로 한 번 묻는다 —
+ *   그 순간이 바로 사람이 값을 확인하는 때다.
+ */
+var LIVE_EVERY = 120000;      // 2분
+var liveTimer = null;
+
+function livePoll(){
+  if (document.hidden) return;
+  live('market_board.json', BOARD, useBoard);
+  live('market_headline.json', HEAD, useHead);
+  live('market_strong.json', STRONG, useStrong);
+}
+
+function startLive(){
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(livePoll, LIVE_EVERY);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) livePoll();
+  });
 }
 /*
  * 아직 못 받은 칸은 **접는다.** 대신 무엇이 비었는지 맨 아래에 적는다.
@@ -1987,6 +2054,9 @@ grab('market_headline.json').then(function(p){
   useHead({rank: []});
   live('market_headline.json', null, useHead);
 });
+
+// 열 때 한 번이 아니라 계속 묻는다.
+startLive();
 
 grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');
