@@ -3,8 +3,8 @@ name: 현황판 갱신
 # 15분마다 새로 받는 것 — 장중에 실제로 움직이는 것들만.
 #   · 헤드라인 뉴스
 #   · 간밤의 증시 + 코스피·코스닥 실시간 지수
-#   · 실시간 종목 (국내 장중에만)
-# 테마·지도·일봉·투자지표는 '시장 신호 수집'(하루 한 번)이 맡는다.
+#   · 실시간 종목 + 시장 지도 (국내 장중에만)
+# 테마·일봉·투자지표·일정은 '시장 신호 수집'(하루 한 번)이 맡는다.
 #
 # =============================================================================
 # 왜 예약(cron)에 기대지 않는가 — 이 저장소의 예약은 다섯 시간씩 늦는다
@@ -153,8 +153,12 @@ jobs:
             if [ "$dow" -le 5 ] && [ "$kst" -ge 0900 ] && [ "$kst" -le 1540 ]; then
               python market_strong.py --quick \
                 || echo "실시간 종목 실패 — 이번 판은 넘어갑니다"
+              # 지도도 장중에 움직인다. 종목 목록과 같은 화면에서 하나만
+              # 살아 있으면 어느 쪽이 지금인지 알 수 없다.
+              python market_tree.py \
+                || echo "시장 지도 실패 — 이번 판은 넘어갑니다"
             else
-              echo "국내 장 시간이 아닙니다 (KST $kst) — 종목은 건너뜁니다"
+              echo "국내 장 시간이 아닙니다 (KST $kst) — 종목·지도는 건너뜁니다"
             fi
 
             # live 가지는 **매번 새로 만든다.** 커밋 하나짜리 저장소를 그때그때
@@ -163,7 +167,7 @@ jobs:
             live=$(mktemp -d)
             mkdir -p "$live/docs"
             for f in docs/market_headline.json docs/market_board.json \
-                     docs/market_strong.json; do
+                     docs/market_strong.json docs/market_tree.json; do
               [ -f "$f" ] && cp "$f" "$live/docs/"
             done
             git -C "$live" init -q

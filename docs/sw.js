@@ -3,7 +3,7 @@
 //   PAGES  — html 과 지수 json. 데이터가 바뀌면 같이 바뀐다.
 // 하나로 두면 캐시 이름이 페이지 해시라 데이터가 바뀌는 날마다 캐시가 통째로
 // 갈리고, 폰트 700KB 를 매일 다시 받게 된다.
-const V = 'c9cce9edf5ec';
+const V = 'e11a9acd4671';
 const PAGES = 'pages-' + V;
 const ASSETS = 'assets-282656e0';
 const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',

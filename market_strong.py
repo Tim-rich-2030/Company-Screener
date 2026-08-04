@@ -326,8 +326,10 @@ def build(rows: list, index_disp: dict, top: int = TOP,
     **네 목록 모두 거래대금·시가총액 문턱을 넘은 종목만 담는다.** 못 사고 못
     파는 종목을 목록에 올리면 그 줄은 읽을 이유가 없다.
 
-    강한 종목 정렬은 **1차 이격도, 2차 거래대금**이다. 이격이 같으면 거래가
-    실린 쪽을 앞에 둔다 — 같은 이격이라도 손이 많이 탄 쪽이 시장이 본 종목이다.
+    강한 종목 **정렬은 등락률순**이다. 목록에 드는 조건은 여전히 이격도지만
+    (지수보다 위), 줄을 세우는 자는 오늘 얼마나 움직였느냐다. 이격도는
+    '20일 평균에서 얼마나 떨어져 있나'라 며칠째 같은 종목이 위에 남는다.
+    같은 등락률이면 이격이 큰 쪽을 앞에 둔다.
 
     '강하다'의 기준은 좁히지 않았다. 지수 이격도보다 위면 강한 것이 맞고,
     대신 몇 종목 중 몇 종목인지를 그대로 적어 화면이 상황을 말하게 한다.
@@ -340,7 +342,7 @@ def build(rows: list, index_disp: dict, top: int = TOP,
         strong = []
         if base is not None:
             strong = sorted([r for r in mine if r["disparity"] > base],
-                            key=lambda r: (-r["disparity"], -r["value"]))
+                            key=lambda r: (-r["chg"], -r["disparity"]))
         markets[m] = {
             "index_disparity": None if base is None else round(base, 2),
             "counted": sum(1 for r in rows if r["market"] == m),

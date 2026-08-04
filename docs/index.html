@@ -1441,7 +1441,7 @@ function renderStrong(){
         '<span class="px num">' + num(r.close, 0) + '</span>' +
         '<span class="mv num ' + cls(r.chg) + '">' +
         (won === null ? '' : (won > 0 ? '+' : '') + num(won, 0) + ' ') +
-        signed(r.chg, 2) + '%</span>' +
+        '(' + signed(r.chg, 2) + '%)</span>' +
         '<span class="gap num ' + cls(r.disparity) + '">' +
         '<i>이격</i>' + signed(r.disparity, 2) + '%</span>' +
         '</span></button>';
@@ -1456,7 +1456,7 @@ function renderStrong(){
   if (mk){
     why.push(mk.index_disparity === null ? '지수 이격도를 못 읽었습니다'
       : '20일선 이격도가 ' + SV + ' 지수(' + signed(mk.index_disparity, 2) +
-        '%)보다 높은 종목 · 이격도순');
+        '%)보다 높은 종목 · 등락률순');
   } else {
     why.push('등락률 ' + (SV === '급상승' ? '상위' : '하위'));
   }

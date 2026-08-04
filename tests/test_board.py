@@ -1753,16 +1753,18 @@ def test_strong_is_measured_against_that_market_index():
     """
     '강하다'는 지수 이격도보다 위라는 뜻이다. 등락률이 아니라 이격도로 잰다.
 
-    정렬은 1차 이격도, 2차 거래대금. 이격이 같으면 거래가 실린 쪽이 앞이다.
+    **목록에 드는 자와 줄을 세우는 자가 다르다.** 드는 조건은 이격도(지수보다
+    위), 세우는 순서는 등락률이다. 이격도로 세우면 20일 평균에서 멀어진
+    종목이 며칠째 위에 남아, 오늘 무엇이 움직였는지가 안 보인다.
     """
-    rows = [_r("A", 5.0, BIG), _r("B", 5.0, BIG * 9), _r("C", -1.0),
+    rows = [_r("A", 5.0, BIG, chg=1.0), _r("B", 5.0, BIG * 9, chg=7.0),
+            _r("C", -1.0),
             _r("D", 12.0, market="코스닥", chg=30.0),
             _r("E", -9.0, market="코스닥", chg=-30.0)]
     out = mst.build(rows, {"코스피": 0.0, "코스닥": 20.0}, top=10)
 
     k = out["markets"]["코스피"]
-    eq([x["code"] for x in k["strong"]], ["B", "A"],
-       "이격이 같으면 거래대금이 큰 쪽이 앞")
+    eq([x["code"] for x in k["strong"]], ["B", "A"], "오늘 더 오른 쪽이 앞")
     eq(k["strong_total"], 2, "지수(0.00%)보다 아래인 C 는 빠진다")
     eq(out["markets"]["코스닥"]["strong"], [],
        "지수가 +20% 인 날은 +12% 도 강한 게 아니다")
@@ -1796,6 +1798,40 @@ def test_strong_drops_stocks_you_cannot_actually_trade():
     eq(out["spread"]["코스피"]["1000억 이상"], 3, "분포를 남겨 문턱을 다시 잰다")
     eq(out["spread"]["코스피"]["3000억 이상"], 0, "그 위 눈금도 함께 남긴다")
     print("test_strong_drops_stocks_you_cannot_actually_trade: OK")
+
+
+def test_strong_list_is_ordered_by_todays_move():
+    """
+    목록에 드는 조건은 이격도지만(지수보다 위), **줄을 세우는 자는 등락률**이다.
+    이격도는 '20일 평균에서 얼마나 떨어져 있나' 라 며칠째 같은 종목이 위에
+    남는다. 오늘 무엇이 움직였는지를 보려고 만든 목록이다.
+    """
+    def row(code, chg, disp, value=10 ** 11):
+        return {"code": code, "name": code, "market": "코스피", "sector": "전기",
+                "cap": 10 ** 12, "themes": [], "sma20": 100.0,
+                "disparity": disp, "chg": chg, "close": 10000, "open": 10000,
+                "high": 10000, "low": 10000, "volume": 10 ** 6, "value": value}
+    rows = [row("A", chg=2.0, disp=30.0), row("B", chg=9.0, disp=11.0),
+            row("C", chg=5.0, disp=20.0)]
+    out = mst.build(rows, {"코스피": 0.0}, top=5)
+    eq([r["code"] for r in out["markets"]["코스피"]["strong"]], ["B", "C", "A"],
+       "등락률이 큰 순")
+    print("test_strong_list_is_ordered_by_todays_move: OK")
+
+
+def test_a_tie_on_move_is_broken_by_disparity():
+    """등락률이 같으면 20일선에서 더 멀리 간 쪽을 앞에 둔다."""
+    def row(code, disp):
+        return {"code": code, "name": code, "market": "코스피", "sector": "전기",
+                "cap": 10 ** 12, "themes": [], "sma20": 100.0,
+                "disparity": disp, "chg": 3.0, "close": 10000, "open": 10000,
+                "high": 10000, "low": 10000, "volume": 10 ** 6,
+                "value": 10 ** 11}
+    out = mst.build([row("A", 5.0), row("B", 12.0)], {"코스피": 0.0}, top=5)
+    eq([r["code"] for r in out["markets"]["코스피"]["strong"]], ["B", "A"],
+       "같은 등락률이면 이격이 큰 쪽")
+    print("test_a_tie_on_move_is_broken_by_disparity: OK")
+
 
 
 def test_strong_leaves_the_list_empty_when_the_index_is_unknown():
@@ -2023,6 +2059,8 @@ if __name__ == "__main__":
     test_strong_drops_stocks_without_a_full_window()
     test_strong_skips_holidays_and_returns_oldest_first()
     test_strong_is_measured_against_that_market_index()
+    test_strong_list_is_ordered_by_todays_move()
+    test_a_tie_on_move_is_broken_by_disparity()
     test_strong_drops_stocks_you_cannot_actually_trade()
     test_strong_leaves_the_list_empty_when_the_index_is_unknown()
     test_strong_tags_themes_but_only_two()
