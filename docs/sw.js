@@ -3,7 +3,7 @@
 //   PAGES  — html 과 지수 json. 데이터가 바뀌면 같이 바뀐다.
 // 하나로 두면 캐시 이름이 페이지 해시라 데이터가 바뀌는 날마다 캐시가 통째로
 // 갈리고, 폰트 700KB 를 매일 다시 받게 된다.
-const V = '9ee87ab37e12';
+const V = 'bf2bf9374b27';
 const PAGES = 'pages-' + V;
 const ASSETS = 'assets-282656e0';
 const STATIC = ['./assets/vendor/lightweight-charts.standalone.production.js',
@@ -48,7 +48,12 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  const path = new URL(req.url).pathname;
+  const url = new URL(req.url);
+  // 바깥 주소는 건드리지 않는다. 현황판이 live 가지(raw.githubusercontent)를
+  // 볼 때 파일 이름이 우리 것과 같아서, 걸러내지 않으면 그 응답까지 우리
+  // 캐시에 들어가고 실패했을 때 index.html 을 JSON 이라고 돌려주게 된다.
+  if (url.origin !== self.location.origin) return;
+  const path = url.pathname;
   // 지수 요약도 페이지와 같이 다룬다. 캐시 우선으로 두면 어제 숫자를 오늘 값처럼
   // 보여주고, 캐시를 아예 안 하면 오프라인에서 시장 화면이 통째로 빈다.
   const isPage = req.mode === 'navigate' || path.endsWith('/') ||
