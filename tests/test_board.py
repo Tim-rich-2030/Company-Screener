@@ -1519,6 +1519,136 @@ def test_office_drops_the_portal_that_only_carried_it():
 
 
 
+# =============================================================================
+# 장중 다시 세기 — 오늘 시세 한 번으로 20일선을 굴린다
+# =============================================================================
+
+def _quick_env(tmp, base_date="20260803", today="20260804",
+               closes=(15000.0, 10000.0)):
+    """밑감과 오늘 시세를 깔아 둔다. 스무 날 합 200,000 · 첫날 9,000 · 끝날 11,000."""
+    mst.BASE_PATH = os.path.join(tmp, "b.json")
+    mst.STORE_PATH = os.path.join(tmp, "s.json")
+    mst.DOCS_PATH = os.path.join(tmp, "ds.json")
+    mst.PX_PATH = os.path.join(tmp, "px.json")
+    meta = {"market": "코스피", "sector": "전기", "cap": 5 * 10 ** 11, "themes": []}
+    with open(mst.BASE_PATH, "w", encoding="utf-8") as f:
+        json.dump({"date": base_date, "days": 20,
+                   "base": {"000001": [200000.0, 9000.0, 11000.0],
+                            "000002": [200000.0, 9000.0, 11000.0]},
+                   "meta": {"000001": dict(meta, name="가"),
+                            "000002": dict(meta, name="나")}}, f)
+    with open(mst.STORE_PATH, "w", encoding="utf-8") as f:
+        json.dump({"date": base_date, "days": 20, "facts": {"000001": {"per": 1}}}, f)
+
+    class DF:
+        def __init__(self, r): self._r = r
+        def iterrows(self): return iter(self._r.items())
+
+    def row(c):
+        return {"종가": c, "시가": c, "고가": c, "저가": c, "등락률": 1.0,
+                "거래량": 10 ** 6, "거래대금": 5 * 10 ** 10}
+    df = DF({"000001": row(closes[0]), "000002": row(closes[1])})
+    mst.fetch_history = lambda stock, end, days=20: [(today, df)]
+    mst.market_tree._stock = lambda: object()
+    mst.live_index = lambda path=None: {"코스피": 0.0}
+
+
+def test_intraday_rolls_the_window_instead_of_refetching_it():
+    """
+    20일치를 다시 받으면 호출이 스무 번이다. 15분마다 그러면 장중 열두 시간에
+    KRX 를 천 번 두드리게 된다 — 우리가 필요해서가 아니라 코드가 그렇게 생겨서.
+
+    하루 한 번 도는 판이 [스무 날 합, 첫날, 끝날]을 남겨 두면, 장중에는
+    오늘 시세 한 번만 받아 합을 굴리면 된다. **어림이 아니라 정확히 스무 날**
+    이다 — 어제 평균에 오늘 값을 얹는 것과 다르다.
+    """
+    keep = (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+            mst.fetch_history, mst.live_index)
+    with tempfile.TemporaryDirectory() as tmp:
+        _quick_env(tmp)
+        try:
+            out = mst.quick(top=5)
+        finally:
+            (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+             mst.fetch_history, mst.live_index) = keep
+    ks = out["markets"]["코스피"]
+    got = {r["name"]: r for r in ks["strong"]}
+    # 손 검산: (200000 - 9000 + 15000) / 20 = 10,300 → (15000-10300)/10300 = +45.63%
+    eq(got["가"]["sma20"], 10300.0, "새 날이면 가장 오래된 날을 뺀다")
+    eq(got["가"]["disparity"], 45.63, "이격도")
+    eq(ks["strong_total"], 1, "지수(0%)보다 위인 것만")
+    print("test_intraday_rolls_the_window_instead_of_refetching_it: OK")
+
+
+def test_intraday_on_the_same_day_drops_the_newest_not_the_oldest():
+    """
+    밑감과 같은 날 다시 세면 오늘이 이미 스무 날 안에 들어 있다. 그때 가장
+    오래된 날을 빼면 오늘이 두 번 들어가 스물한 날짜리 평균이 된다.
+    """
+    keep = (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+            mst.fetch_history, mst.live_index)
+    with tempfile.TemporaryDirectory() as tmp:
+        _quick_env(tmp, base_date="20260804", today="20260804")
+        try:
+            out = mst.quick(top=5)
+        finally:
+            (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+             mst.fetch_history, mst.live_index) = keep
+    rows = out["markets"]["코스피"]["strong"]
+    # (200000 - 11000 + 15000) / 20 = 10,200
+    eq(rows[0]["sma20"], 10200.0, "같은 날이면 가장 최근 날을 뺀다")
+    print("test_intraday_on_the_same_day_drops_the_newest_not_the_oldest: OK")
+
+
+def test_intraday_does_not_wipe_the_daily_bars():
+    """
+    장중 판에는 일봉이 없다. 없는 것을 빈 채로 쓰면 673KB 짜리
+    docs/market_px.json 이 통째로 지워지고 종목을 눌러도 차트가 안 나온다.
+    **빠진 것과 빈 것은 다르다.**
+    """
+    keep = (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+            mst.fetch_history, mst.live_index)
+    with tempfile.TemporaryDirectory() as tmp:
+        _quick_env(tmp)
+        px = mst.PX_PATH
+        with open(px, "w", encoding="utf-8") as f:
+            json.dump({"px": {"000001": [["20260101", 1, 2, 3, 4]]}}, f)
+        before = open(px, encoding="utf-8").read()
+        try:
+            mst.save(mst.quick(top=5))
+        finally:
+            after = open(px, encoding="utf-8").read()
+            (mst.BASE_PATH, mst.STORE_PATH, mst.DOCS_PATH, mst.PX_PATH,
+             mst.fetch_history, mst.live_index) = keep
+    eq(after, before, "일봉은 손대지 않는다")
+    print("test_intraday_does_not_wipe_the_daily_bars: OK")
+
+
+def test_intraday_index_disparity_is_measured_at_the_same_moment():
+    """
+    장중에 종목만 지금 값으로 재고 지수는 어제 것으로 두면 '지수보다 강한'이
+    통째로 기울어진다 — 시장이 3% 빠진 날 모든 종목이 강해 보인다.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        board = os.path.join(tmp, "board.json")
+        with open(board, "w", encoding="utf-8") as f:
+            json.dump({"night": [{"name": "코스피", "market": "KR", "last": 110.0}]}, f)
+        sig = os.path.join(tmp, "signal.json")
+        # 스무 날 모두 100 → 오늘 110 이면 sma = (2000-100+110)/20 = 100.5
+        with open(sig, "w", encoding="utf-8") as f:
+            json.dump({"series": {"코스피": {f"202601{d:02d}": 100.0
+                                            for d in range(1, 21)}}}, f)
+        keep = mst.SIGNAL_PATH
+        mst.SIGNAL_PATH = sig
+        try:
+            got = mst.live_index(board)
+        finally:
+            mst.SIGNAL_PATH = keep
+    eq(got["코스피"], 9.45, "(110-100.5)/100.5 = +9.45%")
+    print("test_intraday_index_disparity_is_measured_at_the_same_moment: OK")
+
+
+
 def test_gold_reads_the_international_column_not_the_first_number():
     """
     날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
@@ -1897,6 +2027,10 @@ if __name__ == "__main__":
     test_strong_leaves_the_list_empty_when_the_index_is_unknown()
     test_strong_tags_themes_but_only_two()
     test_strong_reads_the_same_index_number_the_front_page_shows()
+    test_intraday_rolls_the_window_instead_of_refetching_it()
+    test_intraday_on_the_same_day_drops_the_newest_not_the_oldest()
+    test_intraday_does_not_wipe_the_daily_bars()
+    test_intraday_index_disparity_is_measured_at_the_same_moment()
     test_quote_is_found_wherever_the_wrapper_puts_it()
     test_quote_fills_in_the_missing_half()
     test_quote_ignores_a_dict_without_a_price()

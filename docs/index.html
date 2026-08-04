@@ -584,9 +584,15 @@ function nightOf(key){
 
 function strip(){
   var out = [];
+  // 코스피·코스닥도 현황판이 받은 실시간 값을 먼저 쓴다. 하루 한 번 받은
+  // 종가를 장중에 띄우면 어제 숫자가 오늘 시세인 척한다.
   NAMES.forEach(function(n){
     var d = (DATA.computed || DATA).indices[n];
-    out.push({key: n, name: n, last: d.close, chg: idxChange(n), krx: true});
+    var v = nightOf(n);
+    var on = v && v.last !== null && v.last !== undefined;
+    out.push({key: n, name: n,
+              last: on ? v.last : d.close,
+              chg: on ? v.rate : idxChange(n), krx: true});
   });
   // 해외 지수 값은 **현황판 것을 먼저 쓴다.** FRED 종가는 하루 늦어서, 머리에
   // 나스닥 25,373(7/31)이 뜨는데 바로 아래 현황판에는 25,913(8/3)이 뜬다.
@@ -1440,7 +1446,10 @@ function renderStrong(){
   if (f['거래대금']){
     why.push('거래대금 ' + money(f['거래대금']) + '원 이상');
   }
-  why.push('종가 기준');
+  // 장중에 다시 센 것이면 '종가 기준' 이 아니다. 그렇게 적어 두면 15분 전
+  // 값을 어제 종가로 읽게 된다.
+  why.push(STRONG.intraday_at ? hhmm(STRONG.intraday_at) + ' 기준 (장중)'
+                              : '종가 기준');
   $('strong-why').textContent = why.join(' · ');
 }
 $('strong-tabs').addEventListener('click', function(e){
@@ -1983,10 +1992,14 @@ grab('market_calendar.json').then(renderCal).catch(function(){
   hide('cal', '일정');
 });
 
+function useStrong(p){ STRONG = p; renderStrong(); }
+
 grab('market_strong.json').then(function(p){
-  STRONG = p; renderStrong();
+  useStrong(p);
+  live('market_strong.json', p, useStrong);
 }).catch(function(){
   hide('strong', '지수보다 강한 종목');
+  live('market_strong.json', null, useStrong);
 });
 
 // 해외 지수는 없어도 코스피·코스닥은 그대로 나온다. 머리에서 그 셋만 빠진다.
