@@ -9,6 +9,7 @@
 """
 import os
 import sys
+import re
 import json
 import tempfile
 import datetime as dt
@@ -1649,6 +1650,67 @@ def test_intraday_index_disparity_is_measured_at_the_same_moment():
 
 
 
+# =============================================================================
+# 배선 — 만든 것이 도는 자리까지 갔는가
+# =============================================================================
+
+_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+
+def test_what_the_loop_pushes_is_what_the_screen_reads():
+    """
+    오늘 같은 실수를 네 번 했다. 전부 '파이썬은 맞는데 그게 도는 자리가
+    안 맞는' 것이었다.
+
+      · 워크플로가 market_strong.py 를 아예 안 불렀다
+      · store/strong_base.json 을 만들고 커밋 목록에 안 넣었다
+      · live 판에 pykrx 를 안 깔았다
+      · 지도를 live 가지에 밀면서 화면은 그걸 안 읽었다
+
+    사람이 눈으로 대조하니 계속 빠뜨린다. 기계가 대조하게 한다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    block = re.search(r"for f in (.*?); do", wf, re.S)
+    assert block, "live 가지에 올릴 파일 목록을 못 찾았습니다"
+    pushed = set(re.findall(r"docs/(market_\w+\.json)", block.group(1)))
+    read = set(re.findall(r"live\('(market_\w+\.json)'", idx))
+
+    assert pushed, "미는 파일이 하나도 없습니다"
+    eq(pushed, read, "미는 것과 읽는 것이 어긋납니다")
+    print("test_what_the_loop_pushes_is_what_the_screen_reads: OK")
+
+
+def test_every_live_file_carries_a_time_not_just_a_date():
+    """
+    날짜만 남기면 장중에 15분마다 다시 받아도 "20260804" 로 똑같아서, 화면이
+    새것인지 가릴 수가 없다. 실제로 지도가 그래서 계속 버려졌다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    block = re.search(r"for f in (.*?); do", wf, re.S).group(1)
+    for name in sorted(set(re.findall(r"docs/(market_\w+)\.json", block))):
+        src = open(os.path.join(_ROOT, name + ".py"), encoding="utf-8").read()
+        assert '"fetched_at"' in src or '"intraday_at"' in src, \
+            f"{name}.py 가 시각을 남기지 않습니다 — 날짜만으로는 못 가립니다"
+    print("test_every_live_file_carries_a_time_not_just_a_date: OK")
+
+
+def test_the_loop_installs_what_its_steps_need():
+    """
+    단계를 늘릴 때 그 단계가 무엇을 필요로 하는지 같이 봐야 한다. pykrx 를
+    안 깔아서 종목 다시 세기가 매번 그 자리에서 멈춘 적이 있다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    assert "pip install -q -r requirements.txt" in wf, \
+        "부품 목록을 따로 적지 말고 requirements.txt 를 그대로 쓴다"
+    print("test_the_loop_installs_what_its_steps_need: OK")
+
+
+
 def test_gold_reads_the_international_column_not_the_first_number():
     """
     날짜 뒤 첫 숫자는 **매매기준율(1그램 원)** 이다. 그걸 집어서 '185,821.74
@@ -2081,6 +2143,9 @@ if __name__ == "__main__":
     test_a_live_move_is_not_overwritten_by_the_daily_table()
     test_when_the_daily_table_is_unreadable_nothing_is_invented()
     test_quick_run_keeps_the_trend_it_already_has()
+    test_what_the_loop_pushes_is_what_the_screen_reads()
+    test_every_live_file_carries_a_time_not_just_a_date()
+    test_the_loop_installs_what_its_steps_need()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()
