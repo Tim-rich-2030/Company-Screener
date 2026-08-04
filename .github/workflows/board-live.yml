@@ -92,8 +92,18 @@ jobs:
           python-version: '3.11'
           cache: pip
 
+      # **requirements.txt 를 그대로 쓴다.**
+      #
+      #   처음엔 'pip install requests' 만 뒀다. 그때는 헤드라인과 현황판만
+      #   돌렸고 둘 다 requests 면 충분했기 때문이다. 그 뒤 종목 다시 세기를
+      #   넣었는데 그건 pykrx 가 있어야 한다. 없으니 market_tree._stock() 이
+      #   None 을 돌려주고 'pykrx 없이는 만들 수 없습니다' 로 끝났다 —
+      #   코드도 자료도 다 맞는데 부품 하나가 없어서.
+      #
+      #   단계를 늘릴 때 그 단계가 무엇을 필요로 하는지 같이 봐야 한다.
+      #   목록을 여기서 따로 관리하지 않고 requirements.txt 하나만 본다.
       - name: 의존성 설치
-        run: pip install -q requests
+        run: pip install -q -r requirements.txt
 
       - name: 15분마다 수집해서 live 가지에 올린다
         env:
