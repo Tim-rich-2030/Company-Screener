@@ -79,6 +79,8 @@ DOCS_PATH = os.path.join("docs", "market_strong.json")
 # 일봉은 따로 둔다. 첫 화면이 읽을 이유가 없고, 같이 넣으면 목록을 보려고
 # 1MB 를 먼저 받게 된다. 종목을 눌렀을 때만 받는다.
 PX_PATH = os.path.join("docs", "market_px.json")
+# 장중에 다시 셀 때 쓰는 밑감. 20일치를 또 받지 않으려고 남긴다.
+BASE_PATH = os.path.join("store", "strong_base.json")
 
 
 def log(msg: str) -> None:
@@ -376,6 +378,7 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
 
     rows, cut = [], {"관리종목": 0, "투자주의환기종목": 0,
                      f"{EXCLUDE_UNDER}원 미만": 0, f"{days}일 미만": 0}
+    base, meta = {}, {}
     seen = 0
     for market in MARKETS:
         try:
@@ -402,6 +405,18 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
             sma = sum(vals) / len(vals)
             if sma <= 0:
                 continue
+            # 장중에 20일선을 다시 낼 때 쓸 밑감.
+            #   [스무 날 합, 가장 오래된 날, 가장 최근 날]
+            # 새 날이면  (합 - 가장 오래된 날 + 지금값) / 20
+            # 같은 날이면 (합 - 가장 최근 날 + 지금값) / 20
+            # 어느 쪽이든 **정확히 스무 날**이다. 어제 평균에 오늘 값을 얹는
+            # 어림이 아니다.
+            base[code] = [round(sum(vals), 1), vals[0], vals[-1]]
+            meta[code] = {"name": str(row.get("종목명") or code),
+                          "market": market,
+                          "sector": str(row.get("업종명") or "기타"),
+                          "cap": int(_f(row, "시가총액") or 0),
+                          "themes": themes.get(code, [])}
             rows.append({
                 "code": code,
                 "name": str(row.get("종목명") or code),
@@ -431,6 +446,8 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
 
     px = fetch_px(stock, shown, date)
 
+    save_base({"date": date, "days": days, "base": base, "meta": meta})
+
     return {
         "px": px,
         "date": date, "source": "pykrx", "days": days,
@@ -443,12 +460,145 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
     }
 
 
+def save_base(payload: dict) -> None:
+    """장중에 다시 셀 때 쓰는 밑감. store/ 에만 둔다 — 화면이 읽을 것이 아니다."""
+    os.makedirs(os.path.dirname(BASE_PATH) or ".", exist_ok=True)
+    with open(BASE_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    kb = os.path.getsize(BASE_PATH) / 1024
+    log(f"[저장] {BASE_PATH} ({len(payload['base'])}종목, {kb:,.0f}KB)")
+
+
+def live_index(path: str = os.path.join("docs", "market_board.json")) -> dict:
+    """
+    지금 지수 이격도. 현황판이 방금 받은 코스피·코스닥 실시간 값으로 낸다.
+
+    장중에 종목만 지금 값으로 재고 지수는 어제 것으로 두면, '지수보다 강한'
+    이 통째로 기울어진다 — 시장이 3% 빠진 날 모든 종목이 강해 보인다.
+    비교할 두 값은 같은 시각의 것이어야 한다.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            board = json.load(f)
+        with open(SIGNAL_PATH, encoding="utf-8") as f:
+            sig = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    now = {}
+    for r in board.get("night") or []:
+        if r.get("market") == "KR" and r.get("last"):
+            now[r["name"]] = float(r["last"])
+    out = {}
+    for name, series in (sig.get("series") or {}).items():
+        p = now.get(name)
+        if p is None:
+            continue
+        days = sorted(series)[-DAYS:]
+        if len(days) < DAYS:
+            continue
+        closes = []
+        for d in days:
+            v = series[d]
+            closes.append(float(v[3] if isinstance(v, list) and len(v) >= 4 else v))
+        # 오늘이 이미 그 안에 있으면 마지막 날을, 아니면 가장 오래된 날을 뺀다.
+        drop = closes[-1] if days[-1] == max(days) and len(days) == DAYS else closes[0]
+        sma = (sum(closes) - drop + p) / DAYS
+        if sma > 0:
+            out[name] = round((p - sma) / sma * 100, 2)
+    return out
+
+
+def quick(top: int = TOP) -> dict:
+    """
+    장중 다시 세기 — **오늘 시세 한 번만 받는다.**
+
+    하루 한 번 도는 판이 20일치를 받아 두고 종목마다 [스무 날 합, 첫날, 끝날]
+    을 남겼다. 여기서는 오늘 전종목 시세 한 번(호출 1회)만 받아 그 합을 굴린다.
+    20일치를 다시 받으면 호출이 스무 번이고, 15분마다 그러면 하루 열두 시간
+    장중에 KRX 를 천 번 두드리게 된다.
+
+    **어제 목록에 없던 종목도 들어온다** — 밑감에 그날 20일을 채운 종목이
+    전부(2,800여 개) 들어 있기 때문이다. 오늘 급등해 문턱을 넘으면 잡힌다.
+
+    투자지표·순매수·일봉은 지난 판 것을 그대로 쓴다. 그건 하루 단위 값이라
+    장중에 바뀌지 않는다.
+    """
+    stock = market_tree._stock()
+    if stock is None:
+        raise SystemExit("pykrx 없이는 만들 수 없습니다")
+    try:
+        with open(BASE_PATH, encoding="utf-8") as f:
+            b = json.load(f)
+        with open(STORE_PATH, encoding="utf-8") as f:
+            prev = json.load(f)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"밑감을 못 읽었습니다 ({type(e).__name__}) — "
+                         "하루 한 번 도는 판이 먼저 돌아야 합니다")
+
+    base, meta = b.get("base") or {}, b.get("meta") or {}
+    hist = fetch_history(stock, dt.date.today(), days=1)
+    if not hist:
+        raise SystemExit("오늘 시세를 못 받았습니다")
+    date, df = hist[-1]
+    same_day = (date == b.get("date"))
+    log(f"[장중] {date} · 밑감 {b.get('date')} ({'같은 날' if same_day else '새 날'})"
+        f" · 종목 {len(base)}")
+
+    rows = []
+    for code, row in df.iterrows():
+        m, bb = meta.get(code), base.get(code)
+        if not m or not bb:
+            continue
+        c = _f(row, "종가")
+        if not c or c <= 0 or c < EXCLUDE_UNDER:
+            continue
+        total, oldest, newest = bb
+        sma = (total - (newest if same_day else oldest) + c) / DAYS
+        if sma <= 0:
+            continue
+        rows.append({
+            "code": code, "name": m["name"], "market": m["market"],
+            "sector": m["sector"], "cap": m["cap"], "themes": m["themes"],
+            "sma20": round(sma, 1),
+            "disparity": round((c - sma) / sma * 100, 2),
+            "close": int(c), "open": int(_f(row, "시가") or 0),
+            "high": int(_f(row, "고가") or 0), "low": int(_f(row, "저가") or 0),
+            "chg": round(_f(row, "등락률") or 0.0, 2),
+            "volume": int(_f(row, "거래량") or 0),
+            "value": int(_f(row, "거래대금") or 0),
+        })
+    if not rows:
+        raise SystemExit("계산할 종목이 없습니다")
+
+    disp = live_index() or index_disparity()
+    out = build(rows, disp, top)
+    log(f"  {len(rows)}종목 · 지수 이격도 {disp}")
+    for m, d in out["markets"].items():
+        log(f"  [{m}] 문턱 통과 {d['liquid']} · 강한 종목 {d['strong_total']}")
+
+    return {**prev, "date": date, "source": "pykrx (장중)",
+            "counted": len(rows), "floor": out["floor"],
+            "liquid_total": out["liquid_total"], "spread": out["spread"],
+            "markets": out["markets"],
+            "급상승": out["급상승"], "급하락": out["급하락"],
+            "intraday_at": dt.datetime.now(dt.timezone.utc)
+                             .strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
 def save(payload: dict) -> None:
-    px = payload.pop("px", {})
+    px = payload.pop("px", None)
     for path in (STORE_PATH, DOCS_PATH):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    # 일봉은 **받았을 때만** 쓴다.
+    #
+    #   장중 판(--quick)에는 일봉이 없다. 없는 것을 빈 채로 쓰면 673KB 짜리
+    #   docs/market_px.json 이 통째로 지워지고, 종목을 눌러도 차트가 안 나온다.
+    #   빠진 것과 빈 것은 다르다.
+    if px is None:
+        log(f"[저장] {STORE_PATH}, {DOCS_PATH} (일봉은 그대로 둡니다)")
+        return
     # 일봉은 docs/ 에만. store/ 에도 두면 저장소가 하루에 두 배로 커진다.
     os.makedirs(os.path.dirname(PX_PATH) or ".", exist_ok=True)
     with open(PX_PATH, "w", encoding="utf-8") as f:
@@ -463,7 +613,18 @@ def main(argv=None) -> int:
     p.add_argument("--date", help="기준일 YYYYMMDD (없으면 최근 영업일)")
     p.add_argument("--days", type=int, default=DAYS)
     p.add_argument("--top", type=int, default=TOP)
+    p.add_argument("--quick", action="store_true",
+                   help="장중 다시 세기 — 오늘 시세 한 번만 받는다")
     a = p.parse_args(argv)
+
+    if a.quick:
+        payload = quick(a.top)
+        save(payload)
+        for m, d in payload["markets"].items():
+            log(f"  [{m}] 강한 종목 {d['strong_total']} · "
+                + ", ".join(f"{r['name']} {r['disparity']:+.1f}%"
+                            for r in d["strong"][:3]))
+        return 0
 
     payload = collect(a.date, a.days, a.top)
     save(payload)
