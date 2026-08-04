@@ -4,7 +4,7 @@ name: 현황판 갱신
 # 지수·종목·테마·지도 같은 무거운 것은 '시장 신호 수집'(하루 한 번)이 맡는다.
 #
 # =============================================================================
-# 왜 예약(cron)으로 안 하는가 — 이 저장소의 예약은 다섯 시간씩 늦는다
+# 왜 예약(cron)에 기대지 않는가 — 이 저장소의 예약은 다섯 시간씩 늦는다
 # =============================================================================
 #
 #   워크플로          예약     실제      지연
@@ -17,9 +17,21 @@ name: 현황판 갱신
 #   '*/5' 도 '*/15' 도 **0회** 였다 — 다음 차례가 오기 전에 이미 밀려 있으니
 #   GitHub 이 통째로 버린다. 주기를 어떻게 조정해도 이건 안 풀린다.
 #
-#   반면 workflow_dispatch 는 몇 초 안에 뜬다. 그래서 **한 판이 끝날 때
-#   다음 판을 스스로 깨운다.** 아래 cron 은 사슬이 끊겼을 때 되살리는
-#   그물이라 늦게 와도 상관없다 — 늦는 것이 예정된 쓰임새다.
+# =============================================================================
+# 그래서 한 번 시작하면 하루를 덮는다 — 토큰도, 바깥 서비스도 없이
+# =============================================================================
+#
+#   처음엔 '한 판이 끝날 때 다음 판을 스스로 깨우는' 방식으로 짰다. 그러려면
+#   토큰이 따로 있어야 한다 — GITHUB_TOKEN 으로 만든 요청은 다른 워크플로를
+#   깨우지 못한다 (무한 재귀를 막으려고 GitHub 이 그렇게 정해 뒀다).
+#
+#   토큰 없이 되는 길이 있었다. **한 작업의 상한은 6시간이지만, 한 실행에
+#   담을 수 있는 작업 수에는 그런 제한이 없다.** 5시간 반짜리 다리 넷을
+#   차례로 이으면 한 번 시작으로 스물세 시간을 덮는다.
+#
+#   끊긴 자리는 아래 cron 이 메운다. 늦는 것이 오히려 도움이 된다 —
+#   실행 중에 예약이 뜨면 다음 판이 '대기' 로 걸리고(concurrency), 지금 판이
+#   끝나는 순간 곧바로 이어받는다. 시간마다 뜨므로 대기 자리는 늘 차 있다.
 #
 # =============================================================================
 # 왜 배포를 안 하는가 — 커밋만으로 화면이 바뀐다
@@ -34,14 +46,16 @@ name: 현황판 갱신
 #
 #   그 파일들은 main 이 아니라 **live 가지**에 올린다. 15분마다 main 에
 #   커밋하면 하루 백 번씩 이력이 쌓이고, 하루 한 번 도는 워크플로와
-#   부딪힌다. live 는 커밋 하나짜리로 계속 덮어쓰므로 이력이 자라지 않는다.
+#   부딪힌다. live 는 매번 커밋 하나짜리로 새로 지어 덮어쓰므로 이력이
+#   자라지 않는다.
 on:
   workflow_dispatch:
   schedule:
-    # 사슬이 끊겼을 때만 쓰이는 그물. 몇 시간 늦게 와도 제 몫을 한다.
+    # 이 예약은 '제때 오기' 위한 것이 아니라 **대기 자리를 채워 두기** 위한
+    # 것이다. 지금 판이 끝나는 순간 대기하던 판이 이어받는다.
     - cron: '25 * * * *'
 
-# 두 판이 겹치면 같은 가지에 서로 밀어 넣는다. 앞의 판이 끝날 때까지 기다린다.
+# 두 판이 겹치면 같은 가지에 서로 밀어 넣는다. 앞의 판을 끝까지 두고 기다린다.
 concurrency:
   group: board-live
   cancel-in-progress: false
@@ -56,7 +70,13 @@ defaults:
 jobs:
   live:
     runs-on: ubuntu-latest
-    # 한 작업의 상한은 6시간이다. 뒷정리와 다음 판 깨우기에 쓸 여유를 남긴다.
+    # 다리 넷을 **차례로** 놓는다 (max-parallel: 1). 한 실행이 5.5시간 × 4 =
+    # 스물두 시간을 덮는다. 하나가 터져도 다음 다리는 놓는다 (fail-fast: false).
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4]
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
@@ -70,10 +90,9 @@ jobs:
         run: pip install -q requests
 
       - name: 15분마다 수집해서 live 가지에 올린다
-        id: loop
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_MINUTES: 300          # 5시간 돌고 다음 판에 넘긴다
+          RUN_MINUTES: 330          # 5시간 반. 상한(6시간)까지 여유를 둔다
           EVERY_SECONDS: 900        # 15분
         run: |
           set -uo pipefail
@@ -83,7 +102,7 @@ jobs:
 
           while [ "$(date +%s)" -lt "$deadline" ]; do
             n=$(( n + 1 ))
-            echo "::group::$n 번째 (KST $(TZ=Asia/Seoul date '+%m-%d %H:%M'))"
+            echo "::group::${{ matrix.leg }}번 다리 · $n 번째 (KST $(TZ=Asia/Seoul date '+%m-%d %H:%M'))"
 
             # 실패해도 반복문을 세우지 않는다. 한 판 걸러도 15분 뒤에 다시 온다.
             python market_headline.py || echo "헤드라인 실패 — 이번 판은 넘어갑니다"
@@ -119,42 +138,4 @@ jobs:
           done
 
           ran=$(( ( $(date +%s) - started ) / 60 ))
-          echo "$n 판, $ran 분 돌았습니다"
-          echo "ran_minutes=$ran" >> "$GITHUB_OUTPUT"
-
-      # 다음 판을 스스로 깨운다.
-      #
-      #   GITHUB_TOKEN 으로 만든 요청은 다른 워크플로를 깨우지 못한다 —
-      #   무한 재귀를 막으려고 GitHub 이 그렇게 정해 뒀다. 그래서 이 저장소의
-      #   Actions 권한만 가진 토큰(ACTIONS_PAT)이 따로 필요하다.
-      #
-      #   **너무 빨리 끝났으면 깨우지 않는다.** 시작하자마자 터지는 판이
-      #   자기를 다시 깨우면 초 단위로 도는 고리가 된다. 한 시간은 돌았어야
-      #   다음을 부른다 — 그보다 짧게 끝났다면 무언가 잘못된 것이고,
-      #   그때는 위의 cron 그물이 몇 시간 뒤에 되살린다.
-      - name: 다음 판 깨우기
-        if: always()
-        env:
-          PAT: ${{ secrets.ACTIONS_PAT }}
-          RAN: ${{ steps.loop.outputs.ran_minutes }}
-        run: |
-          set -uo pipefail
-          if [ -z "${PAT:-}" ]; then
-            echo "::warning::ACTIONS_PAT 가 없어 다음 판을 못 깨웁니다. " \
-                 "발급: github.com/settings/personal-access-tokens " \
-                 "(이 저장소 · Actions: Read and write) → Secrets 에 ACTIONS_PAT"
-            exit 0
-          fi
-          if [ "${RAN:-0}" -lt 60 ]; then
-            echo "::warning::${RAN:-0}분 만에 끝났습니다 — 고리가 될 수 있어 " \
-                 "다음 판을 깨우지 않습니다. cron 그물이 되살립니다"
-            exit 0
-          fi
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${PAT}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/board-live.yml/dispatches" \
-            -d '{"ref":"main"}')
-          echo "다음 판 깨우기 → HTTP $code"
-          [ "$code" = "204" ] || echo "::warning::깨우지 못했습니다 (HTTP $code)"
+          echo "${{ matrix.leg }}번 다리 — $n 판, $ran 분 돌았습니다"
