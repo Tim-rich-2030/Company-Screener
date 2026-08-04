@@ -120,7 +120,11 @@ jobs:
       # 지수 이격도(market_signal)와 테마(market_theme)를 읽으므로 그 뒤에 둔다.
       # 20일선을 만들려고 전종목 일별 시세를 20번 받는다 — 종목마다 받으면
       # 2,500종목 × 20일이 된다.
-      - name: 지수보다 강한 종목 (20일선 이격)
+      # 여기서 store/strong_base.json 도 만든다 — 종목마다 [스무 날 합, 첫날,
+      # 끝날]. 장중에 15분마다 도는 판이 그걸 굴려 20일선을 다시 낸다.
+      # **커밋 목록에 반드시 있어야 한다.** 안 그러면 만들어 놓고 버리게 되고,
+      # 장중 판은 checkout 한 저장소에서 그 파일을 못 찾아 매번 실패한다.
+      - name: 지수보다 강한 종목 (20일선 이격 + 장중용 밑감)
         continue-on-error: true
         env:
           KRX_ID: ${{ secrets.KRX_ID }}
@@ -172,6 +176,7 @@ jobs:
                    store/market_news.json  docs/market_news.json \
                    store/market_theme.json docs/market_theme.json \
                    store/market_strong.json docs/market_strong.json \
+                   store/strong_base.json \
                    store/market_world.json  docs/market_world.json \
                    store/market_stocknews.json docs/market_stocknews.json \
                    store/market_board.json docs/market_board.json \
