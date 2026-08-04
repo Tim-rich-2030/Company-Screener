@@ -113,12 +113,29 @@ jobs:
             python market_headline.py || echo "헤드라인 실패 — 이번 판은 넘어갑니다"
             python market_board.py --quick || echo "현황판 실패 — 이번 판은 넘어갑니다"
 
+            # 종목은 **국내 장중에만** 다시 센다. KRX 를 두드리는 일이고,
+            # 장이 닫힌 뒤에는 같은 종가를 계속 다시 세는 셈이라 뜻이 없다.
+            # 평일 09:00~15:40 KST.
+            #
+            # 반드시 market_board 뒤에 둔다 — 지수 이격도를 현황판이 방금
+            # 받은 실시간 코스피·코스닥으로 내기 때문이다. 종목만 지금 값으로
+            # 재고 지수를 어제 것으로 두면 '지수보다 강한' 이 통째로 기운다.
+            kst=$(TZ=Asia/Seoul date +%H%M)
+            dow=$(TZ=Asia/Seoul date +%u)
+            if [ "$dow" -le 5 ] && [ "$kst" -ge 0900 ] && [ "$kst" -le 1540 ]; then
+              python market_strong.py --quick \
+                || echo "실시간 종목 실패 — 이번 판은 넘어갑니다"
+            else
+              echo "국내 장 시간이 아닙니다 (KST $kst) — 종목은 건너뜁니다"
+            fi
+
             # live 가지는 **매번 새로 만든다.** 커밋 하나짜리 저장소를 그때그때
             # 지어서 강제로 덮어쓰므로 이력이 자라지 않는다. 여기 저장소를
             # 건드리지 않으니 다음 판이 checkout 한 것과도 어긋나지 않는다.
             live=$(mktemp -d)
             mkdir -p "$live/docs"
-            for f in docs/market_headline.json docs/market_board.json; do
+            for f in docs/market_headline.json docs/market_board.json \
+                     docs/market_strong.json; do
               [ -f "$f" ] && cp "$f" "$live/docs/"
             done
             git -C "$live" init -q
