@@ -190,15 +190,38 @@ jobs:
             # 지어서 강제로 덮어쓰므로 이력이 자라지 않는다. 여기 저장소를
             # 건드리지 않으니 다음 판이 checkout 한 것과도 어긋나지 않는다.
             live=$(mktemp -d)
-            mkdir -p "$live/docs"
-            for f in docs/market_headline.json docs/market_board.json \
-                     docs/market_strong.json docs/market_tree.json; do
-              [ -f "$f" ] && cp "$f" "$live/docs/"
-            done
             git -C "$live" init -q
             git -C "$live" config user.name  "github-actions[bot]"
             git -C "$live" config user.email \
               "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # **지금 live 에 있는 것을 밑감으로 깐다.**
+            #
+            #   이 판은 매번 커밋 하나짜리 저장소를 새로 지어 force-push 한다.
+            #   그래서 여기 담기지 않은 것은 live 에서 사라진다. 예전엔 그냥
+            #   docs/ 를 통째로 복사했는데, 그게 장 끝난 뒤에 사고를 냈다.
+            #
+            #     git reset --hard  →  docs/*.json 이 main 사본(어제 것)으로 되돌아감
+            #     장 시간이 아니라 종목·지도는 건너뜀
+            #     그 어제 사본이 그대로 live 로 올라가 오늘 것을 지움
+            #
+            #   실제로 삼성전기가 그날 9% 가까이 빠졌는데 화면에는 어제 오른
+            #   폭인 +14.43% 가 떠 있었다. 값이 틀린 게 아니라 어제 것이
+            #   오늘 것을 덮은 것이었다. 5분마다, 장이 닫힌 내내.
+            if git -C "$live" fetch -q --depth=1 \
+                 "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+                 live 2>/dev/null; then
+              git -C "$live" reset -q --hard FETCH_HEAD
+            else
+              echo "live 가지가 아직 없습니다 — 이번에 새로 만듭니다"
+            fi
+
+            # 그 위에 **더 새것만** 얹는다. 판단 기준은 화면이 쓰는 것과 같다.
+            python live_publish.py "$live/docs" \
+              docs/market_headline.json docs/market_board.json \
+              docs/market_strong.json docs/market_tree.json \
+              || echo "::warning::올릴 것을 고르지 못했습니다"
+
             git -C "$live" add -A
             git -C "$live" commit -q -m "현황판 $(date -u '+%Y-%m-%d %H:%M UTC')"
             if git -C "$live" push -q --force \

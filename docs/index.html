@@ -1967,7 +1967,13 @@ var LIVE = 'https://raw.githubusercontent.com/' +
 function stamp(p){
   if (!p) return '';
   var v = p.fetched_at || p.intraday_at || p.date || '';
-  return String(v).replace(/[^0-9]/g, '').slice(0, 14);
+  var d = String(v).replace(/[^0-9]/g, '').slice(0, 14);
+  // **열네 자리로 채운다.** 날짜만 있는 '20260806' 을 그대로 두면
+  // '20260806062101' 보다 짧아 사전순으로 앞선다 — 같은 날 아침에 만든 것이
+  // 오후에 만든 것보다 새것으로 읽힌다. 0 으로 채우면 그날 자정에 놓인다.
+  // live_publish.py 도 같은 규칙을 쓴다. 한쪽만 고치면 화면과 live 가
+  // 서로 다른 것을 새것이라고 부르게 된다.
+  return d ? (d + '00000000000000').slice(0, 14) : '';
 }
 function newer(cur, next){
   var b = stamp(next);
