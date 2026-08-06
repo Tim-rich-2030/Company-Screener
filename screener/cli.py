@@ -210,6 +210,29 @@ def cmd_backfill(args) -> int:
     return 0
 
 
+def fill_currency(record: dict, quarters, currency: str, bs_currency: str) -> int:
+    """
+    통화가 **비어 있는** 분기만 채운다. 채운 분기 수를 돌려준다.
+
+    복구가 받아 오는 통화는 가장 최근 보고서 하나에서 온 것이다. 그걸 모든
+    분기에 바르면 옛 분기의 통화를 지어내는 셈이 된다. 이미 적힌 분기는 그
+    보고서가 실제로 준 값이므로 손대지 않는다 — 고치려면 그 분기 보고서를
+    다시 받아야 하고, 그건 소급 수집이 할 일이다.
+
+    손익과 재무상태표를 **함께** 적는다. currency 만 적으면 metrics 에서
+    bs_currency 가 currency 로 대체돼 어긋남이 다시 감춰진다.
+    """
+    filled = 0
+    for qkey in quarters:
+        slot = record.get("quarters", {}).get(qkey)
+        if slot is None or slot.get("currency"):
+            continue
+        slot["currency"] = currency
+        slot["bs_currency"] = bs_currency or "KRW"
+        filled += 1
+    return filled
+
+
 def cmd_fix_shares(args) -> int:
     """
     이미 저장된 종목의 주식수를 다시 받아 시가총액을 바로잡는다.
@@ -233,15 +256,33 @@ def cmd_fix_shares(args) -> int:
         fixed = 0
         # 통화도 함께 확인한다. USD 로 공시하는 회사(두산밥캣 등)를 원화로 취급하면
         # 달러 자기자본을 원화 시총으로 나눠 PBR 이 1,000배로 나온다.
+        #
+        # **여기서 찍는 통화는 가장 최근 보고서 하나에서 온다.** 그것을 모든
+        # 분기에 그대로 바르면 옛 분기의 통화를 지어내는 셈이 된다. 실제로 그게
+        # 두산밥캣의 두 번째 사고를 키웠다 — 2023년 1~3분기는 재무상태표가 원화
+        # 그대로였는데 최근 보고서의 USD 가 전 분기에 발려, 원화 자기자본이
+        # 달러로 표시된 채 ROE·ROA 분모로 들어갔다.
+        #
+        #   2023Q3  자본총계 5,863,880,215,000   5.86조  ← 원화
+        #   2023Q4  자본총계     4,618,281,799   46억    ← 달러
+        #
+        # 그래서 **비어 있는 칸만** 채운다. 이미 통화가 적힌 분기는 그 보고서가
+        # 실제로 준 값이므로 손대지 않는다. 여기는 없던 것을 메우는 자리지
+        # 있던 것을 고치는 자리가 아니다. 고치려면 그 분기 보고서를 다시 받아야
+        # 하고 그건 소급 수집(backfill)이 할 일이다.
         quarters = store.sort_quarters(record.get("quarters", {}))
         if quarters:
             newest = store.parse_quarter(quarters[0])
             payload, _ = ingest._fetch_report(
                 client, corp_code, newest[0], ingest.QUARTER_TO_REPRT[newest[1]])
             currency = ingest.detect_currency(payload) if payload else ""
+            # 손익과 재무상태표의 통화가 다를 수 있다. 둘을 **함께** 적어야
+            # metrics 가 어긋남을 볼 수 있다. currency 만 적으면 bs_currency 가
+            # currency 로 대체돼(metrics 의 기본값) 어긋남이 다시 감춰진다.
+            bs_currency = (ingest.detect_currency(payload, {base.BS_SJ_DIV})
+                           or "KRW") if payload else ""
             if currency:
-                for qkey in quarters:
-                    record["quarters"][qkey]["currency"] = currency
+                fill_currency(record, quarters, currency, bs_currency)
         for qkey in store.sort_quarters(record.get("quarters", {})):
             parsed = store.parse_quarter(qkey)
             if not parsed:

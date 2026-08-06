@@ -17,14 +17,23 @@ from .watch import alt_reprt_code
 QUARTER_TO_REPRT = {1: "11013", 2: "11012", 3: "11014", 4: "11011"}
 
 
-def detect_currency(payload: dict) -> str:
+def detect_currency(payload: dict, sj_divs: set | None = None) -> str:
     """
     재무제표의 표시 통화. 두산밥캣처럼 USD로 공시하는 회사가 있다.
 
     통화를 무시하면 달러 자기자본을 원화 시가총액으로 나누게 되어 PBR이 1,000배로
     나온다. 실제로 그렇게 나왔다.
+
+    sj_divs 를 주면 그 재무제표 구분(예: 재무상태표만)의 항목에서만 찾는다. 한
+    보고서 안에서 손익계산서와 재무상태표의 통화가 다를 수 있다 — 두산밥캣
+    2023년 1~3분기가 그랬다. 손익은 달러인데 재무상태표는 원화 그대로 남아
+    있었고, 보고서 전체에서 처음 걸리는 통화 하나로 뭉뚱그리다 보니 재무상태표
+    쪽이 원화인 걸 못 보고 넘어갔다. 자기자본이 지표 계산에서 쓰이려면 손익과
+    재무상태표의 통화가 같은지 따로 확인해야 한다.
     """
     for item in payload.get("list", []):
+        if sj_divs is not None and item.get("sj_div") not in sj_divs:
+            continue
         cur = (item.get("currency") or "").strip().upper()
         if cur:
             return cur
@@ -132,9 +141,14 @@ def ingest_one(client, hit: dict, record: dict) -> dict:
     shares = fetch_shares(client, corp_code, year, reprt_code)
 
     record["name"] = hit.get("name") or record.get("name", "")
+    # bs_currency 는 "탐지 못 함"과 "원화라 표시가 없음"을 구분하지 않는다 — DART는
+    # 원화 항목에 통화 표기를 안 남기므로, 못 찾았다는 것 자체가 원화라는 뜻이다.
+    # ""로 두면 store.merge_quarter가 빈 문자열을 건너뛰어 currency 로 조용히
+    # 대체돼 버리므로(=아무 것도 안 걸러짐) 여기서 "KRW"를 명시적으로 채운다.
     meta = {"rcept_no": hit.get("rcept_no", ""), "fs_div": fs_div,
             "report_nm": hit.get("report_nm", ""),
-            "currency": detect_currency(payload)}
+            "currency": detect_currency(payload),
+            "bs_currency": detect_currency(payload, {base.BS_SJ_DIV}) or "KRW"}
 
     touched = []
     for (yy, qq), vals in quarterly.items():
@@ -192,8 +206,12 @@ def backfill_one(client, corp_code: str, name: str, periods: list, record: dict)
         got_shares = fetch_shares(client, corp_code, period.year, period.reprt_code)
         if got_shares:
             shares[(period.year, quarter)] = got_shares
-        meta[(period.year, quarter)] = {"fs_div": fs_div, "report_nm": period.label,
-                                        "currency": detect_currency(payload)}
+        meta[(period.year, quarter)] = {
+            "fs_div": fs_div, "report_nm": period.label,
+            "currency": detect_currency(payload),
+            # 못 찾았다는 것 자체가 원화라는 뜻이므로 ""가 아니라 "KRW"를 채운다
+            # (ingest_one 쪽과 같은 이유 — store.merge_quarter는 빈 문자열을 건너뛴다).
+            "bs_currency": detect_currency(payload, {base.BS_SJ_DIV}) or "KRW"}
 
     if name:
         record["name"] = name
