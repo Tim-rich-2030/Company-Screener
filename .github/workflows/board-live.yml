@@ -74,7 +74,7 @@ name: 현황판 갱신
 #   화면이 거기서 직접 읽으므로 Pages 배포가 필요 없다. 갱신 한 번이
 #   1분에서 10초로 줄고, 그래서 셸 반복문 안에서 돌릴 수 있게 된다.
 #
-#   그 파일들은 main 이 아니라 **live 가지**에 올린다. 15분마다 main 에
+#   그 파일들은 main 이 아니라 **live 가지**에 올린다. 5분마다 main 에
 #   커밋하면 하루 백 번씩 이력이 쌓이고, 하루 한 번 도는 워크플로와
 #   부딪힌다. live 는 매번 커밋 하나짜리로 새로 지어 덮어쓰므로 이력이
 #   자라지 않는다.
@@ -129,7 +129,7 @@ jobs:
       - name: 의존성 설치
         run: pip install -q -r requirements.txt
 
-      - name: 15분마다 수집해서 live 가지에 올린다
+      - name: 5분마다 수집해서 live 가지에 올린다
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KRX_ID: ${{ secrets.KRX_ID }}
@@ -162,7 +162,7 @@ jobs:
             git fetch --depth=1 origin main -q && git reset --hard -q FETCH_HEAD \
               || echo "::warning::최신 main 을 못 받았습니다 — 이번 판은 있던 것으로 돕니다"
 
-            # 실패해도 반복문을 세우지 않는다. 한 판 걸러도 15분 뒤에 다시 온다.
+            # 실패해도 반복문을 세우지 않는다. 한 판 걸러도 5분 뒤에 다시 온다.
             python market_headline.py || echo "헤드라인 실패 — 이번 판은 넘어갑니다"
             python market_board.py --quick || echo "현황판 실패 — 이번 판은 넘어갑니다"
 

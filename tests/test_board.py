@@ -1164,12 +1164,17 @@ def test_when_the_daily_table_is_unreadable_nothing_is_invented():
 
 
 
-def test_quick_run_keeps_the_trend_it_already_has():
+def test_quick_run_keeps_the_history_and_refreshes_only_the_tip():
     """
-    추세는 일별 값이라 15분마다 다시 받을 이유가 없다. 그런데 그 한 번이
-    금 15쪽 + 환율 30쪽 + FRED + 업비트로 쉰 번쯤 두드린다 — 15분마다 그러면
-    하루에 네이버를 오천 번 두드리게 된다. 우리가 필요해서가 아니라 코드가
-    그렇게 생겨서. 자주 도는 판은 시세만 받고 추세는 지난 판을 물려받는다.
+    처음엔 --quick 이 추세를 **통째로** 물려받았다. 한 번 받는 데 금 15쪽 +
+    환율 30쪽 + FRED + 업비트로 쉰 번쯤 두드리는데, 그걸 자주 하면 하루에
+    네이버를 만 번 넘게 두드리게 되기 때문이다.
+
+    그 대가로 화면의 '주요 지표'가 하루 한 번 도는 판에서만 바뀌었다. 장이
+    열려 있는 내내 어제 숫자를 오늘처럼 보여준 셈이다.
+
+    지난 것을 다시 받을 이유가 없다는 것이 답이었다. 지난 자리는 물려받고
+    **끝점만** 다시 받는다.
     """
     class R:
         status_code = 200
@@ -1182,19 +1187,25 @@ def test_quick_run_keeps_the_trend_it_already_has():
     hits = []
     mb.requests.get = lambda url, **kw: (hits.append(url), R())[1]
     mb.load_prev = lambda path=None: {"days": 180, "trend": [
-        {"key": "usdkrw", "points": [["20260101", 1400]]}]}
+        {"key": "usdkrw", "name": "원/달러", "unit": "원", "digits": 1,
+         "note": "매매기준율", "points": [["20260101", 1400]]}]}
     mb.NIGHT = [d for d in keep[2] if d["key"] == "nasdaq"]
+    undo = _stub_tip(fx=lambda cd, s, **k: {"20260310": 1500.0})
     try:
         out = mb.collect(quick=True)
     finally:
         mb.requests.get, mb.load_prev, mb.NIGHT = keep
+        undo()
 
-    eq(len(out["trend"]), 1, "지난 판의 추세를 그대로")
-    eq(out["trend"][0]["points"], [["20260101", 1400]], "손대지 않는다")
-    # 시세 한 줄 말고는 아무 데도 두드리지 않았어야 한다
+    usd = [t for t in out["trend"] if t["key"] == "usdkrw"][0]
+    eq(usd["points"], [["20260101", 1400], ["20260310", 1500.0]],
+       "지난 자리는 그대로 두고 끝점만 붙인다")
+    eq(usd["last"], 1500.0, "끝점이 새 값이어야 한다")
+    # 지난 자리를 다시 받으러 가지 않았어야 한다. 끝점 수집기는 갈아 끼웠으니
+    # 여기 남는 것은 시세 한 줄뿐이다.
     assert not [u for u in hits if "marketindex" in u or "stlouisfed" in u
                 or "upbit" in u], hits
-    print("test_quick_run_keeps_the_trend_it_already_has: OK")
+    print("test_quick_run_keeps_the_history_and_refreshes_only_the_tip: OK")
 
 
 
@@ -1744,6 +1755,109 @@ def test_the_screen_asks_at_least_as_often_as_the_loop_collects():
     print("test_the_screen_asks_at_least_as_often_as_the_loop_collects: OK")
 
 
+def _trend_with_history():
+    """반년치가 이미 쌓인 추세. 끝점 갱신이 이걸 지우면 안 된다."""
+    old = [["2026030%d" % (i + 1), 1400.0 + i] for i in range(9)]
+    return [{"key": s["key"], "name": s["name"], "unit": s["unit"],
+             "digits": s["digits"], "note": s["note"],
+             "points": [list(p) for p in old],
+             "last": old[-1][1], "last_date": old[-1][0]}
+            for s in mb.TREND]
+
+
+def _stub_tip(fx=None, gold=None, btc=None, fred=None):
+    """끝점 수집기 넷을 갈아 끼운다. 원래대로 되돌리는 함수를 준다."""
+    keep = (mb.fetch_fx, mb.fetch_gold, mb.fetch_btc, mb.fetch_fred)
+    mb.fetch_fx = fx or (lambda *a, **k: {})
+    mb.fetch_gold = gold or (lambda *a, **k: {})
+    mb.fetch_btc = btc or (lambda *a, **k: {})
+    mb.fetch_fred = fred or (lambda *a, **k: {})
+
+    def undo():
+        mb.fetch_fx, mb.fetch_gold, mb.fetch_btc, mb.fetch_fred = keep
+    return undo
+
+
+def test_the_tip_is_refreshed_without_refetching_the_history():
+    """
+    추세는 일별 값이라 지난 자리는 바뀌지 않는다. 오늘 자리만 덮으면 된다.
+    그래서 첫 쪽만 받는다 — 쉰 번이 다섯 번이 된다.
+    """
+    pages = []
+
+    def fx(cd, start, pages_=None, **k):
+        pages.append(k.get("pages"))
+        return {"20260310": 1500.0}
+
+    undo = _stub_tip(fx=lambda cd, s, **k: fx(cd, s, **k),
+                     gold=lambda s, **k: (pages.append(k.get("pages")),
+                                          {"20260310": 4100.0})[1],
+                     btc=lambda s, why=None: {"20260310": 160000000.0},
+                     fred=lambda fid, s: {"20260310": 70.0})
+    try:
+        out = mb.refresh_tip(_trend_with_history(), {})
+        for it in out:
+            assert len(it["points"]) == 10, \
+                f"{it['name']}: 지난 자리가 사라졌습니다 ({len(it['points'])}개)"
+            eq(it["points"][0][0], "20260301", "맨 앞이 그대로여야 한다")
+            eq(it["last_date"], "20260310", f"{it['name']} 끝점이 안 바뀌었습니다")
+        assert pages and set(pages) == {mb.TIP_PAGES}, \
+            f"첫 쪽만 받아야 하는데 {sorted(set(pages))} 쪽을 받았습니다"
+    finally:
+        undo()
+    print("test_the_tip_is_refreshed_without_refetching_the_history: OK")
+
+
+def test_a_failed_tip_does_not_erase_the_line():
+    """
+    끝점 하나 못 받았다고 반년치 선을 지우는 것은 그 반대보다 훨씬 나쁘다.
+    빈 화면은 '아직 못 받았다'로 읽히지만, 짧아진 선은 아무도 못 알아챈다.
+    """
+    def boom(*a, **k):
+        raise RuntimeError("접속 실패")
+
+    # 스텁을 미리 둘 다 만들면 안 된다. 두 번째가 **이미 갈아 끼운 것**을
+    # 원본으로 기억해서, 되돌린 뒤에도 스텁이 남는다. 그때그때 만든다.
+    for label, make in (("빈 답", lambda: _stub_tip()),
+                        ("예외", lambda: _stub_tip(fx=boom, gold=boom,
+                                                  btc=boom, fred=boom))):
+        undo = make()
+        try:
+            why = {}
+            out = mb.refresh_tip(_trend_with_history(), why)
+            for it in out:
+                eq(len(it["points"]), 9, f"{label}: 있던 선이 줄었습니다")
+                eq(it["last_date"], "20260309", f"{label}: 끝점이 바뀌었습니다")
+            assert any("끝점" in k for k in why), \
+                f"{label}: 못 받았다는 사실이 어디에도 안 남았습니다"
+        finally:
+            undo()
+    print("test_a_failed_tip_does_not_erase_the_line: OK")
+
+
+def test_the_board_does_not_stretch_itself_to_fill_the_screen():
+    """
+    '첫 화면은 스크롤 없이 완결된다' 를 '화면을 꽉 채운다' 로 옮겨 적었더니,
+    현황판 그릇이 화면 한 판(635px)이 되고 가장 긴 페이지가 394px 이라
+    탭마다 241~346px 이 빈칸이 됐다. 그 빈칸만큼 '실시간 종목' 이 화면
+    밖으로 밀려나 있었다.
+
+    채우는 것과 완결되는 것은 다른 말이다. 그릇은 내용에 맞춘다.
+    """
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    today = re.search(r"#today\{([^}]*)\}", idx).group(1)
+    assert "100dvh" not in today, \
+        "#today 가 화면 높이를 강제합니다 — 남는 자리가 그대로 빈칸이 됩니다"
+
+    pages = re.search(r"\.pages\{([^}]*)\}", idx).group(1)
+    assert "flex:1 1 0" not in pages, \
+        ".pages 가 남는 높이를 다 먹습니다 — 가장 긴 페이지에 맞춰야 합니다"
+    assert "align-items:flex-start" in pages, \
+        "페이지가 늘어나면 그릇 높이를 내용으로 잴 수 없습니다"
+    print("test_the_board_does_not_stretch_itself_to_fill_the_screen: OK")
+
+
 def test_the_page_is_fetched_before_the_cache_is_consulted():
     """
     docs/sw.js 의 주인은 screener/site.py 다. 손으로 고칠 것이 아니다.
@@ -2205,12 +2319,15 @@ if __name__ == "__main__":
     test_the_value_and_its_move_come_from_one_source()
     test_a_live_move_is_not_overwritten_by_the_daily_table()
     test_when_the_daily_table_is_unreadable_nothing_is_invented()
-    test_quick_run_keeps_the_trend_it_already_has()
+    test_quick_run_keeps_the_history_and_refreshes_only_the_tip()
     test_what_the_loop_pushes_is_what_the_screen_reads()
     test_every_live_file_carries_a_time_not_just_a_date()
     test_the_loop_installs_what_its_steps_need()
     test_the_period_is_measured_from_the_start_of_the_cycle()
     test_the_screen_asks_at_least_as_often_as_the_loop_collects()
+    test_the_tip_is_refreshed_without_refetching_the_history()
+    test_a_failed_tip_does_not_erase_the_line()
+    test_the_board_does_not_stretch_itself_to_fill_the_screen()
     test_the_page_is_fetched_before_the_cache_is_consulted()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
