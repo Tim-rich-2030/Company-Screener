@@ -1,10 +1,20 @@
 name: 현황판 갱신
 
-# 15분마다 새로 받는 것 — 장중에 실제로 움직이는 것들만.
+# 5분마다 새로 받는 것 — 장중에 실제로 움직이는 것들만.
 #   · 헤드라인 뉴스
 #   · 간밤의 증시 + 코스피·코스닥 실시간 지수
 #   · 실시간 종목 + 시장 지도 (국내 장중에만)
 # 테마·일봉·투자지표·일정은 '시장 신호 수집'(하루 한 번)이 맡는다.
+#
+# 주기를 15분에서 5분으로 줄였다. **드는 비용은 없다** — 다리는 어차피 다섯
+# 시간 반을 서 있고, 지금까지는 그 시간의 대부분을 sleep 으로 흘려보냈다.
+# 늘어나는 건 바깥으로 나가는 요청뿐이고, 한 바퀴에 네이버 뉴스 5건과
+# KRX 전종목 두어 건이라 세 배가 되어도 여전히 가볍다.
+#
+# 다만 **화면에 닿는 시간은 5분이 바닥이 아니다.** raw.githubusercontent 가
+# 'cache-control: max-age=300' 으로 한 번 받은 것을 5분간 그대로 내주기
+# 때문이다. 수집 5분 + 캐시 0~5분이라, 평균 대여섯 분에 최악 열 분쯤 된다.
+# 쿼리를 붙여 캐시를 비껴가려 해 봤지만 처음 쓰는 값에도 같은 답이 온다.
 #
 # =============================================================================
 # 왜 예약(cron)에 기대지 않는가 — 이 저장소의 예약은 다섯 시간씩 늦는다
@@ -111,7 +121,7 @@ jobs:
           KRX_ID: ${{ secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_PW }}
           RUN_MINUTES: 330          # 5시간 반. 상한(6시간)까지 여유를 둔다
-          EVERY_SECONDS: 900        # 15분
+          EVERY_SECONDS: 300        # 5분
         run: |
           set -uo pipefail
           started=$(date +%s)
@@ -120,6 +130,7 @@ jobs:
 
           while [ "$(date +%s)" -lt "$deadline" ]; do
             n=$(( n + 1 ))
+            cycle_start=$(date +%s)
             echo "::group::${{ matrix.leg }}번 다리 · $n 번째 (KST $(TZ=Asia/Seoul date '+%m-%d %H:%M'))"
 
             # **매번 최신 main 을 다시 받는다.**
@@ -186,9 +197,22 @@ jobs:
             rm -rf "$live"
             echo "::endgroup::"
 
-            left=$(( deadline - $(date +%s) ))
-            if [ "$left" -le "$EVERY_SECONDS" ]; then break; fi
-            sleep "$EVERY_SECONDS"
+            # 다음 바퀴는 **이번 바퀴가 시작한 때**로부터 센다.
+            #
+            #   'sleep 300' 을 일이 끝난 뒤에 두면 한 바퀴가 (일한 시간 + 300초)
+            #   가 된다. 일이 90초 걸리면 5분이 아니라 6분 반이다. 15분일 때는
+            #   그 차이가 묻혔지만 5분에서는 3할이 어긋난다 — 주기를 줄일수록
+            #   일한 시간의 몫이 커지기 때문이다.
+            next=$(( cycle_start + EVERY_SECONDS ))
+            if [ "$deadline" -le "$next" ]; then break; fi
+            nap=$(( next - $(date +%s) ))
+            if [ "$nap" -gt 0 ]; then
+              sleep "$nap"
+            else
+              # 못 따라가는 것 자체는 사고가 아니다. 다만 조용히 늦으면
+              # '5분마다'라고 적어 놓고 실제로는 8분인 줄을 모르게 된다.
+              echo "::warning::한 바퀴가 ${EVERY_SECONDS}초를 넘겼습니다 ($(( $(date +%s) - cycle_start ))초) — 쉬지 않고 다음 바퀴로 갑니다"
+            fi
           done
 
           ran=$(( ( $(date +%s) - started ) / 60 ))
