@@ -1710,6 +1710,69 @@ def test_the_loop_installs_what_its_steps_need():
     print("test_the_loop_installs_what_its_steps_need: OK")
 
 
+def test_the_period_is_measured_from_the_start_of_the_cycle():
+    """
+    'sleep 300' 을 일이 끝난 뒤에 두면 한 바퀴가 (일한 시간 + 300초)가 된다.
+    일이 90초 걸리면 5분이 아니라 6분 반이다. 주기를 줄일수록 일한 시간의
+    몫이 커져서, 15분에서는 묻혔던 차이가 5분에서는 3할이 된다.
+
+    그래서 잘 시간을 **이번 바퀴가 시작한 때**로부터 계산해야 한다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    assert "cycle_start=$(date +%s)" in wf, "바퀴 시작 시각을 안 적어 둡니다"
+    assert "next=$(( cycle_start + EVERY_SECONDS ))" in wf, \
+        "다음 바퀴를 바퀴 시작 시각으로부터 세지 않습니다"
+    assert not re.search(r'sleep\s+"\$EVERY_SECONDS"', wf), \
+        "일이 끝난 뒤에 통째로 쉬면 주기가 일한 시간만큼 밀립니다"
+    print("test_the_period_is_measured_from_the_start_of_the_cycle: OK")
+
+
+def test_the_screen_asks_at_least_as_often_as_the_loop_collects():
+    """
+    수집을 5분으로 당겨 놓고 화면이 10분마다 물으면, 당긴 만큼이 화면에서
+    사라진다. 둘은 따로 있는 숫자가 아니다 — 묻는 쪽이 더 자주여야 한다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    collect = int(re.search(r"EVERY_SECONDS:\s*(\d+)", wf).group(1))
+    ask = int(re.search(r"LIVE_EVERY\s*=\s*(\d+)", idx).group(1)) // 1000
+    assert ask <= collect, \
+        f"화면은 {ask}초마다 묻는데 수집은 {collect}초마다입니다 — 묻는 쪽이 더 잦아야 합니다"
+    print("test_the_screen_asks_at_least_as_often_as_the_loop_collects: OK")
+
+
+def test_the_page_is_fetched_before_the_cache_is_consulted():
+    """
+    docs/sw.js 의 주인은 screener/site.py 다. 손으로 고칠 것이 아니다.
+
+    화면을 고칠 때마다 sw.js 의 판 번호(V)를 손으로 올려 왔다. '안 올리면
+    옛 화면이 캐시에 남는다'고 여겼기 때문이다. 그러다 main 에서 site.py 가
+    같은 줄을 다시 쓰는 바람에 머지가 막혔다 — 한 줄에 주인이 둘이었다.
+
+    그런데 애초에 올릴 이유가 없었다. index.html 은 **네트워크 우선**이라
+    캐시는 실패했을 때만 쓴다. 판 번호는 오프라인 대비용 캐시의 이름일 뿐,
+    새 화면이 사람에게 닿는 것과는 상관이 없다.
+
+    그 성질이 뒤집히면(캐시 우선이 되면) 판 번호가 다시 중요해진다. 그때
+    이 테스트가 알려 준다.
+    """
+    sw = open(os.path.join(_ROOT, "docs/sw.js"), encoding="utf-8").read()
+
+    page = re.search(r"const isPage =(.*?);", sw, re.S)
+    assert page and "index.html" in page.group(1), \
+        "index.html 이 페이지 취급을 못 받습니다"
+
+    branch = re.search(r"if \(isPage\) \{(.*?)\} else \{", sw, re.S).group(1)
+    net, cache = branch.find("fetch(req)"), branch.find("caches.match")
+    assert net >= 0 and cache >= 0, "네트워크와 캐시 중 하나가 없습니다"
+    assert net < cache, \
+        "캐시를 먼저 봅니다 — 그러면 sw.js 의 판 번호가 다시 중요해집니다"
+    print("test_the_page_is_fetched_before_the_cache_is_consulted: OK")
+
+
 
 def test_gold_reads_the_international_column_not_the_first_number():
     """
@@ -2146,6 +2209,9 @@ if __name__ == "__main__":
     test_what_the_loop_pushes_is_what_the_screen_reads()
     test_every_live_file_carries_a_time_not_just_a_date()
     test_the_loop_installs_what_its_steps_need()
+    test_the_period_is_measured_from_the_start_of_the_cycle()
+    test_the_screen_asks_at_least_as_often_as_the_loop_collects()
+    test_the_page_is_fetched_before_the_cache_is_consulted()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()
     test_josa_is_stripped_but_short_words_are_left_alone()
