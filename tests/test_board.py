@@ -1668,6 +1668,13 @@ def test_intraday_index_disparity_is_measured_at_the_same_moment():
 _ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
+def _pushed_files(wf: str):
+    """워크플로가 live 가지에 올리는 파일 이름들."""
+    block = re.search(r"python live_publish\.py(.*?)(?:\|\||\n\s*\n)", wf, re.S)
+    assert block, "live 가지에 올릴 파일 목록을 못 찾았습니다"
+    return re.findall(r"docs/(market_\w+\.json)", block.group(1))
+
+
 def test_what_the_loop_pushes_is_what_the_screen_reads():
     """
     오늘 같은 실수를 네 번 했다. 전부 '파이썬은 맞는데 그게 도는 자리가
@@ -1684,9 +1691,7 @@ def test_what_the_loop_pushes_is_what_the_screen_reads():
               encoding="utf-8").read()
     idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
 
-    block = re.search(r"for f in (.*?); do", wf, re.S)
-    assert block, "live 가지에 올릴 파일 목록을 못 찾았습니다"
-    pushed = set(re.findall(r"docs/(market_\w+\.json)", block.group(1)))
+    pushed = set(_pushed_files(wf))
     read = set(re.findall(r"live\('(market_\w+\.json)'", idx))
 
     assert pushed, "미는 파일이 하나도 없습니다"
@@ -1701,8 +1706,7 @@ def test_every_live_file_carries_a_time_not_just_a_date():
     """
     wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
               encoding="utf-8").read()
-    block = re.search(r"for f in (.*?); do", wf, re.S).group(1)
-    for name in sorted(set(re.findall(r"docs/(market_\w+)\.json", block))):
+    for name in sorted({f[:-5] for f in _pushed_files(wf)}):
         src = open(os.path.join(_ROOT, name + ".py"), encoding="utf-8").read()
         assert '"fetched_at"' in src or '"intraday_at"' in src, \
             f"{name}.py 가 시각을 남기지 않습니다 — 날짜만으로는 못 가립니다"
@@ -1856,6 +1860,100 @@ def test_the_board_does_not_stretch_itself_to_fill_the_screen():
     assert "align-items:flex-start" in pages, \
         "페이지가 늘어나면 그릇 높이를 내용으로 잴 수 없습니다"
     print("test_the_board_does_not_stretch_itself_to_fill_the_screen: OK")
+
+
+def test_yesterdays_copy_never_overwrites_todays():
+    """
+    장 끝난 뒤 '실시간 종목'이 어제 등락을 보여줬다. 삼성전기가 그날 9% 가까이
+    빠졌는데 화면에는 어제 오른 폭인 +14.43% 가 떠 있었다.
+
+    값이 틀린 게 아니라 **어제 것이 오늘 것을 덮은 것**이었다.
+
+      git reset --hard   → docs/*.json 이 main 사본(어제 것)으로 되돌아감
+      장 시간이 아니라 종목·지도는 건너뜀
+      그 어제 사본이 그대로 live 로 올라가 오늘 것을 지움
+
+    5분마다, 장이 닫힌 내내 그랬다.
+    """
+    import live_publish as lp
+
+    d = tempfile.mkdtemp()
+    live, work = os.path.join(d, "live"), os.path.join(d, "work")
+    os.makedirs(live); os.makedirs(work)
+
+    def put(where, name, payload):
+        p = os.path.join(where, name)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        return p
+
+    # live 에는 오늘 장중 15:40 에 만든 것이 올라가 있다
+    put(live, "market_strong.json",
+        {"date": "20260806", "fetched_at": "2026-08-06T06:40:00Z",
+         "intraday_at": "2026-08-06T06:40:00Z", "삼성전기": -8.9})
+    # 작업 폴더에는 git reset 이 되돌려 놓은 어제 사본이 있다
+    src = put(work, "market_strong.json",
+              {"date": "20260805", "fetched_at": "2026-08-05T16:06:56Z",
+               "삼성전기": 14.43})
+
+    lp.publish(live, [src])
+    with open(os.path.join(live, "market_strong.json"), encoding="utf-8") as f:
+        got = json.load(f)
+    eq(got["date"], "20260806", "어제 사본이 오늘 것을 덮었습니다")
+    eq(got["삼성전기"], -8.9, "어제 등락이 남았습니다")
+    print("test_yesterdays_copy_never_overwrites_todays: OK")
+
+
+def test_a_date_only_stamp_sits_at_midnight_of_that_day():
+    """
+    날짜만 있는 '20260806' 을 그대로 두면 '20260806062101' 보다 짧아 사전순으로
+    앞선다 — 같은 날 아침에 만든 것이 오후 것보다 새것으로 읽힌다.
+    0 으로 채워 그날 자정에 놓는다.
+    """
+    import live_publish as lp
+    eq(lp.stamp({"date": "20260806"}), "20260806000000", "날짜만")
+    eq(lp.stamp({"fetched_at": "2026-08-06T06:21:01Z"}), "20260806062101", "시각까지")
+    assert lp.stamp({"date": "20260806"}) < lp.stamp(
+        {"fetched_at": "2026-08-06T06:21:01Z"}), "같은 날이면 시각이 늦은 쪽이 새것"
+    assert lp.stamp({"date": "20260807"}) > lp.stamp(
+        {"fetched_at": "2026-08-06T06:21:01Z"}), "날이 바뀌면 날짜가 이긴다"
+    # 화면도 같은 규칙을 써야 한다. 한쪽만 고치면 서로 다른 것을 새것이라 부른다.
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+    assert "'00000000000000'" in idx, "화면의 stamp 가 열네 자리로 채우지 않습니다"
+    print("test_a_date_only_stamp_sits_at_midnight_of_that_day: OK")
+
+
+def test_the_loop_seeds_from_live_before_it_publishes():
+    """
+    올릴 판은 매번 커밋 하나짜리로 새로 지어 force-push 한다. 그래서 거기
+    담기지 않은 것은 live 에서 **사라진다.** 지금 live 에 있는 것을 먼저
+    깔지 않으면, 이번 바퀴에 안 만든 칸이 통째로 날아간다.
+    """
+    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
+              encoding="utf-8").read()
+    seed = wf.find("fetch -q --depth=1")
+    pub = wf.find("python live_publish.py")
+    assert seed > 0, "live 가지를 밑감으로 깔지 않습니다"
+    assert pub > 0, "올릴 것을 고르는 자리가 없습니다"
+    assert seed < pub, "밑감을 깔기 전에 올려 버립니다"
+    assert "cp \"$f\" \"$live/docs/\"" not in wf, \
+        "docs 를 통째로 복사하면 어제 사본이 오늘 것을 덮습니다"
+    print("test_the_loop_seeds_from_live_before_it_publishes: OK")
+
+
+def test_the_intraday_run_stamps_its_own_time():
+    """
+    장중 판은 {**prev} 로 지난 판을 펼친다. fetched_at 을 다시 찍지 않으면
+    하루 한 번 판이 남긴 **어제 시각**을 그대로 물려받는다. 화면도 live 도
+    fetched_at 을 먼저 보므로, 방금 만든 것이 어제 것으로 취급된다.
+    """
+    src = open(os.path.join(_ROOT, "market_strong.py"), encoding="utf-8").read()
+    quick = src[src.find("def quick("):]
+    quick = quick[:quick.find("\ndef ", 1)]
+    assert '"fetched_at": now' in quick, \
+        "장중 판이 fetched_at 을 다시 찍지 않습니다 — 어제 시각을 물려받습니다"
+    assert '"intraday_at": now' in quick, "장중이라는 표시도 남겨야 합니다"
+    print("test_the_intraday_run_stamps_its_own_time: OK")
 
 
 def test_refresh_says_so_when_nothing_changed():
@@ -2350,6 +2448,10 @@ if __name__ == "__main__":
     test_the_tip_is_refreshed_without_refetching_the_history()
     test_a_failed_tip_does_not_erase_the_line()
     test_the_board_does_not_stretch_itself_to_fill_the_screen()
+    test_yesterdays_copy_never_overwrites_todays()
+    test_a_date_only_stamp_sits_at_midnight_of_that_day()
+    test_the_loop_seeds_from_live_before_it_publishes()
+    test_the_intraday_run_stamps_its_own_time()
     test_refresh_says_so_when_nothing_changed()
     test_the_page_is_fetched_before_the_cache_is_consulted()
     test_fx_reads_the_base_rate_column_by_name()

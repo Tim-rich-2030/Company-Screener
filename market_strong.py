@@ -453,6 +453,13 @@ def collect(date: str = None, days: int = DAYS, top: int = TOP) -> dict:
     return {
         "px": px,
         "date": date, "source": "pykrx", "days": days,
+        # **언제 만든 것인지 시각까지 남긴다.**
+        #
+        #   날짜만 있으면 같은 날 만든 두 판(장중 15:40 것과 마감 뒤 17:30 것)
+        #   중 어느 쪽이 나중인지 가릴 수가 없다. live 가지에 올릴 때 그걸
+        #   가려야 한다 — 옛것이 새것을 덮으면 어제 등락이 오늘로 보인다.
+        "fetched_at": dt.datetime.now(dt.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
         "from": hist[0][0],
         "seen": seen, "counted": len(rows), "cut": cut,
         "floor": out["floor"], "liquid_total": out["liquid_total"],
@@ -578,13 +585,17 @@ def quick(top: int = TOP) -> dict:
     for m, d in out["markets"].items():
         log(f"  [{m}] 문턱 통과 {d['liquid']} · 강한 종목 {d['strong_total']}")
 
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # fetched_at 을 **반드시 다시 찍는다.** {**prev} 로 지난 판을 펼치므로
+    # 그냥 두면 하루 한 번 판이 찍어 둔 어제 시각을 그대로 물려받는다.
+    # 화면도 live 도 fetched_at 을 먼저 보기 때문에, 그러면 방금 만든 것이
+    # 어제 것으로 취급돼 장중 갱신이 통째로 막힌다.
     return {**prev, "date": date, "source": "pykrx (장중)",
             "counted": len(rows), "floor": out["floor"],
             "liquid_total": out["liquid_total"], "spread": out["spread"],
             "markets": out["markets"],
             "급상승": out["급상승"], "급하락": out["급하락"],
-            "intraday_at": dt.datetime.now(dt.timezone.utc)
-                             .strftime("%Y-%m-%dT%H:%M:%SZ")}
+            "fetched_at": now, "intraday_at": now}
 
 
 def save(payload: dict) -> None:
