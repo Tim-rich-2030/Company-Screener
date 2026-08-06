@@ -1,0 +1,152 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>시세 직접 받기 — 되는지 확인</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+/*
+ * 화면을 만들려는 것이 아니다. **브라우저가 직접 부를 수 있는지**만 본다.
+ *
+ *   지금 화면은 서버가 없는 정적 파일이다. 시세가 계속 움직이게 하려면
+ *   브라우저가 시세 주소를 직접 불러야 하고, 그러려면 그쪽이 CORS 를
+ *   열어 줘야 한다. 열어 주는지 아닌지는 **두드려 봐야 안다** —
+ *   수집기가 도는 자리(GitHub Actions)는 브라우저가 아니라서 매일 잘
+ *   받아 오지만, 그게 브라우저에서도 된다는 뜻은 전혀 아니다.
+ *
+ *   업비트는 되는 것을 아는 자리다. 그래서 맨 위에 둔다 — 그것마저 실패하면
+ *   막힌 건 상대가 아니라 이 폰의 네트워크다. 대조군이 없으면 '다 안 된다'를
+ *   '다 막혔다'로 잘못 읽는다.
+ */
+:root{
+  --paper:#F5F2EC; --surface:#FFFDF8; --ink:#1C1A17; --ink-muted:#6B6558;
+  --rule:#DED8CC; --accent:#2C4A45; --up:#C4443D; --down:#3D6099;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#14130F; --surface:#1C1A16; --ink:#E8E3D8; --rule:#2E2B24;
+  --ink-muted:#9A9384; --accent:#7FA89F; --up:#D9645C; --down:#6E8FC4;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;
+  font-size:14px;line-height:1.6;-webkit-text-size-adjust:100%}
+main{max-width:760px;margin:0 auto;padding:24px 18px 64px}
+h1{font-family:'Noto Serif KR',serif;font-size:19px;font-weight:600;
+  margin:0 0 4px;letter-spacing:-.2px}
+p.lead{color:var(--ink-muted);margin:0 0 28px;font-size:13px}
+.row{border-top:1px solid var(--rule);padding:14px 0}
+.row:last-of-type{border-bottom:1px solid var(--rule)}
+.nm{font-weight:600}
+.url{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;
+  color:var(--ink-muted);word-break:break-all;margin-top:2px}
+.out{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
+  font-variant-numeric:tabular-nums;margin-top:6px}
+.ok{color:var(--up)}
+.no{color:var(--down)}
+.wait{color:var(--ink-muted)}
+.sum{margin-top:32px;border-top:1px solid var(--rule);padding-top:18px;
+  font-size:13px;color:var(--ink-muted)}
+.sum b{color:var(--ink)}
+button{font:inherit;font-size:13px;background:none;color:var(--accent);
+  border:1px solid var(--rule);border-radius:2px;padding:8px 16px;
+  margin-top:20px;cursor:pointer}
+</style>
+<main>
+<h1>시세를 브라우저가 직접 받을 수 있나</h1>
+<p class="lead">되면 5분마다가 아니라 몇 초마다 움직이게 할 수 있습니다.
+안 되면 서버를 하나 두어야 합니다. 이 한 장이 그걸 가릅니다.</p>
+<div id="rows"></div>
+<div class="sum" id="sum">확인하는 중입니다…</div>
+<button id="again" type="button">다시 확인</button>
+</main>
+<script>
+/* 후보. 수집기(market_board.py)가 실제로 쓰는 주소와 같은 것들이다.
+   서버에서는 다 되는 것들이므로, 여기서 갈리는 것은 오직 CORS 다. */
+var TRY = [
+  {n:'업비트 (되는 것을 아는 자리)', control:true,
+   u:'https://api.upbit.com/v1/candles/days?market=KRW-BTC&count=1'},
+  {n:'네이버 국내지수 실시간 (코스피)',
+   u:'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI'},
+  {n:'네이버 해외지수 (나스닥)',
+   u:'https://api.stock.naver.com/index/.IXIC/basic'},
+  {n:'네이버 종목 시세 (삼성전자)',
+   u:'https://polling.finance.naver.com/api/realtime/domestic/stock/005930'},
+  {n:'네이버 일별 시세',
+   u:'https://api.finance.naver.com/siseJson.naver?symbol=005930' +
+     '&requestType=1&startTime=20260801&endTime=20260806&timeframe=day'}
+];
+
+function el(t, c, s){ var e = document.createElement(t);
+  if (c) e.className = c; if (s != null) e.textContent = s; return e; }
+
+function one(spec, box){
+  var out = box.querySelector('.out');
+  out.className = 'out wait'; out.textContent = '부르는 중…';
+  var t0 = Date.now();
+  /* mode 는 기본값(cors)으로 둔다. no-cors 로 부르면 요청은 나가지만 답을
+     못 읽는다 — '됐다'로 착각하기 딱 좋다. 우리가 알고 싶은 것은 요청이
+     나가느냐가 아니라 **읽을 수 있느냐**다. */
+  return fetch(spec.u, {cache:'no-store'})
+    .then(function(r){
+      return r.text().then(function(body){
+        var ms = Date.now() - t0;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        out.className = 'out ok';
+        out.textContent = '읽힘 · ' + ms + 'ms · ' + body.length.toLocaleString() +
+                          '바이트 · ' + body.slice(0, 60).replace(/\s+/g, ' ');
+        return true;
+      });
+    })
+    .catch(function(e){
+      var ms = Date.now() - t0;
+      out.className = 'out no';
+      /* 브라우저는 CORS 로 막은 것과 그물이 끊긴 것을 둘 다 'TypeError:
+         Failed to fetch' 로 준다. 무엇 때문인지 여기서 단정하지 않는다 —
+         맨 위 대조군이 됐는데 이것만 안 되면 CORS 다. */
+      out.textContent = '못 읽음 · ' + ms + 'ms · ' + (e.message || e);
+      return false;
+    });
+}
+
+function run(){
+  var rows = document.getElementById('rows');
+  rows.innerHTML = '';
+  document.getElementById('sum').textContent = '확인하는 중입니다…';
+  var boxes = TRY.map(function(spec){
+    var b = el('div', 'row');
+    b.appendChild(el('div', 'nm', spec.n));
+    b.appendChild(el('div', 'url', spec.u));
+    b.appendChild(el('div', 'out wait', '기다리는 중'));
+    rows.appendChild(b);
+    return b;
+  });
+  Promise.all(TRY.map(function(spec, i){ return one(spec, boxes[i]); }))
+    .then(function(got){
+      var ctrl = got[0];
+      var real = got.slice(1).filter(Boolean).length;
+      var s = document.getElementById('sum');
+      s.innerHTML = '';
+      if (!ctrl){
+        s.appendChild(el('b', null, '이 폰에서 바깥으로 못 나갑니다.'));
+        s.appendChild(el('div', null,
+          '되는 것을 아는 자리(업비트)마저 실패했습니다. 막힌 것은 상대가 ' +
+          '아니라 이 그물입니다. 다른 망에서 다시 확인해 주세요.'));
+        return;
+      }
+      if (real > 0){
+        s.appendChild(el('b', null, '됩니다 — ' + real + '곳이 읽혔습니다.'));
+        s.appendChild(el('div', null,
+          '브라우저가 직접 부를 수 있다는 뜻입니다. 서버 없이도 몇 초마다 ' +
+          '움직이게 만들 수 있습니다.'));
+      } else {
+        s.appendChild(el('b', null, '네이버는 브라우저에서 못 읽습니다.'));
+        s.appendChild(el('div', null,
+          '업비트는 읽혔으니 그물 문제가 아니라 네이버가 열어 주지 않는 ' +
+          '것입니다. 시세가 계속 움직이게 하려면 중간에 서버를 하나 두어야 ' +
+          '합니다. 비트코인만은 지금도 몇 초마다 움직이게 할 수 있습니다.'));
+      }
+    });
+}
+
+document.getElementById('again').addEventListener('click', run);
+run();
+</script>
