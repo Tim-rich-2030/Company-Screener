@@ -124,9 +124,18 @@ h2 .no{font-size:12px;color:var(--ink-muted);letter-spacing:2px}
 h2 .note{margin-left:auto;font-family:'Pretendard',sans-serif;font-size:11.5px;
   color:var(--ink-muted);font-weight:400;text-align:right}
 
-/* 1면은 스크롤 없이 완결된다. 차트가 남는 높이를 먹고, 아래 세 줄은 고정. */
+/* 1면은 스크롤 없이 완결된다. 다만 **화면을 채우는 것과 완결되는 것은
+   다른 말이다.** 예전엔 min-height 로 한 판을 강제로 채웠는데, 현황판의
+   가장 긴 페이지가 394px 인데 그릇이 635px 이라 탭마다 241~346px 이 빈칸이
+   됐다. 그 빈칸만큼 '실시간 종목' 이 화면 밖으로 밀려나 있었다.
+
+     그릇 635      간밤 289 · 헤드라인 394 · 주요 지표 351
+
+   그릇을 내용에 맞춘다. 세 페이지 중 가장 긴 것에 맞으므로 옆으로 넘길 때
+   아래가 들썩이지 않는다 — 활성 페이지에 맞추면 더 좁아지지만, 넘길 때마다
+   아래 단이 위아래로 뛴다. */
 #today{margin-top:0;border-top:0;padding-top:0;
-  min-height:calc(100dvh - 196px);display:flex;flex-direction:column}
+  display:flex;flex-direction:column}
 
 /* 전환은 박스가 아니라 밑줄로 표시한다. */
 .tabs{display:flex;gap:22px;padding:8px 0 0}
@@ -143,8 +152,10 @@ h2 .note{margin-left:auto;font-family:'Pretendard',sans-serif;font-size:11.5px;
 /* 증시 현황판 — 1면. 탭을 누르거나 옆으로 밀면 장이 넘어간다.
    가로 스크롤 스냅으로 만든다. 자바스크립트로 손짓을 흉내내면 관성·되돌림을
    전부 다시 만들어야 하고, 그렇게 만든 것은 늘 진짜보다 뻑뻑하다. */
-.board{flex:1 1 0;display:flex;flex-direction:column;min-height:0}
-.pages{flex:1 1 0;display:flex;align-items:flex-start;
+.board{display:flex;flex-direction:column;min-height:0}
+/* align-items:flex-start 라 페이지는 저마다 제 높이를 갖고, 그릇은 그중
+   가장 긴 것이 된다. flex:1 1 0 을 주면 그릇이 남는 높이를 다 먹는다. */
+.pages{display:flex;align-items:flex-start;
   overflow-x:auto;overflow-y:hidden;
   scroll-snap-type:x mandatory;scrollbar-width:none;
   -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
@@ -1463,7 +1474,7 @@ function renderStrong(){
   if (f['거래대금']){
     why.push('거래대금 ' + money(f['거래대금']) + '원 이상');
   }
-  // 장중에 다시 센 것이면 '종가 기준' 이 아니다. 그렇게 적어 두면 15분 전
+  // 장중에 다시 센 것이면 '종가 기준' 이 아니다. 그렇게 적어 두면 5분 전
   // 값을 어제 종가로 읽게 된다.
   why.push(STRONG.intraday_at ? hhmm(STRONG.intraday_at) + ' 기준 (장중)'
                               : '종가 기준');
@@ -1895,7 +1906,7 @@ function grab(file){
 }
 
 /*
- * 현황판은 15분마다 새로 받는다. 그런데 Pages 배포를 그렇게 자주 돌릴 수는
+ * 현황판은 5분마다 새로 받는다. 그런데 Pages 배포를 그렇게 자주 돌릴 수는
  * 없고, 이 저장소의 예약 실행은 다섯 시간씩 늦는다 (08:30 예약이 17:01 에
  * 왔다). 그래서 자주 바뀌는 파일만 **live 가지에서 직접** 읽는다 —
  * raw.githubusercontent 가 CORS 를 열어 주므로 배포 없이 커밋만으로 바뀐다.
@@ -1946,7 +1957,7 @@ function live(file, cur, apply){
  *
  *   처음엔 화면을 열 때 한 번만 live 를 봤다. 그래서 열자마자 한 번 새
  *   값으로 바뀌고, 그 뒤로는 창을 열어 둔 채 아무리 기다려도 그대로였다.
- *   수집은 15분마다 도는데 화면이 안 물어보니 소용이 없었다.
+ *   수집은 5분마다 도는데 화면이 안 물어보니 소용이 없었다.
  *
  *   그래서 되풀이해서 묻는다.
  *
@@ -2043,7 +2054,7 @@ grab('market_signal.json').then(function(p){
     '지수를 불러오지 못했습니다 (' + esc(e.message) + ')</div>';
 });
 
-// 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 15분마다 따로 갱신되므로
+// 현황판 — 간밤의 증시와 주요 지표. 헤드라인은 5분마다 따로 갱신되므로
 // 파일도 따로 받는다. 한쪽이 늦어도 다른 쪽은 그대로 나온다.
 function useBoard(p){
   BOARD = p; renderBoard();
@@ -2092,7 +2103,7 @@ grab('market_world.json').then(function(p){
   WORLD = p; renderStrip();
 }).catch(function(){});
 
-/* 보고 있던 탭은 그대로 둔다. 15분마다 코스피 탭으로 되돌아가면
+/* 보고 있던 탭은 그대로 둔다. 5분마다 코스피 탭으로 되돌아가면
    코스닥을 보던 사람은 지도를 읽을 수가 없다. */
 function useTree(p){
   TREE = p;

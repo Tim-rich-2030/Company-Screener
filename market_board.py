@@ -26,7 +26,7 @@
 못 받은 지표는 값을 비운다. 틀린 데이터가 없는 데이터보다 위험하다.
 
     python market_board.py            # 전부 수집·저장 (하루 한 번)
-    python market_board.py --quick    # 시세만. 추세는 지난 판 그대로 (15분마다)
+    python market_board.py --quick    # 시세 + 추세 끝점만 (5분마다)
     python market_board.py --dump     # 후보 주소를 두드려 본 결과만 출력
     python market_board.py --probe    # 선물 심볼 찾기 → store/board_probe.json
 """
@@ -437,7 +437,7 @@ def fetch_btc(start: dt.date, why: dict = None) -> dict:
 
 
 def load_prev(path: str = DOCS_PATH) -> dict:
-    """지난 판. --quick 이 추세를 그대로 물려받을 때 쓴다."""
+    """지난 판. --quick 이 추세의 지난 자리를 물려받을 때 쓴다."""
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
@@ -445,14 +445,87 @@ def load_prev(path: str = DOCS_PATH) -> dict:
         return {}
 
 
+# 끝점만 갈 때 얼마나 받을지. 첫 쪽에 열흘쯤 들어 있어 넉넉하다.
+TIP_PAGES = 1
+TIP_DAYS = 10
+
+
+def refresh_tip(prev_trend: list, why: dict = None) -> list:
+    """
+    추세의 **끝점만** 다시 받아 있던 것 위에 덮는다.
+
+    처음엔 --quick 이 추세를 통째로 지난 판에서 물려받았다. 한 번 받는 데
+    금 15쪽 + 환율 15쪽씩 둘 + FRED + 업비트로 쉰 번쯤 두드리는데, 그걸
+    5분마다 하면 하루에 네이버를 만 번 넘게 두드리게 되기 때문이다.
+
+    그래서 화면의 '주요 지표'가 하루 한 번 도는 판에서만 바뀌었다. 장이
+    열려 있는 내내 어제 숫자를 오늘처럼 보여준 셈이다.
+
+    **지난 것을 다시 받을 이유가 없다는 게 답이었다.** 추세는 일별 값이라
+    지난 자리는 바뀌지 않고 오늘 자리 하나만 움직인다. 첫 쪽만 받아서
+    있던 것 위에 덮으면 쉰 번이 다섯 번이 된다.
+
+    못 받으면 **있던 것을 그대로 둔다.** 끝점 하나 못 받았다고 반년치 선을
+    지우는 것은 그 반대보다 훨씬 나쁘다.
+    """
+    why = why if why is not None else {}
+    kept = {it.get("key"): it for it in (prev_trend or []) if it.get("key")}
+    start = dt.date.today() - dt.timedelta(days=TIP_DAYS)
+    out, moved = [], []
+
+    for spec in TREND:
+        base = kept.get(spec["key"]) or {
+            k: spec[k] for k in ("key", "name", "unit", "digits", "note")}
+        item = dict(base)
+        pts = {d: v for d, v in (item.get("points") or [])}
+        had = item.get("last")
+
+        fresh = {}
+        try:
+            if spec.get("fx"):
+                fresh = fetch_fx(spec["fx"], start, pages=TIP_PAGES, why=why)
+            elif spec.get("gold"):
+                fresh = fetch_gold(start, pages=TIP_PAGES, why=why)
+            elif spec.get("upbit"):
+                fresh = fetch_btc(start, why)
+            elif spec.get("fred"):
+                fresh = fetch_fred(spec["fred"], start)
+        except Exception as e:                           # noqa: BLE001
+            why[f"{spec['name']}/끝점"] = f"{type(e).__name__}: {e}"[:160]
+
+        if fresh:
+            pts.update(fresh)
+        else:
+            why[f"{spec['name']}/끝점"] = why.get(
+                f"{spec['name']}/끝점", "못 받았습니다 — 있던 것을 그대로 둡니다")
+
+        if not pts:
+            item.update({"points": [], "last": None})
+            out.append(item)
+            continue
+        days_sorted = sorted(pts)
+        item.update({"points": [[d, pts[d]] for d in days_sorted],
+                     "last": pts[days_sorted[-1]],
+                     "last_date": days_sorted[-1]})
+        out.append(item)
+        if had != item["last"]:
+            moved.append(f"{spec['name']} {had}→{item['last']}")
+
+    log("  추세 끝점: " + ("· ".join(moved) if moved else "다섯 지표 다 그대로"))
+    return out
+
+
 def collect(days: int = DAYS, quick: bool = False) -> dict:
     """
-    quick=True 면 **시세만** 새로 받고 추세는 지난 판을 그대로 쓴다.
+    quick=True 면 시세를 새로 받고, 추세는 **끝점만** 다시 받는다.
 
-    추세는 일별 값이라 15분마다 다시 받을 이유가 없다. 그런데 그 한 번이
-    금 15쪽 + 환율 30쪽 + FRED + 업비트로 쉰 번쯤 두드린다. 15분마다 그러면
-    하루에 네이버를 오천 번 두드리게 된다 — 우리가 필요해서가 아니라
-    코드가 그렇게 생겨서. 자주 도는 판은 시세 다섯 줄만 받는다.
+    추세를 통째로 받으면 금 15쪽 + 환율 30쪽 + FRED + 업비트로 쉰 번쯤
+    두드린다. 5분마다 그러면 하루에 네이버를 만 번 넘게 두드리게 된다 —
+    우리가 필요해서가 아니라 코드가 그렇게 생겨서.
+
+    그렇다고 통째로 물려받으면 '주요 지표'가 하루 종일 어제 값에 멈춘다.
+    추세는 일별 값이라 **지난 자리는 바뀌지 않고 오늘 자리만 움직인다.**
+    첫 쪽만 받아 덮으면 쉰 번이 다섯 번이 된다 (refresh_tip 참고).
     """
     today = dt.date.today()
     start = today - dt.timedelta(days=days)
@@ -491,9 +564,9 @@ def collect(days: int = DAYS, quick: bool = False) -> dict:
 
     if quick:
         prev = load_prev()
-        trend = prev.get("trend", [])
-        why["추세"] = f"지난 판 그대로 ({len(trend)}개, --quick)"
-        log(f"  추세: 지난 판 그대로 {len(trend)}개")
+        trend = refresh_tip(prev.get("trend", []), why)
+        why["추세"] = (f"지난 자리는 물려받고 끝점만 다시 받음 "
+                     f"({len(trend)}개, --quick)")
         return {"as_of": today.strftime("%Y%m%d"),
                 "fetched_at": dt.datetime.now(dt.timezone.utc)
                                 .strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -649,7 +722,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="증시 현황판 — 간밤의 증시·주요 지표")
     p.add_argument("--days", type=int, default=DAYS)
     p.add_argument("--quick", action="store_true",
-                   help="시세만 받고 추세는 지난 판 그대로 (자주 도는 판)")
+                   help="시세를 받고 추세는 끝점만 다시 받는다 (자주 도는 판)")
     p.add_argument("--dump", action="store_true")
     p.add_argument("--probe", action="store_true",
                    help="야간선물 심볼을 찾는다 (저장하지 않음)")
