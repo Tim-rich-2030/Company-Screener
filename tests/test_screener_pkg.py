@@ -528,6 +528,55 @@ def test_ingest_one():
     print("test_ingest_one: OK")
 
 
+class FakeDartMixedCurrency(FakeDart):
+    """
+    두산밥캣 2023년 1~3분기 실제 상황을 흉내낸다: 손익계산서 항목엔 통화가 USD로
+    찍혀 있는데, 재무상태표 항목엔 통화 표기 자체가 없다(=원화 그대로 방치).
+    """
+
+    def get_json(self, endpoint, params):
+        resp = FakeDart.get_json(self, endpoint, params)
+        if endpoint == "fnlttSinglAcntAll.json" and resp.get("status") == "000":
+            for item in resp["list"]:
+                if item.get("sj_div") == "IS":
+                    item["currency"] = "USD"
+                # BS 항목은 그대로 둔다 — currency 키가 아예 없다
+        return resp
+
+
+def test_ingest_one_detects_mismatched_bs_currency():
+    """
+    detect_currency 를 보고서 전체에서 하나만 뽑던 시절엔, IS 가 USD 라고 찍히면
+    보고서 전체가 "USD 공시"로 기록됐다. 그 상태에서 재무상태표가 실은 원화
+    그대로였다는 사실은 아무 데도 안 남았고, ROE·ROA 가 자기자본만 원화(=1000배
+    큰 분모)로 계산돼 실제 값의 1/1000 로 조용히 찍혔다.
+
+    이제는 재무제표 구분(sj_div)별로 따로 통화를 감지해 currency 와 bs_currency
+    를 함께 남긴다. 재무상태표 쪽에 통화 표기가 없으면(=원화) "KRW"를 명시적으로
+    적어 둔다 — 안 그러면 나중에 currency 값으로 조용히 대체돼 이 문제가 다시
+    감춰진다.
+    """
+    rec = store.load("241560")
+    hit = {"code": "241560", "corp_code": "00000001", "name": "두산밥캣",
+           "year": 2023, "reprt_code": "11013", "quarter": 1,
+           "rcept_no": "20230515000001", "report_nm": "분기보고서 (2023.03)",
+           "qkey": "2023Q1"}
+    result = ingest.ingest_one(FakeDartMixedCurrency(), hit, rec)
+    assert result["changed"], result
+
+    slot = rec["quarters"]["2023Q1"]
+    assert slot["currency"] == "USD"
+    assert slot["bs_currency"] == "KRW", (
+        "재무상태표에 통화 표기가 없으면 원화로 명시해야 합니다 (안 그러면 "
+        "currency 로 조용히 대체됩니다)")
+
+    quarters = store.sort_quarters(rec["quarters"])
+    ctx = QuarterContext(rec, quarters, quarters.index("2023Q1"))
+    assert ctx.currency == "USD" and ctx.bs_currency == "KRW"
+    assert ctx.equity is None, "손익과 통화가 다른 재무상태표 값을 그대로 쓰면 안 됩니다"
+    print("test_ingest_one_detects_mismatched_bs_currency: OK")
+
+
 def test_backfill_one_fetches_each_report_once():
     """
     소급 수집은 보고서를 기간마다 한 번씩만 받아야 한다.
@@ -655,11 +704,104 @@ def test_foreign_currency_blanks_price_ratios():
     print("test_foreign_currency_blanks_price_ratios: OK")
 
 
+def test_mixed_currency_balance_sheet_blanks_equity_ratios():
+    """
+    두산밥캣 2023년 1~3분기 실제 저장값에서 드러난 경우: 그 분기의 손익(매출액 등)은
+    달러인데 재무상태표(자본총계·지배주주지분 등)는 원화 그대로 저장돼 있었다.
+    detect_currency 가 보고서 전체에서 하나의 통화만 골라 currency 에 찍다 보니
+    "USD 공시"로만 표시되고, 원화 자기자본이 그대로 ROE·ROA 분모로 들어가
+    실제 값의 1/1000 수준으로 조용히 찍혔다 (PBR·PER 은 currency != KRW 라서
+    애초에 계산되지 않으니 이 문제가 드러나지 않았다).
+
+    bs_currency 가 currency 와 다르면 그 분기의 재무상태표 기반 지표는 전부
+    비어야 한다(0이 아니라 None) — 시총 기반 지표와 같은 원칙이다.
+    """
+    rec = sample_record()
+    q = "2026Q1"
+    rec["quarters"][q]["currency"] = "USD"
+    rec["quarters"][q]["bs_currency"] = "KRW"     # 재무상태표만 원화로 남은 상태
+
+    quarters = store.sort_quarters(rec["quarters"])
+    ctx = QuarterContext(rec, quarters, quarters.index(q))
+    assert ctx.equity is None, "통화가 어긋난 재무상태표의 자기자본을 그대로 쓰면 안 됩니다"
+    assert ctx.bs("자산총계") is None
+    assert ctx.bs("부채총계") is None
+
+    ts = compute_timeseries(rec, qd.METRICS)
+    i = ts["quarters"].index(q)
+    assert ts["metrics"]["PBR"][i] is None
+    assert ts["metrics"]["ROE(%)"][i] is None
+    assert ts["metrics"]["ROA(%)"][i] is None
+    # 손익끼리의 비율(같은 통화)은 재무상태표와 무관하므로 계속 나와야 한다
+    assert ts["metrics"]["분기 영업이익률(%)"][i] is not None
+
+    # 다른 분기는 currency/bs_currency 가 둘 다 없으므로(=원화로 간주) 영향이 없다
+    other = ts["quarters"][i + 1]
+    j = ts["quarters"].index(other)
+    assert ts["metrics"]["ROE(%)"][j] is not None
+
+    # bs_currency 가 currency 와 같으면(정상 USD 공시) 그대로 계산된다
+    rec["quarters"][q]["bs_currency"] = "USD"
+    ts2 = compute_timeseries(rec, qd.METRICS)
+    assert ts2["metrics"]["ROE(%)"][i] is not None
+    print("test_mixed_currency_balance_sheet_blanks_equity_ratios: OK")
+
+
+def test_repair_fills_only_empty_currency_and_writes_both():
+    """
+    복구가 받아 오는 통화는 **가장 최근 보고서 하나**에서 온다. 그걸 모든 분기에
+    바르면 옛 분기의 통화를 지어내는 셈이다.
+
+    두산밥캣이 그랬다. 2023년 1~3분기는 재무상태표가 원화 그대로였는데 최근
+    보고서의 USD 가 전 분기에 발려, 원화 자기자본이 달러로 표시된 채 ROE·ROA
+    분모로 들어갔다. 저장된 자본총계에 그 자국이 그대로 남아 있다.
+
+      2023Q3   5,863,880,215,000   5.86조  ← 원화
+      2023Q4       4,618,281,799   46억    ← 달러
+
+    그리고 둘을 함께 적어야 한다. currency 만 적으면 metrics 에서 bs_currency
+    가 currency 로 대체돼(기본값) 어긋남이 다시 감춰진다.
+    """
+    from screener import cli
+
+    rec = {"quarters": {
+        "2023Q1": {"currency": "USD", "자본총계": 5_355_624_061_000},  # 이미 적힌 분기
+        "2023Q4": {"자본총계": 4_618_281_799},                          # 비어 있는 분기
+        "2024Q1": {},
+    }}
+    qs = ["2024Q1", "2023Q4", "2023Q1"]
+    filled = cli.fill_currency(rec, qs, "USD", "USD")
+
+    assert filled == 2, f"비어 있던 두 분기만 채워야 합니다 ({filled})"
+    assert "bs_currency" not in rec["quarters"]["2023Q1"], (
+        "이미 통화가 적힌 분기는 손대지 않습니다 — 옛 분기 통화를 지어내면 안 됩니다")
+    assert rec["quarters"]["2023Q4"]["currency"] == "USD", "빈 칸은 채웁니다"
+    assert rec["quarters"]["2023Q4"]["bs_currency"] == "USD", "둘을 함께 적습니다"
+
+    # 재무상태표에 통화 표기가 없으면(=원화) 빈 글자가 아니라 KRW 로 적는다
+    rec2 = {"quarters": {"2024Q1": {}}}
+    cli.fill_currency(rec2, ["2024Q1"], "USD", "")
+    assert rec2["quarters"]["2024Q1"]["bs_currency"] == "KRW", (
+        "빈 글자로 두면 metrics 에서 currency 로 대체됩니다")
+    print("test_repair_fills_only_empty_currency_and_writes_both: OK")
+
+
 def test_detect_currency():
     assert ingest.detect_currency({"list": [{"currency": "USD"}]}) == "USD"
     assert ingest.detect_currency({"list": [{"currency": " krw "}]}) == "KRW"
     assert ingest.detect_currency({"list": [{}]}) == ""
     assert ingest.detect_currency({}) == ""
+
+    # sj_divs 를 주면 그 재무제표 구분의 항목에서만 찾는다. 두산밥캣 2023년
+    # 1~3분기처럼 손익(IS)은 USD, 재무상태표(BS)는 통화 표기가 없는(=원화)
+    # 보고서를 상정한다. 전체를 훑으면 먼저 나온 IS 쪽 USD 를 집어 온다.
+    mixed = {"list": [
+        {"sj_div": "IS", "currency": "USD"},
+        {"sj_div": "BS", "currency": ""},
+    ]}
+    assert ingest.detect_currency(mixed) == "USD"
+    assert ingest.detect_currency(mixed, {"IS", "CIS"}) == "USD"
+    assert ingest.detect_currency(mixed, {"BS"}) == ""
     print("test_detect_currency: OK")
 
 
@@ -692,11 +834,14 @@ if __name__ == "__main__":
         test_site_build()
         test_site_shows_backfill_progress()
         test_ingest_one()
+        test_ingest_one_detects_mismatched_bs_currency()
         test_backfill_one_fetches_each_report_once()
         test_fetch_shares_uses_issued_not_authorized()
         test_missing_shares_carried_from_neighbour()
         test_missing_mcap_yields_blank_not_zero()
         test_foreign_currency_blanks_price_ratios()
+        test_mixed_currency_balance_sheet_blanks_equity_ratios()
+        test_repair_fills_only_empty_currency_and_writes_both()
         test_detect_currency()
         test_price_backtracks_to_business_day()
         print("\nALL SCREENER PACKAGE TESTS PASSED")

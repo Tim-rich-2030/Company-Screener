@@ -39,16 +39,25 @@ class QuarterContext:
         # 재무제표를 USD로 내는 회사(예: 두산밥캣)가 있다. 달러 자기자본을 원화
         # 시가총액으로 나누면 PBR이 1,000배로 나온다. 통화가 원화가 아니면
         # 시가총액 기반 지표(PBR·PER·PSR)를 계산하지 않는다.
-        # ROE·영업이익률처럼 같은 통화끼리의 비율은 통화와 무관하므로 그대로 둔다.
+        # ROE·영업이익률처럼 같은 통화끼리의 비율은 통화와 무관하므로 그대로 둔다 —
+        # 단, 손익과 재무상태표가 "같은" 통화일 때만이다. 두산밥캣 2023년
+        # 1~3분기는 손익은 달러인데 재무상태표(자본총계 등)는 원화 그대로 남아
+        # 있었다. bs_currency 가 currency 와 다르면 그 분기의 재무상태표 값은
+        # 못 믿는다 — ROE·ROA가 자릿수 3개가 빠진 값으로 조용히 찍힌다.
         self.currency = (self._slot.get("currency") or "KRW").upper()
+        self.bs_currency = (self._slot.get("bs_currency") or self.currency).upper()
         self.mcap = self._slot.get("시가총액") if self.currency == "KRW" else None
 
     # --- 재무상태표 (이 분기 시점의 잔액) ---
     @property
     def equity(self):
+        if self.bs_currency != self.currency:
+            return None
         return self._slot.get("지배주주지분") or self._slot.get("자본총계")
 
     def bs(self, account: str):
+        if self.bs_currency != self.currency:
+            return None
         return self._slot.get(account)
 
     # --- 손익 시계열 (이 분기 기준 과거 방향) ---
