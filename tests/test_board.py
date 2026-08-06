@@ -1858,6 +1858,28 @@ def test_the_board_does_not_stretch_itself_to_fill_the_screen():
     print("test_the_board_does_not_stretch_itself_to_fill_the_screen: OK")
 
 
+def test_refresh_says_so_when_nothing_changed():
+    """
+    '다시 받기' 는 **지금 다시 물어보는 것**이지 새로 받아오는 것이 아니다.
+    수집은 5분마다 도니 눌러도 값이 그대로일 수 있다.
+
+    그때 아무 일도 안 일어난 것처럼 두면 안 된다. 누른 사람이 자기가 잘못
+    눌렀는지, 고장인지, 원래 같은 값인지 가릴 수가 없다 — 셋은 다른 상태다.
+    """
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    for sec, name in (("strong-rf", "실시간 종목"), ("tree-rf", "시장 지도")):
+        assert 'id="%s"' % sec in idx, f"{name} 에 다시 받기 단추가 없습니다"
+        assert re.search(r"refresher\('%s'" % sec, idx), \
+            f"{name} 의 단추가 아무 데도 연결돼 있지 않습니다"
+
+    body = re.search(r"function refresher\(.*?\n\}\n", idx, re.S).group(0)
+    assert "새 값 없음" in body, "값이 그대로일 때 아무 말도 안 합니다"
+    assert "못 받았습니다" in body, "못 받았을 때와 같은 값일 때가 구별되지 않습니다"
+    assert "aria-label" in idx, "그림만 있는 단추는 이름을 달아야 합니다"
+    print("test_refresh_says_so_when_nothing_changed: OK")
+
+
 def test_the_page_is_fetched_before_the_cache_is_consulted():
     """
     docs/sw.js 의 주인은 screener/site.py 다. 손으로 고칠 것이 아니다.
@@ -2328,6 +2350,7 @@ if __name__ == "__main__":
     test_the_tip_is_refreshed_without_refetching_the_history()
     test_a_failed_tip_does_not_erase_the_line()
     test_the_board_does_not_stretch_itself_to_fill_the_screen()
+    test_refresh_says_so_when_nothing_changed()
     test_the_page_is_fetched_before_the_cache_is_consulted()
     test_fx_reads_the_base_rate_column_by_name()
     test_fx_stays_empty_when_the_column_is_gone()

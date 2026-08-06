@@ -124,6 +124,25 @@ h2 .no{font-size:12px;color:var(--ink-muted);letter-spacing:2px}
 h2 .note{margin-left:auto;font-family:'Pretendard',sans-serif;font-size:11.5px;
   color:var(--ink-muted);font-weight:400;text-align:right}
 
+/* 다시 받기 — 화살표 하나. 상자도 배경도 두르지 않는다.
+   h2 는 flex(gap:8px, align-items:baseline) 다. 사이는 gap 이 벌리므로
+   margin 을 따로 주지 않고, 글자 밑선이 아니라 가운데에 맞춘다. */
+.rf{padding:2px;background:none;border:0;line-height:0;flex:0 0 auto;
+  color:var(--ink-muted);cursor:pointer;align-self:center}
+.rf svg{width:13px;height:13px;display:block}
+.rf.spin svg{animation:rfspin .9s linear infinite}
+@keyframes rfspin{to{transform:rotate(360deg)}}
+/* 눌렀는데 값이 그대로일 때 그렇게 적는 자리. 잠깐 떴다 사라진다. */
+.rf-say{font-family:'Pretendard',sans-serif;font-size:11.5px;
+  font-weight:400;color:var(--ink-muted);opacity:0;transition:opacity .25s;
+  white-space:nowrap}
+.rf-say.on{opacity:1}
+/* 움직임을 줄여 달라고 한 사람에게는 돌리지 않고 흐리게만 한다. */
+@media (prefers-reduced-motion:reduce){
+  .rf.spin svg{animation:none}
+  .rf.spin{opacity:.4}
+}
+
 /* 1면은 스크롤 없이 완결된다. 다만 **화면을 채우는 것과 완결되는 것은
    다른 말이다.** 예전엔 min-height 로 한 판을 강제로 채웠는데, 현황판의
    가장 긴 페이지가 394px 인데 그릇이 635px 이라 탭마다 241~346px 이 빈칸이
@@ -425,14 +444,25 @@ footer{font-size:11px;color:var(--ink-muted);margin-top:32px;padding-top:9px;
   </section>
 
   <section id="strong">
-    <h2><span class="no">二</span>실시간 종목</h2>
+    <h2><span class="no">二</span>실시간 종목<button class="rf" id="strong-rf"
+      type="button" aria-label="다시 받기"
+      title="지금 다시 받아봅니다 (수집은 5분마다 돕니다)"><svg viewBox="0 0 16 16"
+      fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+      stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"
+      /><path d="M13.6 2.2v2.9h-2.9"/></svg></button></h2>
     <div class="tabs sm" id="strong-tabs"></div>
     <div class="lst" id="strong-list"></div>
     <div class="why" id="strong-why"></div>
   </section>
 
   <section id="tree">
-    <h2><span class="no">三</span>시장 지도<span class="note" id="tree-note"></span></h2>
+    <h2><span class="no">三</span>시장 지도<button class="rf" id="tree-rf"
+      type="button" aria-label="다시 받기"
+      title="지금 다시 받아봅니다 (수집은 5분마다 돕니다)"><svg viewBox="0 0 16 16"
+      fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+      stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"
+      /><path d="M13.6 2.2v2.9h-2.9"/></svg></button><span class="note"
+      id="tree-note"></span></h2>
     <div class="tabs sm" id="tree-tabs"></div>
     <div id="map"></div>
     <div class="scale" id="tree-scale"></div>
@@ -2082,6 +2112,54 @@ grab('market_headline.json').then(function(p){
 });
 
 // 열 때 한 번이 아니라 계속 묻는다.
+/*
+ * 다시 받기 — **지금 다시 물어보는 것**이지 새로 받아오는 것이 아니다.
+ *
+ *   수집은 GitHub Actions 가 5분마다 한다. 화면이 할 수 있는 것은 live
+ *   가지에 지금 무엇이 올라와 있는지 다시 묻는 것뿐이다. 눌러서 줄어드는
+ *   것은 **화면이 스스로 묻기까지 기다리는 1분**이지, 수집 주기가 아니다.
+ *
+ *   그래서 눌러도 값이 그대로일 수 있다. 그때는 **그렇게 적는다.** 아무 일도
+ *   안 일어난 것처럼 두면 누른 사람은 자기가 잘못 눌렀는지, 고장인지,
+ *   원래 같은 값인지 가릴 수가 없다. 셋은 다른 상태다.
+ */
+function refresher(btnId, file, get, apply){
+  var btn = $(btnId);
+  if (!btn) return;
+  var say = document.createElement('span');
+  say.className = 'rf-say';
+  btn.parentNode.insertBefore(say, btn.nextSibling);
+  var fade = null;
+
+  btn.addEventListener('click', function(){
+    if (btn.classList.contains('spin')) return;   // 연타해도 한 번만
+    btn.classList.add('spin');
+    say.classList.remove('on');
+    if (fade) clearTimeout(fade);
+
+    var began = Date.now(), cur = get();
+    fetch(LIVE + file, {cache:'no-store'})
+      .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function(p){ if (newer(cur, p)){ apply(p); return ''; }
+                         return '새 값 없음'; })
+      .catch(function(){ return '못 받았습니다'; })
+      .then(function(msg){
+        // 너무 빨리 끝나면 돌긴 돌았는지도 모른다. 최소 한 바퀴는 보여 준다.
+        setTimeout(function(){
+          btn.classList.remove('spin');
+          say.textContent = msg;
+          say.classList.toggle('on', !!msg);
+          if (msg) fade = setTimeout(function(){ say.classList.remove('on'); }, 2600);
+        }, Math.max(0, 500 - (Date.now() - began)));
+      });
+  });
+}
+
+refresher('strong-rf', 'market_strong.json',
+          function(){ return STRONG; }, useStrong);
+refresher('tree-rf', 'market_tree.json',
+          function(){ return TREE; }, useTree);
+
 startLive();
 
 grab('market_calendar.json').then(renderCal).catch(function(){
