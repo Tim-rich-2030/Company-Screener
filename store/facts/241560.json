@@ -20,7 +20,8 @@
    "상장주식수": 95856065.0,
    "shares_src": "carried",
    "시가총액": 5454210098500.0,
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2025Q4": {
    "영업이익": 101742000.0,
@@ -39,7 +40,8 @@
    "시가총액": 5530894950500.0,
    "price_date": "20251230",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2025Q3": {
    "영업이익": 97607000.0,
@@ -59,7 +61,8 @@
    "상장주식수": 95856065.0,
    "shares_src": "carried",
    "시가총액": 5320011607500.0,
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2025Q2": {
    "영업이익": 145380000.0,
@@ -78,7 +81,8 @@
    "시가총액": 5578822983000.0,
    "price_date": "20250630",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2025Q1": {
    "영업이익": 137708000.0,
@@ -98,7 +102,8 @@
    "상장주식수": 100249166.0,
    "shares_src": "carried",
    "시가총액": 5012458300000.0,
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2024Q4": {
    "영업이익": 127934000.0,
@@ -117,7 +122,8 @@
    "시가총액": 4200440055400.0,
    "price_date": "20241230",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2024Q3": {
    "영업이익": 91881000.0,
@@ -137,7 +143,8 @@
    "상장주식수": 100249166.0,
    "shares_src": "carried",
    "시가총액": 4070116139600.0,
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2024Q2": {
    "영업이익": 173676000.0,
@@ -156,7 +163,8 @@
    "시가총액": 5142782215800.0,
    "price_date": "20240628",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2024Q1": {
    "영업이익": 245376000.0,
@@ -176,7 +184,8 @@
    "상장주식수": 100249166.0,
    "shares_src": "carried",
    "시가총액": 5343280547800.0,
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2023Q4": {
    "영업이익": 192761661.0,
@@ -195,7 +204,8 @@
    "시가총액": 5052557966400.0,
    "price_date": "20231228",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "USD"
   },
   "2023Q3": {
    "영업이익": 226212916.0,
@@ -214,7 +224,8 @@
    "시가총액": 5112707466000.0,
    "price_date": "20230927",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "KRW"
   },
   "2023Q2": {
    "영업이익": 355938788.0,
@@ -233,7 +244,8 @@
    "시가총액": 5884626044200.0,
    "price_date": "20230630",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "KRW"
   },
   "2023Q1": {
    "영업이익": 289809635.0,
@@ -252,7 +264,8 @@
    "시가총액": 4380888554200.0,
    "price_date": "20230331",
    "price_src": "naver",
-   "currency": "USD"
+   "currency": "USD",
+   "bs_currency": "KRW"
   },
   "2022Q4": {
    "영업이익": -819934315893.0,
