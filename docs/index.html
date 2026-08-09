@@ -742,6 +742,76 @@ function isOpen(market){
   return null;
 }
 
+/*
+ * 멈춘 것을 멈췄다고 적는다.
+ *
+ *   GitHub 쪽 장애로 수집이 여섯 시간 넘게 멈춘 적이 있다. 그때 화면은 그냥
+ *   '16:43 기준' 이라고만 적혀 있었다. 그게 6분 전인지 6시간 전인지는 눈으로
+ *   세어 봐야 알았고, 폰을 보면서 그걸 세는 사람은 없다.
+ *
+ *   **판단하지 않는다.** '문제가 있습니다' 가 아니라 몇 분째 새 값이 없는지만
+ *   적는다. 고칠지 기다릴지는 보는 사람이 정한다.
+ */
+var STALE_MIN = 15;        // 수집 5분 + 전파 1분 + 묻는 간격 1분이라 넉넉히 잡는다
+
+/* 받은 지 몇 분 됐나. 시각이 없으면(날짜만 있으면) 못 잰다 — null. */
+function ageMin(p){
+  if (!p) return null;
+  var v = p.fetched_at || p.intraday_at;
+  if (!v) return null;
+  var t = new Date(v).getTime();
+  if (isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 60000);
+}
+
+/*
+ * 국내 장이 열린 지 몇 분 됐나. 장 시간이 아니면 -1.
+ *
+ *   여는 시각을 함께 보는 이유가 있다. 09:01 에는 마지막 값이 어제 15:40 것이라
+ *   '천 분째 새 값 없음' 이 뜬다 — 틀린 말은 아니지만 아직 첫 바퀴가 안 왔을
+ *   뿐이다. 장이 열리고 STALE_MIN 이 지난 뒤부터 센다.
+ */
+function krOpenFor(){
+  try {
+    var k = tzNow('Asia/Seoul');
+    if (k.wd === 'Sat' || k.wd === 'Sun') return -1;
+    return (k.min >= 540 && k.min < 940) ? k.min - 540 : -1;   // 09:00~15:40
+  } catch (e){ return -1; }
+}
+
+/* expected 가 참일 때만 적는다. 종목·지도는 장이 끝나면 원래 안 바뀌므로,
+   그때까지 '멈췄다' 고 적으면 매일 밤 거짓 경보가 된다. */
+function staleNote(p, expected){
+  if (!expected) return '';
+  var m = ageMin(p);
+  return (m !== null && m >= STALE_MIN) ? ' · ' + m + '분째 새 값 없음' : '';
+}
+
+/*
+ * **멈춤 표시는 스스로 갱신되어야 한다.**
+ *
+ *   처음엔 렌더 안에서 한 번 적고 말았다. 그런데 렌더는 **새 값이 와야** 돈다.
+ *   정작 수집이 멈추면 새 값이 안 오니 렌더도 안 돌고, '멈췄다' 는 영영 안
+ *   뜬다 — 알려야 할 바로 그때 침묵하는 표시가 된다.
+ *
+ *   그래서 렌더가 만든 바탕 글만 기억해 두고, 시계는 따로 돌린다.
+ */
+var NOTE_BASE = {};
+
+function setNote(id, base, payload, expected){
+  NOTE_BASE[id] = {base: base, get: payload, when: expected};
+  var el = $(id);
+  if (el) el.textContent = base + staleNote(payload(), expected());
+}
+
+function tickStale(){
+  for (var id in NOTE_BASE){
+    var n = NOTE_BASE[id], el = $(id);
+    // 장이 열리고 닫히는 것도 시간이 가면 바뀌므로 매번 다시 묻는다.
+    if (el) el.textContent = n.base + staleNote(n.get(), n.when());
+  }
+}
+
 /* UTC 로 적힌 시각을 한국 시각 HH:MM 으로. */
 function hhmm(iso){
   var d = new Date(iso);
@@ -902,8 +972,10 @@ function drawTrend(){
 function renderBoard(){
   renderNight();
   drawTrend();
-  $('board-note').textContent = BOARD && BOARD.fetched_at
-    ? hhmm(BOARD.fetched_at) + ' 기준' : '';
+  // 헤드라인·간밤의 증시는 24시간 5분마다 도니 늘 새것이어야 한다.
+  setNote('board-note',
+          BOARD && BOARD.fetched_at ? hhmm(BOARD.fetched_at) + ' 기준' : '',
+          function(){ return BOARD; }, function(){ return true; });
 }
 
 // =============================================================================
@@ -1159,7 +1231,9 @@ function renderTree(){
   }
 
   var b = breadth;
-  $('tree-note').textContent = note(n);
+  setNote('tree-note', note(n),
+          function(){ return TREE; },
+          function(){ return krOpenFor() >= STALE_MIN; });
   $('tree-scale').innerHTML =
     // 넓이가 시총에 그대로 비례하지 않는다는 것을 적는다. 안 적으면 넓이 두 배를
     // 시총 두 배로 읽는다.
@@ -1508,7 +1582,9 @@ function renderStrong(){
   // 값을 어제 종가로 읽게 된다.
   why.push(STRONG.intraday_at ? hhmm(STRONG.intraday_at) + ' 기준 (장중)'
                               : '종가 기준');
-  $('strong-why').textContent = why.join(' · ');
+  setNote('strong-why', why.join(' · '),
+          function(){ return STRONG; },
+          function(){ return krOpenFor() >= STALE_MIN; });
 }
 $('strong-tabs').addEventListener('click', function(e){
   var b = e.target.closest('.tab');
@@ -2021,6 +2097,8 @@ var liveTimer = null;
 
 function livePoll(){
   if (document.hidden) return;
+  // 새 값이 안 와도 시간은 간다. 멈춤 표시는 여기서 갱신한다.
+  tickStale();
   live('market_board.json', BOARD, useBoard);
   live('market_headline.json', HEAD, useHead);
   live('market_strong.json', STRONG, useStrong);

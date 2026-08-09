@@ -1993,6 +1993,51 @@ def test_the_intraday_run_stamps_its_own_time():
     print("test_the_intraday_run_stamps_its_own_time: OK")
 
 
+def test_the_stale_note_updates_without_new_data():
+    """
+    멈춤 표시는 **새 값이 없을 때** 떠야 하는 물건이다.
+
+    처음엔 렌더 안에서 한 번 적고 말았다. 그런데 렌더는 새 값이 와야 돈다.
+    정작 수집이 멈추면 새 값이 안 오니 렌더도 안 돌고, '멈췄다' 는 영영 안
+    뜬다 — 알려야 할 바로 그때 침묵하는 표시가 된다.
+
+    그래서 바탕 글만 기억해 두고(setNote) 시계는 따로 돌린다(tickStale).
+    """
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    poll = re.search(r"function livePoll\(\)\{(.*?)\n\}", idx, re.S).group(1)
+    assert "tickStale()" in poll, \
+        "묻는 자리에서 멈춤 표시를 갱신하지 않습니다 — 멈추면 영영 안 뜹니다"
+
+    for el in ("board-note", "tree-note", "strong-why"):
+        assert re.search(r"setNote\('%s'" % el, idx), \
+            f"{el} 이 setNote 를 안 거칩니다 — 시계가 갱신할 수 없습니다"
+    print("test_the_stale_note_updates_without_new_data: OK")
+
+
+def test_the_stale_note_stays_quiet_when_nothing_is_expected():
+    """
+    종목·지도는 장이 끝나면 원래 안 바뀐다. 그때까지 '멈췄다' 고 적으면 매일
+    밤 거짓 경보가 되고, 거짓 경보가 반복되면 진짜일 때도 안 보게 된다.
+
+    여는 시각도 함께 본다. 09:01 에는 마지막 값이 어제 것이라 '천 분째' 가
+    뜨는데, 틀린 말은 아니지만 아직 첫 바퀴가 안 왔을 뿐이다.
+    """
+    idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
+
+    body = re.search(r"function staleNote\(.*?\n\}", idx, re.S).group(0)
+    assert "if (!expected) return ''" in body, \
+        "새 값이 올 때가 아닌데도 적습니다"
+
+    kr = re.search(r"function krOpenFor\(\)\{(.*?)\n\}", idx, re.S).group(1)
+    assert "540" in kr and "940" in kr, "장 시간(09:00~15:40)을 안 봅니다"
+    assert "Sat" in kr and "Sun" in kr, "주말을 안 거릅니다"
+    # 종목·지도는 '장이 열리고 STALE_MIN 이 지난 뒤' 부터 센다
+    assert len(re.findall(r"krOpenFor\(\) >= STALE_MIN", idx)) == 2, \
+        "종목·지도가 여는 시각을 안 봅니다 — 09:01 에 거짓 경보가 뜹니다"
+    print("test_the_stale_note_stays_quiet_when_nothing_is_expected: OK")
+
+
 def test_refresh_says_so_when_nothing_changed():
     """
     '다시 받기' 는 **지금 다시 물어보는 것**이지 새로 받아오는 것이 아니다.
@@ -2490,6 +2535,8 @@ if __name__ == "__main__":
     test_a_date_only_stamp_sits_at_midnight_of_that_day()
     test_the_loop_seeds_from_live_before_it_publishes()
     test_the_intraday_run_stamps_its_own_time()
+    test_the_stale_note_updates_without_new_data()
+    test_the_stale_note_stays_quiet_when_nothing_is_expected()
     test_refresh_says_so_when_nothing_changed()
     test_the_page_is_fetched_before_the_cache_is_consulted()
     test_fx_reads_the_base_rate_column_by_name()
