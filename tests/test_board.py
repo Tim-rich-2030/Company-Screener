@@ -1725,6 +1725,43 @@ def test_the_loop_installs_what_its_steps_need():
     print("test_the_loop_installs_what_its_steps_need: OK")
 
 
+def test_the_morning_has_extra_chances_to_start():
+    """
+    아침에 판이 없으면 장이 열려도 아무것도 안 쌓인다.
+
+    이 저장소의 예약은 통째로 걸러지는 때가 있다 ('*/15' 는 0회였고, 지금 도는
+    '25 * * * *' 도 7~54분씩 늦는다). 걸러진 자리가 하필 새벽이면 아침이 빈다.
+    그래서 장 열기 전 시간대(UTC 21~23시 = KST 06~09시)에만 기회를 늘린다.
+
+    보장이 아니다. 다만 그 시간대에 거는 것이 하나도 없으면 아침은 순전히
+    운에 맡기는 것이 된다.
+    """
+    import yaml
+    wf = yaml.safe_load(open(os.path.join(_ROOT,
+                        ".github/workflows/board-live.yml"), encoding="utf-8"))
+    crons = [c["cron"] for c in wf[True]["schedule"]]
+
+    def hours(field):
+        out = set()
+        for part in field.split(","):
+            if "-" in part:
+                a, b = part.split("-")
+                out |= set(range(int(a), int(b) + 1))
+            elif part != "*":
+                out.add(int(part))
+            else:
+                out |= set(range(24))
+        return out
+
+    # KST 06~09시 = UTC 21~23시. 그 시간대를 겨냥한 예약이 하나라도 있어야 한다.
+    premarket = {21, 22, 23}
+    extra = [c for c in crons
+             if hours(c.split()[1]) & premarket and hours(c.split()[1]) != set(range(24))]
+    assert extra, ("장 열기 전(UTC 21~23시)을 겨냥한 예약이 없습니다 — "
+                   f"아침에 판이 뜨는 것이 운에 달립니다: {crons}")
+    print("test_the_morning_has_extra_chances_to_start: OK")
+
+
 def test_the_period_is_measured_from_the_start_of_the_cycle():
     """
     'sleep 300' 을 일이 끝난 뒤에 두면 한 바퀴가 (일한 시간 + 300초)가 된다.
@@ -2443,6 +2480,7 @@ if __name__ == "__main__":
     test_what_the_loop_pushes_is_what_the_screen_reads()
     test_every_live_file_carries_a_time_not_just_a_date()
     test_the_loop_installs_what_its_steps_need()
+    test_the_morning_has_extra_chances_to_start()
     test_the_period_is_measured_from_the_start_of_the_cycle()
     test_the_screen_asks_at_least_as_often_as_the_loop_collects()
     test_the_tip_is_refreshed_without_refetching_the_history()
