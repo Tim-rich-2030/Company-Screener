@@ -86,6 +86,32 @@ Settings → Secrets and variables → Actions에 등록한다 ([SECURITY.md](SE
 4. check 생성은 수동으로 하지 않는다 — 구현된 `scripts/provision_healthchecks.py`가
    [WORKFLOWS.md](WORKFLOWS.md) §3.1의 Period/Grace로 자동 생성·갱신한다.
 
+## 9.5 Vercel (Dashboard 배포 — 확정)
+
+1. https://vercel.com 가입 → Add New Project → GitHub `content-radar` 저장소 연결
+2. **Root Directory: `apps/dashboard`** 지정 (모노레포)
+3. Environment Variables 설정:
+   - `DATABASE_URL` — Supabase 연결 문자열 (Settings → Database → **Connection pooling**
+     URI 권장, 서버 전용 — 클라이언트에 노출되지 않음)
+   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `ADMIN_EMAILS` — 접근 허용 관리자 이메일 (콤마 구분)
+   - `NEXT_PUBLIC_RADAR_ENV=PRODUCTION`
+   - `AUTH_DISABLED`은 설정하지 않는다 (기본 false — 운영에서 true 금지)
+4. Supabase 대시보드 → Authentication → Users에서 관리자 계정(이메일/비밀번호) 생성
+   (Sign-up은 공개로 열지 않는다)
+5. 배포 후 확인: 비로그인 접근 → /login 리다이렉트, allowlist 외 계정 → 차단,
+   /health에 Environment=PRODUCTION·Git SHA 표시
+
+## 9.6 GitHub Secrets — infra-heartbeat 검증용 (M1.5)
+
+| Secret | 값 |
+| --- | --- |
+| `SUPABASE_DB_URL` | Supabase Postgres 연결 문자열 (Settings → Database) |
+| `HEALTHCHECKS_PING_KEY` | (선택) Healthchecks 프로젝트 Ping Key — 없으면 ping 단계 생략 |
+
+설정 후 Actions 탭에서 `infra-heartbeat` 워크플로를 Run workflow로 실행하면
+GitHub → Supabase 기록/연결성/health 갱신 체인이 검증된다.
+
 ## 10. GitHub 저장소 설정
 
 1. Settings → Secrets and variables → Actions에 위 Secret 전부 등록

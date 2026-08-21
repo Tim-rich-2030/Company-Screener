@@ -66,7 +66,15 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
                 <tbody>
                   {Object.entries(comp[group]).map(([k, v]) => (
                     <tr key={k} className="border-b border-neutral-100">
-                      <td className="py-1 pr-2 font-mono text-xs">{k}</td>
+                      <td className="py-1 pr-2 font-mono text-xs">
+                        {k}
+                        {group === "opportunity" && (k === "blog_fit" || k === "monetization") && (
+                          // M1.5 §15-B: 실제 logic 구현 전까지 stub 성분임을 명시
+                          <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-bold text-amber-800">
+                            PROVISIONAL
+                          </span>
+                        )}
+                      </td>
                       <td className="w-16 py-1 text-right font-mono">{Number(v).toFixed(1)}</td>
                       <td className="w-1/2 py-1 pl-3">
                         <div className="h-1.5 rounded bg-neutral-100">

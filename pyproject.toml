@@ -1,0 +1,10 @@
+[project]
+name = "content-radar-workers"
+version = "0.1.0"
+description = "Content Radar data workers (collectors / discovery / scoring)"
+# Production/CI 기준 Python은 3.12 고정 (M1.5 §14).
+# 로컬 3.11 실행은 개발 편의일 뿐 production 기준이 아니다.
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

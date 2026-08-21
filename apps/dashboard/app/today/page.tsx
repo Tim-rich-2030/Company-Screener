@@ -1,7 +1,9 @@
 // 화면: TODAY (명세 §37~§38). Fail-Closed 규칙은 docs/DATA_FRESHNESS.md §7.
+// M1.5 §16: live source 미연결 상태의 real 환경에서는 추천을 보여주지 않는다.
 import Link from "next/link";
 import DashboardHeader from "@/components/DashboardHeader";
 import { sql } from "@/lib/db";
+import { isRealEnv } from "@/lib/env";
 import { kst } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,29 @@ type TodayRow = {
 };
 
 export default async function TodayPage() {
+  const infra = await sql()`select live_data_connected from v_infra_status`;
+  const liveConnected = Boolean(infra[0]?.live_data_connected);
+
+  // Real 환경 + live source 0개 → 추천 자체를 렌더하지 않는다 (mock 후보 오인 차단)
+  if (isRealEnv() && !liveConnected) {
+    return (
+      <div>
+        <DashboardHeader />
+        <h1 className="text-lg font-bold">TODAY</h1>
+        <div className="mt-6 rounded border border-neutral-300 bg-white p-8 text-center">
+          <p className="text-lg font-bold">LIVE DATA NOT CONNECTED</p>
+          <p className="mt-2 text-sm text-neutral-600">
+            실제 수집 소스가 아직 하나도 연결되지 않았습니다. 추천은 live 수집이
+            시작된 후에만 표시됩니다. (mock 데이터는 이 환경에서 추천으로 노출되지 않습니다)
+          </p>
+          <p className="mt-3 text-xs text-neutral-500">
+            <Link href="/health" className="underline">SOURCES / HEALTH에서 연결 상태 확인</Link>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const rows = (await sql()`select * from v_today`) as unknown as TodayRow[];
   const worstRed = await sql()`
     select name, last_success_at,
@@ -59,6 +84,12 @@ export default async function TodayPage() {
     <div>
       <DashboardHeader />
       <h1 className="text-lg font-bold">TODAY</h1>
+
+      {!isRealEnv() && (
+        <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          SIMULATION / NOT A REAL RECOMMENDATION — mock fixture 데이터 기반
+        </div>
+      )}
 
       {suspended && (
         <div className="mt-4 rounded border border-red-300 bg-red-50 p-4 text-sm font-medium text-red-900">
@@ -109,6 +140,11 @@ function Card({ r, rank, highlight = false }: { r: TodayRow; rank: number; highl
         }`}>
           {r.lifecycle.toUpperCase()}
         </span>
+        {!isRealEnv() && (
+          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
+            SIMULATION
+          </span>
+        )}
         <span className="ml-auto font-mono text-sm">
           Opportunity <b>{Number(r.opportunity).toFixed(0)}</b> · Confidence{" "}
           <b>{Number(r.confidence).toFixed(0)}</b>

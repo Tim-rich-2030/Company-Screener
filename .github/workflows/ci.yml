@@ -39,6 +39,15 @@ jobs:
           TEST_PG_ADMIN_URL: postgresql://radar@127.0.0.1:5432/postgres
         run: python -m pytest tests/ -v
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 전체 history 스캔
+      - run: bash scripts/secret_scan.sh
+
   dashboard-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

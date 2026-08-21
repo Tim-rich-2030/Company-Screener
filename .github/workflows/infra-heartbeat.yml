@@ -1,0 +1,46 @@
+# Milestone 1.5 §7 — 인프라 신뢰 사슬 검증용 임시 워크플로.
+# production collector cron이 아니다. 검증 목적의 수동 실행(workflow_dispatch) 전용.
+#
+# 검증 흐름:
+#   GitHub Action → Supabase workflow_runs 기록 → 연결성 write/read/delete
+#   → system_health 갱신 → Healthchecks.io ping (키가 있을 때)
+#
+# 필요 Secrets:
+#   SUPABASE_DB_URL        — Supabase Postgres 연결 문자열 (Settings → Database)
+#   HEALTHCHECKS_PING_KEY  — (선택) 없으면 ping 단계는 생략되고 로그에 표시됨
+name: infra-heartbeat
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: infra-heartbeat
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run heartbeat (DB 기록 + 연결성 + health + ping)
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          HEALTHCHECKS_PING_KEY: ${{ secrets.HEALTHCHECKS_PING_KEY }}
+        run: python -m workers.run heartbeat
+      - name: Failure ping (Python이 뜨기 전에 죽은 경우의 최후 방어)
+        if: failure()
+        env:
+          HEALTHCHECKS_PING_KEY: ${{ secrets.HEALTHCHECKS_PING_KEY }}
+        run: |
+          if [ -n "$HEALTHCHECKS_PING_KEY" ]; then
+            curl -fsS -m 10 "https://hc-ping.com/$HEALTHCHECKS_PING_KEY/infra-heartbeat/fail" || true
+          fi

@@ -87,6 +87,21 @@ class TestMockPipeline:
         n1 = q(pipeline_db, "select count(*) as n from score_snapshots")[0]["n"]
         assert n1 > n0  # 기존 snapshot 덮어쓰기 금지 (명세 §55)
 
+    def test_mock_runs_never_count_as_live(self, pipeline_db):
+        # M1.5 §9/§16: trigger_type='test'(mock) run은 live 데이터로 집계되지 않는다
+        row = q(pipeline_db, "select live_data_connected from v_infra_status")[0]
+        assert row["live_data_connected"] is False
+
+    def test_connectivity_check_leaves_no_rows(self, pipeline_db, monkeypatch):
+        # M1.5 §8: 전용 테이블 write/read/delete, 운영 테이블 불오염
+        from workers.tools.connectivity_check import check
+        monkeypatch.setenv("DATABASE_URL", pipeline_db)
+        with psycopg.connect(pipeline_db, row_factory=dict_row) as conn:
+            check(conn)
+            conn.commit()
+        n = q(pipeline_db, "select count(*) as n from infra_connectivity_checks")[0]["n"]
+        assert n == 0
+
     def test_rerun_collection_is_idempotent(self, pipeline_db):
         n0 = q(pipeline_db, "select count(*) as n from source_items")[0]["n"]
         with psycopg.connect(pipeline_db, row_factory=dict_row) as conn:
