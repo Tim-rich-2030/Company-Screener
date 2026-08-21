@@ -27,10 +27,11 @@
    데이터" 금지). 예외는 **API가 구조적으로 게시시각을 제공하지 않음이 공식 문서로
    확인된 경우**뿐이며, 그 사실을 `published_precision` 필드로 데이터에 남긴다.
    2026-08 검증 결과 실제로 해상도가 소스마다 다르다: News=초 단위, **Blog=날짜만
-   (yyyymmdd)**, **Cafe=게시시각 없음**, 검색광고=월 단위. 해상도별 집계 규칙
-   (`effective_at`)은 [DATABASE.md](DATABASE.md) §2에 정의되어 있고, 6h 윈도우 지표는
-   해상도가 부족한 소스에 대해 `first_seen_at`(최초 관측 시각)을 쓴다 — published_at을
-   지어내지 않는다.
+   (yyyymmdd)**, **Cafe=게시시각 없음**, 검색광고=월 단위. precision은 4값 enum
+   (`SECOND|MINUTE|DAY|UNKNOWN`)으로 저장하며, **`DAY`/`UNKNOWN` 데이터는 6h
+   velocity/acceleration 계산에서 제외**하고 24h+ 윈도우·daily supply·cross-source
+   evidence에만 쓴다. 정확한 시간 데이터와 날짜 단위 데이터를 같은 정밀도로 계산하는
+   것은 금지다. 상세 규칙은 [DATABASE.md](DATABASE.md) §2.
 4. `source_data_through`는 **단조 증가**한다. 새 run이 계산한 값이 기존 값보다 과거이면
    기존 값을 유지하고 경고 로그를 남긴다 (API가 일시적으로 빈 응답을 줄 때 후퇴 방지).
 

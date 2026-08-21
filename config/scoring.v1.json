@@ -1,0 +1,58 @@
+{
+  "score_version": "v1.0.0",
+  "windows": {
+    "velocity_window_hours": 6,
+    "baseline_same_hour_days": 7,
+    "novelty_lookback_days": 30
+  },
+  "velocity": {
+    "smoothing": 1,
+    "sparse_min_distinct_documents": 4,
+    "sparse_velocity_cap": 1.5,
+    "velocity_cap": 10.0,
+    "acceleration_cap": 5.0
+  },
+  "novelty": {
+    "max_mentions_30d_for_full": 3,
+    "zero_novelty_mentions_30d": 200
+  },
+  "cross_source": { "1": 20, "2": 50, "3": 75, "4": 90, "5": 100 },
+  "early_signal_weights": {
+    "velocity": 25,
+    "acceleration": 20,
+    "novelty": 20,
+    "cross_source": 15,
+    "google_trend": 10,
+    "event_freshness": 10
+  },
+  "opportunity_weights": {
+    "early_signal": 35,
+    "search_trend": 15,
+    "absolute_demand": 15,
+    "content_gap": 15,
+    "blog_fit": 10,
+    "monetization": 10
+  },
+  "confidence_weights": {
+    "source_freshness": 35,
+    "evidence_count": 25,
+    "cross_source": 20,
+    "historical_coverage": 10,
+    "official_evidence": 10
+  },
+  "rank": { "base": 0.7, "confidence_factor": 0.3 },
+  "today_thresholds": {
+    "now_opportunity_min": 75,
+    "now_confidence_min": 70,
+    "watch_opportunity_min": 55,
+    "watch_confidence_min": 50
+  },
+  "candidate_rules": {
+    "rule_a_min_distinct_documents_6h": 4,
+    "rule_a_min_source_types_6h": 2,
+    "rule_c_min_naver_new_docs": 3,
+    "rule_d_min_velocity": 2.0
+  },
+  "demand": { "monthly_search_log_base": 10, "monthly_search_norm_max": 100000 },
+  "evidence": { "confidence_full_evidence_count": 20 }
+}

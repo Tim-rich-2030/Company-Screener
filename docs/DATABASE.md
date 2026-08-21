@@ -86,8 +86,8 @@ canonical_url   text
 title           text NOT NULL
 body_excerpt    text
 author          text
-published_at    timestamptz                   -- NULL 허용은 §4의 예외 소스만 (CHECK로 강제)
-published_precision text NOT NULL CHECK       -- 'second'|'day'|'none'  (§4 참조)
+published_at    timestamptz                   -- NULL 허용은 UNKNOWN precision만 (CHECK로 강제)
+published_precision text NOT NULL CHECK       -- 'SECOND'|'MINUTE'|'DAY'|'UNKNOWN'  (§2 참조)
 first_seen_at   timestamptz NOT NULL default now()  -- = 최초 fetched_at
 fetched_at      timestamptz NOT NULL
 raw_payload     jsonb NOT NULL
@@ -116,7 +116,8 @@ term_mentions:
   term_id         uuid FK→terms
   source_item_id  uuid FK→source_items
   published_at    timestamptz                  -- item의 published_at 복제 (윈도우 집계용)
-  effective_at    timestamptz NOT NULL         -- 집계 기준 시각 (§4: published 없으면 first_seen)
+  published_precision text NOT NULL            -- item에서 복제 (6h 필터용, §2)
+  effective_at    timestamptz NOT NULL         -- 집계 기준 시각 (§2의 effective_at 규칙)
   source_type     text NOT NULL
   PK (term_id, source_item_id)
   INDEX (term_id, effective_at DESC)
@@ -226,28 +227,38 @@ policy_events:
 
 ---
 
-## 2. published_precision — Naver API 검증 결과의 반영
+## 2. published_precision — 시간 해상도 규칙 (확정)
 
-2026-08 공식 문서 검증에서 확인된 사실 ([DATA_SOURCES.md](DATA_SOURCES.md) §1):
+`published_precision`은 4값 enum이다: **`SECOND` | `MINUTE` | `DAY` | `UNKNOWN`**.
 
-- News `pubDate`: 초 단위 시각 제공 → `precision='second'`
-- Blog `postdate`: **날짜만 제공 (yyyymmdd)** → `precision='day'`, published_at은 KST 자정으로 저장
-- Cafe: **게시시각 필드가 아예 없음** → `precision='none'`, published_at NULL
+2026-08 공식 문서 검증 결과의 매핑 ([DATA_SOURCES.md](DATA_SOURCES.md) §1):
 
-이에 따른 집계 규칙 (`term_mentions.effective_at`):
+- News `pubDate`: 초 단위 시각 → `SECOND`
+- Google Trends RSS `pubDate` / YouTube `publishedAt`: → `SECOND` (RSS는 분 해상도면 `MINUTE`)
+- Blog `postdate`: **날짜만 (yyyymmdd)** → `DAY`, published_at은 KST 자정으로 저장
+- Cafe: **게시시각 필드 없음** → `UNKNOWN`, published_at NULL
 
-| precision | effective_at | 6h 윈도우 집계 | 일 단위 baseline |
-| --- | --- | --- | --- |
-| second | published_at | published_at 사용 | published_at |
-| day | `max(published_at, first_seen_at)`은 쓰지 않고 **first_seen_at** 사용 | first_seen_at (관측 시각이 곧 신규성) | published_at (날짜는 정확) |
-| none | first_seen_at | first_seen_at | first_seen_at의 날짜 |
+### 핵심 규칙 — 정밀도 혼합 계산 금지
 
-원칙: **시간 해상도가 없는 데이터로 시간 해상도가 필요한 지표를 만들 때는 "우리가 처음
-관측한 시각"을 쓴다.** 이는 published_at을 조작하는 것이 아니라 별도 필드
-(`effective_at`)로 명시해 혼용 금지 원칙(명세 §18)을 지키는 것이다.
-"Source timestamp 없는 데이터 금지"(명세 §64)의 적용: cafe는 API가 구조적으로
-미제공임이 공식 문서로 확인된 예외이며, `published_precision='none'`으로 그 사실이
-데이터에 남는다. Cafe 문서는 evidence 표시 시 게시시각을 "미제공"으로 표기한다.
+**`DAY` / `UNKNOWN` 데이터는 6h velocity / acceleration의 primary evidence로
+사용하지 않는다.** 날짜 단위 데이터를 6시간 단위 데이터처럼 취급하는 것을 금지한다.
+
+| precision | 6h 윈도우 (velocity/acceleration) | 24h+ 윈도우 / daily supply | cross-source evidence | effective_at |
+| --- | --- | --- | --- | --- |
+| SECOND / MINUTE | **포함** | 포함 | 포함 | published_at |
+| DAY | **제외** | 포함 (날짜는 정확) | 포함 | published_at (KST 자정) |
+| UNKNOWN | **제외** | 포함 (first_seen 기준) | 포함 | first_seen_at |
+
+- 6h/prev-6h 카운트와 그로부터 파생되는 velocity·acceleration은
+  `precision IN ('SECOND','MINUTE')`인 mention만으로 계산한다.
+- DAY/UNKNOWN mention은 24h 이상 윈도우, content supply(blog/cafe 공급량),
+  cross-source·evidence 카운트에만 기여한다.
+- 이 필터는 scoring 코드에 하드코딩된 WHERE 조건이며 unit test로 고정한다
+  ([ACCEPTANCE_TESTS.md](ACCEPTANCE_TESTS.md) §1.1 precision 테스트).
+
+"Source timestamp 없는 데이터 금지"(명세 §64)의 적용: Cafe는 API가 구조적으로
+미제공임이 공식 문서로 확인된 예외이며, `UNKNOWN`으로 그 사실이 데이터에 남는다.
+Cafe 문서는 evidence 표시 시 게시시각을 "미제공"으로 표기한다.
 
 ---
 

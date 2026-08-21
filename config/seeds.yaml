@@ -1,0 +1,81 @@
+# Root Keyword Seeds — Naver 검색/수집의 출발 키워드.
+# 확정: 40~50개로 시작. 코드 hardcode 금지 — 이 파일이 유일한 정의처.
+# category priority: 1(최우선)~5. 쿼터 압박 시 priority 낮은(숫자 큰) category부터 수집 스킵.
+
+categories:
+  tech:           { priority: 1 }
+  electronics:    { priority: 1 }
+  camera:         { priority: 1 }
+  mobile:         { priority: 1 }
+  pc:             { priority: 2 }
+  ai:             { priority: 1 }
+  home_appliance: { priority: 2 }
+  work_tools:     { priority: 2 }
+  car:            { priority: 3 }
+  parenting:      { priority: 2 }
+  education:      { priority: 3 }
+  policy:         { priority: 2 }
+  finance:        { priority: 2 }
+  shopping:       { priority: 3 }
+
+# 45 roots
+roots:
+  # tech (4)
+  - { keyword: "스마트홈",        category: tech }
+  - { keyword: "웨어러블",        category: tech }
+  - { keyword: "스마트워치",      category: tech }
+  - { keyword: "전자책 리더기",   category: tech }
+  # electronics (4)
+  - { keyword: "무선이어폰",      category: electronics }
+  - { keyword: "블루투스 스피커", category: electronics }
+  - { keyword: "모니터 추천",     category: electronics }
+  - { keyword: "보조배터리",      category: electronics }
+  # camera (4)
+  - { keyword: "액션캠",          category: camera }
+  - { keyword: "짐벌 카메라",     category: camera }
+  - { keyword: "미러리스 카메라", category: camera }
+  - { keyword: "브이로그 카메라", category: camera }
+  # mobile (3)
+  - { keyword: "갤럭시 신제품",   category: mobile }
+  - { keyword: "아이폰 신제품",   category: mobile }
+  - { keyword: "폴더블폰",        category: mobile }
+  # pc (3)
+  - { keyword: "게이밍 노트북",   category: pc }
+  - { keyword: "기계식 키보드",   category: pc }
+  - { keyword: "미니PC",          category: pc }
+  # ai (4)
+  - { keyword: "AI 글쓰기",       category: ai }
+  - { keyword: "AI 이미지 생성",  category: ai }
+  - { keyword: "챗봇 활용",       category: ai }
+  - { keyword: "AI 요약",         category: ai }
+  # home_appliance (4)
+  - { keyword: "로봇청소기",      category: home_appliance }
+  - { keyword: "공기청정기",      category: home_appliance }
+  - { keyword: "에어프라이어",    category: home_appliance }
+  - { keyword: "제습기",          category: home_appliance }
+  # work_tools (3)
+  - { keyword: "노션 활용",       category: work_tools }
+  - { keyword: "업무 자동화",     category: work_tools }
+  - { keyword: "재택근무 장비",   category: work_tools }
+  # car (3)
+  - { keyword: "전기차 보조금",   category: car }
+  - { keyword: "차박 용품",       category: car }
+  - { keyword: "블랙박스 추천",   category: car }
+  # parenting (3)
+  - { keyword: "유모차 추천",     category: parenting }
+  - { keyword: "아기 이유식",     category: parenting }
+  - { keyword: "육아템",          category: parenting }
+  # education (2)
+  - { keyword: "초등 학습지",     category: education }
+  - { keyword: "코딩 교육",       category: education }
+  # policy (3)
+  - { keyword: "청년 지원금",     category: policy }
+  - { keyword: "육아휴직 제도",   category: policy }
+  - { keyword: "부동산 정책",     category: policy }
+  # finance (3)
+  - { keyword: "ISA 계좌",        category: finance }
+  - { keyword: "연금저축",        category: finance }
+  - { keyword: "파킹통장",        category: finance }
+  # shopping (2)
+  - { keyword: "블랙프라이데이",  category: shopping }
+  - { keyword: "와디즈 펀딩",     category: shopping }

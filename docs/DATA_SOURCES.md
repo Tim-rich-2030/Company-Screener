@@ -69,8 +69,8 @@ NCP 공지 (2026-06-25 NAVER API HUB 출시).
 겹칠 때까지 페이지네이션. `start` 최대 1000 = keyword당 최대 1000건 창.
 
 **쿼터 예산:** root keyword N개 × 3 vertical × 24회/일 = 72N calls/day.
-25,000 한도 내에서 root는 **최대 100개** (7,200 calls + demand 검증 여유)로 시작한다.
-`config/root_keywords.json`에서 관리.
+**root는 40~50개로 시작한다 (확정)** — 45개 기준 3,240 calls/day로 25,000 한도의 13%.
+`config/seeds.yaml`에서 관리하며 코드 hardcode 금지. category 14종에 priority 부여.
 
 ## 2. Naver DataLab Search Trend (검색어트렌드)
 

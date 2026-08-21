@@ -1,0 +1,4 @@
+# Data worker 의존성 (Python 3.12+ 권장, 3.11 호환)
+psycopg[binary]>=3.1
+PyYAML>=6.0
+pytest>=8.0

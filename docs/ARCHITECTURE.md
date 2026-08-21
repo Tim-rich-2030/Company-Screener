@@ -102,9 +102,10 @@ Content Radar V1의 전체 구조. 제품 요구사항의 원본은 [specs/conte
 
 ## 6. 배포 형태
 
-- **dashboard**: Next.js. Supabase를 클라이언트에서 직접 읽으므로 정적 export도 가능하지만,
-  Freshness 계산의 "현재시각" 처리와 서버 컴포넌트 활용을 위해 Vercel 배포를 기본안으로 둔다.
-  → Open Decision ([ARCHITECTURE STATUS] 참조): Vercel vs GitHub Pages 정적 export.
+- **dashboard**: Next.js, **Vercel 배포 (확정)**. GitHub Pages 정적 export는 사용하지
+  않는다. 인증은 **Supabase Auth — 지정된 관리자 이메일 계정만 로그인 가능** (확정).
+  URL만 아는 사람에게 공개되는 배포는 금지. anon key는 프론트에서 사용 가능하되 모든
+  데이터 접근은 RLS로 보호하고, service_role key는 절대 프론트에 노출하지 않는다.
 - **workers**: 배포 없음. GitHub Actions runner에서 `pip install` 후 직접 실행.
   단일 진입점: `python -m workers.run <workflow-name> [--test-mode]`.
 - **supabase**: migration은 `supabase/migrations`에 SQL로 보관, `supabase db push`
@@ -114,8 +115,8 @@ Content Radar V1의 전체 구조. 제품 요구사항의 원본은 [specs/conte
 
 | 파일 | 내용 |
 | --- | --- |
-| `sources.seed.json` | Source Registry 초기값 (명세 §6 필드) — migration seed로 삽입 |
-| `root_keywords.json` | Naver 검색 root keyword 목록 + YouTube High Priority 20개 표시 |
+| `sources.yaml` | Source Registry (명세 §6 필드 + published_precision) — 워커가 DB에 sync |
+| `seeds.yaml` | root keyword (**40~50개로 시작, 확정**) + category(14종)·priority. 코드 hardcode 금지 |
 | `scoring.v1.json` | 모든 가중치·임계값 (§26~§36). `score_version` = 이 파일의 버전 |
 | `healthchecks.yml` | 워크플로 slug ↔ check 매핑, Period/Grace 정의 |
 | `categories.json` | RADAR category, Naver 쇼핑 CID 매핑 |

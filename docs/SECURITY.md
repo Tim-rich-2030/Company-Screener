@@ -47,9 +47,11 @@ Secrets 관리, DB 접근 제어, 수집 윤리. 명세 §13, §50, §59, §64 �
   - `save_experience_answer(brief_id, question_order, answer)` — 길이 제한
   - `set_shopping_connect_url(candidate_id, url)` — **URL 검증: naver.com 계열 도메인의
     https만 허용** (비공식 링크 자동 생성 금지 원칙의 입력단 방어, 명세 §64)
-- 대시보드 자체의 접근 제어: V1은 단일 사용자. anon 키가 공개되는 배포(공개 URL)라면
-  read-only 데이터 특성상 치명적이지 않으나, Vercel 배포 시 기본 보호(Password/
-  Vercel Authentication) 적용을 권장. → Open Decision.
+- 대시보드 접근 제어 (**확정**): **Supabase Auth 사용, 지정된 관리자 이메일 계정만
+  로그인 가능.** URL만 아는 사람에게 단순 공개하는 방식 금지. 미들웨어에서 세션 없으면
+  /login으로 리다이렉트하고, 로그인 후에도 이메일이 관리자 목록(`ADMIN_EMAILS`)에
+  없으면 접근 거부. anon key는 프론트 사용 가능(RLS 방어), service_role key는
+  프론트 절대 금지.
 
 ## 3. 수집 윤리·법적 제약 (명세 §13, §64)
 

@@ -84,7 +84,38 @@ content-radar/
 5. GitHub Actions 활성화 후 `workflow_dispatch`로 첫 수집 실행
 6. 대시보드에서 SOURCES / HEALTH 화면 확인
 
-## 상태
+## Milestone 1 — Mock 신뢰성 구조 (완료)
 
-**현재 단계: 설계 문서 확정 (코딩 전).** 구현 순서는
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)의 Implementation Order 참조.
+외부 API가 하나도 연결되지 않아도 Mock Data로 전체 신뢰성 구조가 작동한다:
+
+```bash
+# 1. 의존성
+pip install -r requirements.txt
+
+# 2. 로컬 Postgres에 migration 적용
+createdb content_radar
+for f in supabase/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+
+# 3. Mock 파이프라인 (fixture → DB → normalize → dedupe → candidate
+#    → metrics → score → freshness gate → ranking → system health)
+export DATABASE_URL=postgresql://...  RADAR_MODE=mock
+python -m workers.run mock-pipeline
+
+# 4. 대시보드 (Next.js — /today, /health, /candidate/[id])
+cd apps/dashboard && npm install
+DATABASE_URL=... AUTH_DISABLED=true npm run dev
+
+# 5. 장애 시뮬레이션 (Fail-Closed 검증)
+python -m workers.tools.simulate_failure --source naver_search
+#   → naver 3종 RED, SYSTEM RED, Freshness Gate FAIL, TODAY의 NOW 추천 제거
+python -m workers.tools.simulate_failure --source naver_search_trend --stale-days 3
+#   → fetch 성공 상태 그대로여도 데이터가 오래되면 RED (Test C)
+# 복구: mock-pipeline 재실행
+
+# 6. 테스트 (59개: scoring/freshness/dedupe/precision/lifecycle/failure/DB integration)
+TEST_PG_ADMIN_URL=postgresql://.../postgres python -m pytest tests/
+```
+
+**아직 구현하지 않은 것 (Milestone 2+):** 실제 외부 API collector, Claude API,
+Content Studio(Brief/Draft), Shopping Connect, AdSense, production 수집 cron.
+구현 순서는 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)의 Implementation Order 참조.

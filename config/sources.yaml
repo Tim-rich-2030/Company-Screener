@@ -1,0 +1,183 @@
+# Source Registry — 유일한 정의처. 워커가 시작 시 sources 테이블로 sync한다.
+# 코드에 소스 정보를 hardcode하지 않는다.
+#
+# freshness_sla_minutes:
+#   realtime: {green_lt, red_gte}  분 단위 (green_lt 미만 GREEN, red_gte 이상 RED, 사이 YELLOW)
+#   daily:    {expected_lag_days}  (data ≤ D-lag GREEN, D-lag-1일 초과 RED)
+#   monthly:  {}                   (실시간 판정 없음 — Demand Base)
+# published_precision: 이 소스 원문의 게시시각 해상도 (SECOND|MINUTE|DAY|UNKNOWN)
+# required_for: 어떤 Freshness Gate에 필수인가 (market_gate|policy_gate|evergreen_gate)
+
+sources:
+  - name: naver_news
+    provider: naver
+    source_type: news
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 60
+    freshness_sla_minutes: { green_lt: 90, red_gte: 180 }
+    published_precision: SECOND
+    required_for: [market_gate, policy_gate]
+    enabled: true
+    priority: 10
+    official_source: false
+    parser_version: v1
+
+  - name: naver_blog
+    provider: naver
+    source_type: blog
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 60
+    freshness_sla_minutes: { green_lt: 90, red_gte: 180 }
+    published_precision: DAY          # 공식 API가 postdate(yyyymmdd)만 제공 — 검증됨
+    required_for: [market_gate, policy_gate, evergreen_gate]
+    enabled: true
+    priority: 10
+    official_source: false
+    parser_version: v1
+
+  - name: naver_cafe
+    provider: naver
+    source_type: cafe
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 60
+    freshness_sla_minutes: { green_lt: 90, red_gte: 180 }
+    published_precision: UNKNOWN      # 공식 API에 게시시각 필드 없음 — 검증됨
+    required_for: [market_gate]
+    enabled: true
+    priority: 20
+    official_source: false
+    parser_version: v1
+
+  - name: google_trends
+    provider: google
+    source_type: trend
+    endpoint_type: rss
+    cadence: realtime
+    collection_interval_minutes: 60
+    freshness_sla_minutes: { green_lt: 90, red_gte: 180 }
+    published_precision: MINUTE
+    required_for: []                  # market_gate의 OR 조건 (google_trends OR youtube)
+    enabled: true
+    priority: 30
+    official_source: false
+    parser_version: v1
+
+  - name: youtube
+    provider: google
+    source_type: video
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 360
+    freshness_sla_minutes: { green_lt: 480, red_gte: 960 }
+    published_precision: SECOND
+    required_for: []                  # market_gate의 OR 조건
+    enabled: true
+    priority: 30
+    official_source: false
+    parser_version: v1
+
+  - name: policy_briefing
+    provider: korea.kr
+    source_type: policy
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 120
+    freshness_sla_minutes: { green_lt: 180, red_gte: 360 }
+    published_precision: DAY          # 승인일 필드 해상도 미검증 — fixture 확보 후 상향 가능
+    required_for: [policy_gate]
+    enabled: true
+    priority: 10
+    official_source: true
+    parser_version: v1
+
+  - name: law_go_kr
+    provider: moleg
+    source_type: policy
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 120
+    freshness_sla_minutes: { green_lt: 180, red_gte: 360 }
+    published_precision: DAY          # 공포일자/시행일자는 날짜 단위 — 검증됨
+    required_for: [policy_gate]
+    enabled: true
+    priority: 10
+    official_source: true
+    parser_version: v1
+
+  - name: lawmaking_notice
+    provider: moleg
+    source_type: policy
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 120
+    freshness_sla_minutes: { green_lt: 180, red_gte: 360 }
+    published_precision: DAY
+    required_for: [policy_gate]
+    enabled: true
+    priority: 20
+    official_source: true
+    parser_version: v1
+
+  - name: naver_search_trend
+    provider: naver
+    source_type: demand
+    endpoint_type: rest_json
+    cadence: daily
+    collection_interval_minutes: 1440
+    freshness_sla_minutes: { expected_lag_days: 1 }   # D-1 가정 — 실측 후 보정
+    published_precision: DAY
+    required_for: [evergreen_gate]
+    enabled: true
+    priority: 10
+    official_source: false
+    parser_version: v1
+
+  - name: shopping_insight
+    provider: naver
+    source_type: demand
+    endpoint_type: rest_json
+    cadence: daily
+    collection_interval_minutes: 1440
+    freshness_sla_minutes: { expected_lag_days: 1 }
+    published_precision: DAY
+    required_for: []
+    enabled: true
+    priority: 20
+    official_source: false
+    parser_version: v1
+
+  - name: naver_searchad
+    provider: naver
+    source_type: demand
+    endpoint_type: rest_json
+    cadence: monthly
+    collection_interval_minutes: 1440
+    freshness_sla_minutes: {}
+    published_precision: DAY
+    required_for: [evergreen_gate]
+    enabled: true
+    priority: 10
+    official_source: false
+    parser_version: v1
+
+  - name: assembly_bills
+    provider: assembly
+    source_type: policy
+    endpoint_type: rest_json
+    cadence: realtime
+    collection_interval_minutes: 240
+    freshness_sla_minutes: { green_lt: 360, red_gte: 720 }
+    published_precision: DAY
+    required_for: []
+    enabled: false                    # 확정: V1 disabled. 정부/법제처/예고 안정화 후 enable
+    priority: 90
+    official_source: true
+    parser_version: v1
+
+# 별칭 (simulate_failure 등 CLI에서 사용)
+aliases:
+  naver_search: [naver_news, naver_blog, naver_cafe]
+  policy: [policy_briefing, law_go_kr, lawmaking_notice]

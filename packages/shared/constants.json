@@ -1,0 +1,19 @@
+{
+  "published_precision": ["SECOND", "MINUTE", "DAY", "UNKNOWN"],
+  "velocity_eligible_precision": ["SECOND", "MINUTE"],
+  "source_type": ["news", "blog", "cafe", "video", "trend", "policy", "demand"],
+  "cadence": ["realtime", "daily", "monthly"],
+  "health_status": ["GREEN", "YELLOW", "RED"],
+  "workflow_status": ["running", "success", "partial", "failed"],
+  "source_run_status": ["running", "success", "failed"],
+  "trigger_type": ["schedule", "manual", "test", "local"],
+  "candidate_type": ["market", "policy", "evergreen"],
+  "lifecycle": ["new", "rising", "now", "watch", "late", "mature", "expired"],
+  "evidence_type": ["mention", "trend", "policy_event", "demand"],
+  "monetization_route": ["naver_shopping", "naver_traffic", "web_adsense", "dual"],
+  "alert_severity": ["info", "warn", "red"],
+  "category": [
+    "tech", "electronics", "camera", "mobile", "pc", "ai", "home_appliance",
+    "work_tools", "car", "parenting", "education", "policy", "finance", "shopping"
+  ]
+}
