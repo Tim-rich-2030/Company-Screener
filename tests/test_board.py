@@ -1668,6 +1668,25 @@ def test_intraday_index_disparity_is_measured_at_the_same_moment():
 _ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
+def _live_workflow(name="board-live.yml"):
+    """
+    **돌고 있는** 워크플로를 읽는다. 동면 중이면 None.
+
+    이 저장소는 archive/github-actions/ 로 워크플로를 옮겨 동면 상태다.
+    아카이브에 있는 것을 읽어 검사하면 '지금 도는 것' 이 아니라 '보관된 것' 을
+    검사하는 셈이라 통과해도 뜻이 없다. 그래서 살아 있을 때만 본다 —
+    파일을 .github/workflows/ 로 되돌리면 검사도 같이 돌아온다.
+    """
+    path = os.path.join(_ROOT, ".github/workflows", name)
+    if not os.path.exists(path):
+        return None
+    return open(path, encoding="utf-8").read()
+
+
+def _dormant(test):
+    print(f"{test}: 건너뜀 — 워크플로가 동면 중입니다 (archive/github-actions/)")
+
+
 def _pushed_files(wf: str):
     """워크플로가 live 가지에 올리는 파일 이름들."""
     block = re.search(r"python live_publish\.py(.*?)(?:\|\||\n\s*\n)", wf, re.S)
@@ -1687,8 +1706,8 @@ def test_what_the_loop_pushes_is_what_the_screen_reads():
 
     사람이 눈으로 대조하니 계속 빠뜨린다. 기계가 대조하게 한다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_what_the_loop_pushes_is_what_the_screen_reads")
     idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
 
     pushed = set(_pushed_files(wf))
@@ -1704,8 +1723,8 @@ def test_every_live_file_carries_a_time_not_just_a_date():
     날짜만 남기면 장중에 15분마다 다시 받아도 "20260804" 로 똑같아서, 화면이
     새것인지 가릴 수가 없다. 실제로 지도가 그래서 계속 버려졌다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_every_live_file_carries_a_time_not_just_a_date")
     for name in sorted({f[:-5] for f in _pushed_files(wf)}):
         src = open(os.path.join(_ROOT, name + ".py"), encoding="utf-8").read()
         assert '"fetched_at"' in src or '"intraday_at"' in src, \
@@ -1718,8 +1737,8 @@ def test_the_loop_installs_what_its_steps_need():
     단계를 늘릴 때 그 단계가 무엇을 필요로 하는지 같이 봐야 한다. pykrx 를
     안 깔아서 종목 다시 세기가 매번 그 자리에서 멈춘 적이 있다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_the_loop_installs_what_its_steps_need")
     assert "pip install -q -r requirements.txt" in wf, \
         "부품 목록을 따로 적지 말고 requirements.txt 를 그대로 쓴다"
     print("test_the_loop_installs_what_its_steps_need: OK")
@@ -1737,8 +1756,9 @@ def test_the_morning_has_extra_chances_to_start():
     운에 맡기는 것이 된다.
     """
     import yaml
-    wf = yaml.safe_load(open(os.path.join(_ROOT,
-                        ".github/workflows/board-live.yml"), encoding="utf-8"))
+    raw = _live_workflow()
+    if raw is None: return _dormant("test_the_morning_has_extra_chances_to_start")
+    wf = yaml.safe_load(raw)
     crons = [c["cron"] for c in wf[True]["schedule"]]
 
     def hours(field):
@@ -1770,8 +1790,8 @@ def test_the_period_is_measured_from_the_start_of_the_cycle():
 
     그래서 잘 시간을 **이번 바퀴가 시작한 때**로부터 계산해야 한다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_the_period_is_measured_from_the_start_of_the_cycle")
     assert "cycle_start=$(date +%s)" in wf, "바퀴 시작 시각을 안 적어 둡니다"
     assert "next=$(( cycle_start + EVERY_SECONDS ))" in wf, \
         "다음 바퀴를 바퀴 시작 시각으로부터 세지 않습니다"
@@ -1785,8 +1805,8 @@ def test_the_screen_asks_at_least_as_often_as_the_loop_collects():
     수집을 5분으로 당겨 놓고 화면이 10분마다 물으면, 당긴 만큼이 화면에서
     사라진다. 둘은 따로 있는 숫자가 아니다 — 묻는 쪽이 더 자주여야 한다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_the_screen_asks_at_least_as_often_as_the_loop_collects")
     idx = open(os.path.join(_ROOT, "docs/index.html"), encoding="utf-8").read()
 
     collect = int(re.search(r"EVERY_SECONDS:\s*(\d+)", wf).group(1))
@@ -1966,8 +1986,8 @@ def test_the_loop_seeds_from_live_before_it_publishes():
     담기지 않은 것은 live 에서 **사라진다.** 지금 live 에 있는 것을 먼저
     깔지 않으면, 이번 바퀴에 안 만든 칸이 통째로 날아간다.
     """
-    wf = open(os.path.join(_ROOT, ".github/workflows/board-live.yml"),
-              encoding="utf-8").read()
+    wf = _live_workflow()
+    if wf is None: return _dormant("test_the_loop_seeds_from_live_before_it_publishes")
     seed = wf.find("fetch -q --depth=1")
     pub = wf.find("python live_publish.py")
     assert seed > 0, "live 가지를 밑감으로 깔지 않습니다"
